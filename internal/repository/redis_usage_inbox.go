@@ -47,7 +47,7 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []dto.RedisInboxInsert) (
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		// Redis 拉取批次仍由配置控制；这里只把数据库写入拆成安全大小。
-		return tx.CreateInBatches(&rows, insertBatchSize(entities.RedisUsageInbox{})).Error
+		return tx.CreateInBatches(&rows, insertBatchSize()).Error
 	}); err != nil {
 		return nil, err
 	}

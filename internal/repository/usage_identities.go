@@ -59,8 +59,8 @@ func ReplaceUsageIdentitiesForProviderTypes(ctx context.Context, db *gorm.DB, id
 		}
 
 		// fetched provider type 也按批次切分，避免极端情况下 type IN 变量过多。
-		for start := 0; start < len(types); start += insertBatchSize(entities.UsageIdentity{}) {
-			end := min(start+insertBatchSize(entities.UsageIdentity{}), len(types))
+		for start := 0; start < len(types); start += insertBatchSize() {
+			end := min(start+insertBatchSize(), len(types))
 			// 每批只处理本次成功 fetch 的 provider type；未返回且仍 active 的身份才会被标记 deleted。
 			staleRows, err := listUsageIdentitySyncRows(tx.Model(&entities.UsageIdentity{}).
 				Where("auth_type = ? AND is_deleted = ?", entities.UsageIdentityAuthTypeAIProvider, false).
@@ -402,8 +402,8 @@ func markStaleUsageIdentityRowsDeleted(tx *gorm.DB, rows []usageIdentitySyncRow,
 	}
 
 	// stale ID 也按批次更新，避免 id IN 在数据量大时超出参数上限。
-	for start := 0; start < len(staleIDs); start += insertBatchSize(entities.UsageIdentity{}) {
-		end := min(start+insertBatchSize(entities.UsageIdentity{}), len(staleIDs))
+	for start := 0; start < len(staleIDs); start += insertBatchSize() {
+		end := min(start+insertBatchSize(), len(staleIDs))
 		if err := tx.Model(&entities.UsageIdentity{}).
 			Where("id IN ?", staleIDs[start:end]).
 			Updates(map[string]any{"is_deleted": true, "deleted_at": timeutil.NormalizeStorageTime(now)}).Error; err != nil {
@@ -436,7 +436,7 @@ func syncUsageIdentities(tx *gorm.DB, identities []entities.UsageIdentity, exist
 	if len(toCreate) == 0 {
 		return nil
 	}
-	if err := tx.CreateInBatches(&toCreate, insertBatchSize(entities.UsageIdentity{})).Error; err != nil {
+	if err := tx.CreateInBatches(&toCreate, insertBatchSize()).Error; err != nil {
 		return fmt.Errorf("create usage identities: %w", err)
 	}
 	return nil

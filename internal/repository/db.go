@@ -53,8 +53,8 @@ func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, err
 	inserted := 0
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		for start := 0; start < len(events); start += insertBatchSize(entities.UsageEvent{}) {
-			end := min(start+insertBatchSize(entities.UsageEvent{}), len(events))
+		for start := 0; start < len(events); start += insertBatchSize() {
+			end := min(start+insertBatchSize(), len(events))
 			batch := events[start:end]
 			for index := range batch {
 				batch[index].Timestamp = timeutil.NormalizeStorageTime(batch[index].Timestamp)

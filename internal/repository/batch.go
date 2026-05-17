@@ -2,6 +2,6 @@ package repository
 
 const defaultInsertBatchSize = 500
 
-func insertBatchSize(model any) int {
+func insertBatchSize() int {
 	return defaultInsertBatchSize
 }

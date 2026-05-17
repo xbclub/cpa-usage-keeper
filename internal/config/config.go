@@ -22,8 +22,7 @@ const (
 )
 
 var (
-	DefaultLogDir   = filepath.Join(".", "data", "logs")
-	workDirLogsName = "logs"
+	DefaultLogDir = filepath.Join(".", "data", "logs")
 )
 
 type Config struct {

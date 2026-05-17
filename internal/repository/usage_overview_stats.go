@@ -20,7 +20,7 @@ func AggregateUsageOverviewStats(ctx context.Context, db *gorm.DB, now time.Time
 		return fmt.Errorf("database is nil")
 	}
 	now = timeutil.NormalizeStorageTime(now)
-	batchSize := insertBatchSize(entities.UsageEvent{})
+	batchSize := insertBatchSize()
 	for {
 		processed, err := aggregateUsageOverviewStatsBatch(ctx, db, now, batchSize)
 		if err != nil {
@@ -244,8 +244,8 @@ func addUsageOverviewEventToDailyStat(row *entities.UsageOverviewDailyStat, even
 
 // applyUsageOverviewHourlyStats 分批写入小时聚合行，分批写入。
 func applyUsageOverviewHourlyStats(tx *gorm.DB, rows []entities.UsageOverviewHourlyStat, now time.Time) error {
-	for start := 0; start < len(rows); start += insertBatchSize(entities.UsageOverviewHourlyStat{}) {
-		end := min(start+insertBatchSize(entities.UsageOverviewHourlyStat{}), len(rows))
+	for start := 0; start < len(rows); start += insertBatchSize() {
+		end := min(start+insertBatchSize(), len(rows))
 		for index := start; index < end; index++ {
 			if err := applyUsageOverviewHourlyStat(tx, rows[index], now); err != nil {
 				return err
@@ -257,8 +257,8 @@ func applyUsageOverviewHourlyStats(tx *gorm.DB, rows []entities.UsageOverviewHou
 
 // applyUsageOverviewDailyStats 分批写入天聚合行，分批写入。
 func applyUsageOverviewDailyStats(tx *gorm.DB, rows []entities.UsageOverviewDailyStat, now time.Time) error {
-	for start := 0; start < len(rows); start += insertBatchSize(entities.UsageOverviewDailyStat{}) {
-		end := min(start+insertBatchSize(entities.UsageOverviewDailyStat{}), len(rows))
+	for start := 0; start < len(rows); start += insertBatchSize() {
+		end := min(start+insertBatchSize(), len(rows))
 		for index := start; index < end; index++ {
 			if err := applyUsageOverviewDailyStat(tx, rows[index], now); err != nil {
 				return err
@@ -270,8 +270,8 @@ func applyUsageOverviewDailyStats(tx *gorm.DB, rows []entities.UsageOverviewDail
 
 // applyUsageOverviewHealthStats 分批写入 health 聚合行，分批写入。
 func applyUsageOverviewHealthStats(tx *gorm.DB, rows []entities.UsageOverviewHealthStat, now time.Time) error {
-	for start := 0; start < len(rows); start += insertBatchSize(entities.UsageOverviewHealthStat{}) {
-		end := min(start+insertBatchSize(entities.UsageOverviewHealthStat{}), len(rows))
+	for start := 0; start < len(rows); start += insertBatchSize() {
+		end := min(start+insertBatchSize(), len(rows))
 		for index := start; index < end; index++ {
 			if err := applyUsageOverviewHealthStat(tx, rows[index], now); err != nil {
 				return err
