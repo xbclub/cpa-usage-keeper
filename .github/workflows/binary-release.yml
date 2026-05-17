@@ -17,11 +17,9 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            cc: gcc
             asset_arch: amd64
           - goos: linux
             goarch: arm64
-            cc: aarch64-linux-gnu-gcc
             asset_arch: arm64
     steps:
       - name: Checkout repository
@@ -41,9 +39,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-aarch64-linux-gnu
-
       - name: Install frontend dependencies
         run: npm --prefix ./web ci
 
@@ -55,7 +50,6 @@ jobs:
           VERSION: ${{ github.ref_name }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
           ASSET_ARCH: ${{ matrix.asset_arch }}
         run: |
           set -euo pipefail
@@ -63,7 +57,7 @@ jobs:
           package_dir="dist/${package_name}"
           mkdir -p "${package_dir}/data"
 
-          CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" CC="${CC}" \
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
             go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
           cp deploy/linux/cpa-usage-keeper.service "${package_dir}/"
@@ -126,7 +120,7 @@ jobs:
           package_dir="dist/${package_name}"
           mkdir -p "${package_dir}/data"
 
-          CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
             go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
           tar -czf "dist/${package_name}.tar.gz" -C dist "${package_name}"
@@ -147,15 +141,9 @@ jobs:
           - goarch: amd64
             asset_arch: amd64
             runs_on: windows-2025
-            msystem: UCRT64
-            install: mingw-w64-ucrt-x86_64-gcc
-            cc: gcc
           - goarch: arm64
             asset_arch: arm64
             runs_on: windows-11-arm
-            msystem: CLANGARM64
-            install: mingw-w64-clang-aarch64-gcc
-            cc: gcc
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -174,14 +162,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Set up MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          path-type: inherit
-          install: ${{ matrix.install }}
-
       - name: Install frontend dependencies
         shell: bash
         run: npm --prefix ./web ci
@@ -191,20 +171,19 @@ jobs:
         run: npm --prefix ./web run build
 
       - name: Build binary package
-        shell: msys2 {0}
+        shell: bash
         env:
           VERSION: ${{ github.ref_name }}
           GOOS: windows
           GOARCH: ${{ matrix.goarch }}
           ASSET_ARCH: ${{ matrix.asset_arch }}
-          CC: ${{ matrix.cc }}
         run: |
           set -euo pipefail
           package_name="cpa-usage-keeper_${VERSION}_${GOOS}_${ASSET_ARCH}"
           package_dir="dist/${package_name}"
           mkdir -p "${package_dir}/data"
 
-          CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" CC="${CC}" \
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
             go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper.exe" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
 

@@ -3,14 +3,13 @@ package benchmark
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
 	repositorydto "cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -120,10 +119,7 @@ func openOverviewBenchmarkDB(b *testing.B, eventCount int) *gorm.DB {
 
 func openOverviewBenchmarkDBWithoutStats(b *testing.B, eventCount int) *gorm.DB {
 	b.Helper()
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(b.TempDir(), "overview-benchmark.db")})
-	if err != nil {
-		b.Fatalf("OpenDatabase returned error: %v", err)
-	}
+	db := testutil.OpenTestDatabaseForB(b)
 	events := make([]entities.UsageEvent, 0, eventCount)
 	base := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < eventCount; i++ {
@@ -150,8 +146,5 @@ func openOverviewBenchmarkDBWithoutStats(b *testing.B, eventCount int) *gorm.DB 
 
 func closeOverviewBenchmarkDB(b *testing.B, db *gorm.DB) {
 	b.Helper()
-	sqlDB, err := db.DB()
-	if err == nil {
-		_ = sqlDB.Close()
-	}
+	// Schema cleanup handled by testutil
 }

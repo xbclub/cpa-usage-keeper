@@ -53,11 +53,7 @@ func resolveLogDir(cfg config.Config) string {
 	if logDir != "" {
 		return logDir
 	}
-	workDir := strings.TrimSpace(cfg.WorkDir)
-	if workDir == "" {
-		workDir = config.DefaultWorkDir
-	}
-	return filepath.Join(workDir, filepath.Base(config.DefaultLogDir))
+	return config.DefaultLogDir
 }
 
 func Configure(cfg config.Config) (io.Closer, error) {

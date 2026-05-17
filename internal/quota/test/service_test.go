@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa/dto/apicall"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/quota"
-	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
@@ -123,20 +121,7 @@ func TestServiceAllowsCodexQuotaWithoutAccountID(t *testing.T) {
 
 func openQuotaTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "quota.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("load sql db: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Fatalf("close database: %v", err)
-		}
-	})
-	return db
+	return testutil.OpenTestDatabase(t)
 }
 
 func seedUsageIdentity(t *testing.T, db *gorm.DB, identity entities.UsageIdentity) {

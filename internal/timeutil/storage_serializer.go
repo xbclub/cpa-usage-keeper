@@ -39,7 +39,7 @@ func (StorageTimeSerializer) Scan(ctx context.Context, field *schema.Field, dst 
 	return field.Set(ctx, dst, NormalizeStorageTime(parsed))
 }
 
-// GORM 写库时统一输出 RFC3339Nano + 项目 TZ offset，避免 SQLite TEXT 混格式比较。
+// GORM 写库时统一输出 RFC3339Nano + 项目 TZ offset，确保时间格式一致。
 func (StorageTimeSerializer) Value(ctx context.Context, field *schema.Field, dst reflect.Value, fieldValue any) (any, error) {
 	if fieldValue == nil {
 		return nil, nil

@@ -13,6 +13,7 @@ import (
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -57,42 +58,27 @@ func TestNewWithConfigBuildsRedisDrainAndRouter(t *testing.T) {
 	if app.LogCloser == nil {
 		t.Fatal("expected log closer to be initialized")
 	}
-	if app.BackupMaintenance == nil {
-		t.Fatal("expected database backup runner to be initialized")
-	}
 	if app.MetadataSync == nil {
 		t.Fatal("expected metadata sync runner to be initialized")
 	}
 }
 
 func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "app-startup-overview-catchup.db")
-	seedDB, err := repository.OpenDatabase(config.Config{SQLitePath: dbPath})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
+	seedDB := testutil.OpenTestDatabase(t)
 	if _, _, err := repository.InsertUsageEvents(seedDB, []entities.UsageEvent{
 		{EventKey: "legacy-event", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 10, 0, 0, time.UTC), TotalTokens: 150},
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	seedSQL, err := seedDB.DB()
-	if err != nil {
-		t.Fatalf("load seed sql db: %v", err)
-	}
-	if err := seedSQL.Close(); err != nil {
-		t.Fatalf("close seed db: %v", err)
-	}
 
 	logDir := t.TempDir()
 
 	cfg := testAppConfig(t)
-	cfg.SQLitePath = dbPath
 	cfg.LogFileEnabled = true
 	cfg.LogDir = logDir
-	app, err := NewWithConfig(cfg)
+	app, err := NewWithConfigWithDB(cfg, seedDB)
 	if err != nil {
-		t.Fatalf("NewWithConfig returned error: %v", err)
+		t.Fatalf("NewWithConfigWithDB returned error: %v", err)
 	}
 	defer app.Close()
 
@@ -109,19 +95,6 @@ func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testi
 	}
 	if !strings.Contains(logContent, "completed usage overview aggregation catch-up") {
 		t.Fatalf("expected startup catch-up completion log, got %s", logContent)
-	}
-}
-
-func TestNewWithConfigSkipsBackupRunnerWhenDisabled(t *testing.T) {
-	cfg := testAppConfig(t)
-	cfg.BackupEnabled = false
-	app, err := NewWithConfig(cfg)
-	if err != nil {
-		t.Fatalf("NewWithConfig returned error: %v", err)
-	}
-	defer app.Close()
-	if app.BackupMaintenance != nil {
-		t.Fatal("expected database backup runner to be skipped when backups are disabled")
 	}
 }
 
@@ -172,7 +145,6 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 	processStarted := make(chan struct{})
 	maintenanceStarted := make(chan struct{})
 	metadataStarted := make(chan struct{})
-	backupStarted := make(chan struct{})
 	maintenance := NewStorageCleanupRunner(&maintenanceSyncStub{})
 	maintenance.sleep = func(context.Context, time.Duration) bool {
 		close(maintenanceStarted)
@@ -181,11 +153,6 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 	metadataRunner := NewMetadataSyncRunner(&metadataSyncStub{}, time.Second)
 	metadataRunner.sleep = func(context.Context, time.Duration) bool {
 		close(metadataStarted)
-		return false
-	}
-	backupRunner := NewDatabaseBackupRunner(&databaseBackupWriterStub{}, nil, time.Second, 0)
-	backupRunner.sleep = func(context.Context, time.Duration) bool {
-		close(backupStarted)
 		return false
 	}
 	statusProvider := &appRunStub{started: make(chan struct{})}
@@ -197,7 +164,6 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 		RedisProcess:      &appRunStub{started: processStarted},
 		Maintenance:       maintenance,
 		MetadataSync:      metadataRunner,
-		BackupMaintenance: backupRunner,
 	}
 
 	if err := app.Run(); err == nil {
@@ -227,44 +193,6 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 	case <-metadataStarted:
 	case <-time.After(time.Second):
 		t.Fatal("expected metadata sync runner to start")
-	}
-	select {
-	case <-backupStarted:
-	case <-time.After(time.Second):
-		t.Fatal("expected database backup runner to start")
-	}
-}
-
-func TestRunCancelsBackgroundTasksWhenRouterStops(t *testing.T) {
-	cfg := testAppConfig(t)
-	cfg.AppPort = "invalid-port"
-	backupStarted := make(chan struct{})
-	backupCanceled := make(chan struct{})
-	backupRunner := NewDatabaseBackupRunner(&databaseBackupWriterStub{}, nil, time.Second, 0)
-	backupRunner.sleep = func(ctx context.Context, _ time.Duration) bool {
-		close(backupStarted)
-		<-ctx.Done()
-		close(backupCanceled)
-		return false
-	}
-	app := &App{
-		Config:            &cfg,
-		Router:            gin.New(),
-		BackupMaintenance: backupRunner,
-	}
-
-	if err := app.Run(); err == nil {
-		t.Fatal("expected Run to return an error for invalid port")
-	}
-	select {
-	case <-backupStarted:
-	case <-time.After(time.Second):
-		t.Fatal("expected database backup runner to start")
-	}
-	select {
-	case <-backupCanceled:
-	case <-time.After(time.Second):
-		t.Fatal("expected database backup runner context to be canceled")
 	}
 }
 
@@ -321,10 +249,7 @@ func testAppConfig(t *testing.T) config.Config {
 		RedisQueueIdleInterval: time.Second,
 		RedisQueueErrorBackoff: 10 * time.Second,
 		MetadataSyncInterval:   30 * time.Second,
-		SQLitePath:             t.TempDir() + "/app.db",
-		BackupEnabled:          true,
-		BackupDir:              t.TempDir() + "/backups",
-		BackupRetentionDays:    7,
+		DatabaseURL:            os.Getenv("DATABASE_URL"),
 		RequestTimeout:         5 * time.Second,
 		LogLevel:               "info",
 		LogFileEnabled:         false,

@@ -2,12 +2,11 @@ package repository
 
 import (
 	"cpa-usage-keeper/internal/repository/dto"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -72,10 +71,5 @@ func TestUpsertModelPriceSettingCreatesAndUpdatesRow(t *testing.T) {
 
 func openPricingTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "pricing.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	return db
+	return testutil.OpenTestDatabase(t)
 }

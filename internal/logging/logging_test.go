@@ -16,13 +16,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func TestResolveLogDirUsesWorkDirFallback(t *testing.T) {
-	workDir := filepath.Join(t.TempDir(), "work")
+func TestResolveLogDirReturnsDefaultWhenEmpty(t *testing.T) {
+	logDir := resolveLogDir(config.Config{})
 
-	logDir := resolveLogDir(config.Config{WorkDir: workDir})
+	if logDir != config.DefaultLogDir {
+		t.Fatalf("expected default log dir %q, got %q", config.DefaultLogDir, logDir)
+	}
+}
 
-	if logDir != filepath.Join(workDir, filepath.Base(config.DefaultLogDir)) {
-		t.Fatalf("expected log dir under work dir, got %q", logDir)
+func TestResolveLogDirUsesExplicitLogDir(t *testing.T) {
+	explicitDir := "/var/log/app"
+	logDir := resolveLogDir(config.Config{LogDir: explicitDir})
+
+	if logDir != explicitDir {
+		t.Fatalf("expected explicit log dir %q, got %q", explicitDir, logDir)
 	}
 }
 

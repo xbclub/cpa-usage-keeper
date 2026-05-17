@@ -180,12 +180,12 @@ func usageEventProjectionToEntity(event usageEventProjection) entities.UsageEven
 
 // applyUsageQueryWindow 给 usage 查询追加闭区间时间过滤。
 func applyUsageQueryWindow(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
-	// 查询参数和落库 timestamp 使用同一格式，避免 SQLite TEXT 范围比较失真。
+	// 查询参数和落库 timestamp 使用同一格式，确保范围比较使用相同时区格式。
 	if filter.StartTime != nil {
-		query = query.Where("timestamp >= ?", timeutil.FormatStorageTime(*filter.StartTime))
+		query = query.Where("timestamp >= ?", timeutil.NormalizeStorageTime(*filter.StartTime))
 	}
 	if filter.EndTime != nil {
-		query = query.Where("timestamp <= ?", timeutil.FormatStorageTime(*filter.EndTime))
+		query = query.Where("timestamp <= ?", timeutil.NormalizeStorageTime(*filter.EndTime))
 	}
 	return query
 }
@@ -711,7 +711,7 @@ func loadAnalysisOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQuer
 func loadUsageOverviewHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeCPAAPIKeysOnly bool) ([]entities.UsageOverviewHourlyStat, error) {
 	var rows []entities.UsageOverviewHourlyStat
 	query := db.Model(&entities.UsageOverviewHourlyStat{}).
-		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
+		Where("bucket_start >= ? AND bucket_start < ?", timeutil.NormalizeStorageTime(start), timeutil.NormalizeStorageTime(end)).
 		Order("bucket_start asc")
 	if activeCPAAPIKeysOnly {
 		query = query.Joins("INNER JOIN cpa_api_keys ON cpa_api_keys.api_key = usage_overview_hourly_stats.api_group_key AND cpa_api_keys.is_deleted = ?", false)
@@ -737,7 +737,7 @@ func loadAnalysisOverviewDailyStatsWithFilter(db *gorm.DB, filter dto.UsageQuery
 func loadUsageOverviewDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeCPAAPIKeysOnly bool) ([]entities.UsageOverviewDailyStat, error) {
 	var rows []entities.UsageOverviewDailyStat
 	query := db.Model(&entities.UsageOverviewDailyStat{}).
-		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
+		Where("bucket_start >= ? AND bucket_start < ?", timeutil.NormalizeStorageTime(start), timeutil.NormalizeStorageTime(end)).
 		Order("bucket_start asc")
 	if activeCPAAPIKeysOnly {
 		query = query.Joins("INNER JOIN cpa_api_keys ON cpa_api_keys.api_key = usage_overview_daily_stats.api_group_key AND cpa_api_keys.is_deleted = ?", false)
@@ -804,15 +804,15 @@ func loadUsageOverviewEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFil
 	if end.Before(start) || (!includeEnd && end.Equal(start)) {
 		return nil, nil
 	}
-	// 单段范围让 SQLite 可以稳定使用 timestamp 索引，不把左右边界拼成 OR 查询。
+	// 单段范围让数据库可以稳定使用 timestamp 索引，不把左右边界拼成 OR 查询。
 	query := db.Model(&entities.UsageEvent{}).
-		Where("timestamp >= ?", timeutil.FormatStorageTime(start)).
+		Where("timestamp >= ?", timeutil.NormalizeStorageTime(start)).
 		Select(usageEventProjectionColumns).
 		Order("timestamp asc")
 	if includeEnd {
-		query = query.Where("timestamp <= ?", timeutil.FormatStorageTime(end))
+		query = query.Where("timestamp <= ?", timeutil.NormalizeStorageTime(end))
 	} else {
-		query = query.Where("timestamp < ?", timeutil.FormatStorageTime(end))
+		query = query.Where("timestamp < ?", timeutil.NormalizeStorageTime(end))
 	}
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
@@ -849,7 +849,7 @@ func loadUsageOverviewHealthTotalsWithFilter(db *gorm.DB, filter dto.UsageQueryF
 	// health 总计不按 health grid 窗口截断，否则 7d/30d 查询会丢完整查询窗口内的数据。
 	totalsQuery := db.Model(&entities.UsageOverviewHourlyStat{}).
 		Select("COALESCE(SUM(success_count), 0) AS success_count, COALESCE(SUM(failure_count), 0) AS failure_count").
-		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(fullStart), timeutil.FormatStorageTime(fullEnd))
+		Where("bucket_start >= ? AND bucket_start < ?", timeutil.NormalizeStorageTime(fullStart), timeutil.NormalizeStorageTime(fullEnd))
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		totalsQuery = totalsQuery.Where("api_group_key = ?", apiGroupKey)
 	}
@@ -1024,7 +1024,7 @@ func applyUsageOverviewHealthStatsToOverview(db *gorm.DB, overview *dto.UsageOve
 	fullStart, fullEnd := usageOverviewFullHealthWindow(exactStart, exactEnd, span)
 	if fullStart.Before(fullEnd) {
 		query := db.Model(&entities.UsageOverviewHealthStat{}).
-			Where("bucket_start >= ? AND bucket_start < ? AND span_seconds = ?", timeutil.FormatStorageTime(fullStart), timeutil.FormatStorageTime(fullEnd), spanSeconds)
+			Where("bucket_start >= ? AND bucket_start < ? AND span_seconds = ?", timeutil.NormalizeStorageTime(fullStart), timeutil.NormalizeStorageTime(fullEnd), spanSeconds)
 		if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 			query = query.Where("api_group_key = ?", apiGroupKey)
 		}

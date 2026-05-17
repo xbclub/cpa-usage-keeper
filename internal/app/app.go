@@ -48,7 +48,6 @@ type App struct {
 	RedisProcess      Runner
 	Maintenance       *StorageCleanupRunner
 	MetadataSync      *MetadataSyncRunner
-	BackupMaintenance *DatabaseBackupRunner
 	LogCloser         io.Closer
 
 	backgroundCancel context.CancelFunc
@@ -66,6 +65,69 @@ func NewWithOptions(options Options) (*App, error) {
 	}
 
 	return NewWithConfig(*cfg)
+}
+
+// NewWithConfigWithDB creates an App with a pre-opened database (for tests).
+func NewWithConfigWithDB(cfg config.Config, db *gorm.DB) (*App, error) {
+	logCloser, err := logging.Configure(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	logrus.Info("starting usage overview aggregation catch-up")
+	if err := repository.AggregateUsageOverviewStats(context.Background(), db, time.Now()); err != nil {
+		_ = logCloser.Close()
+		return nil, err
+	}
+	logrus.Info("completed usage overview aggregation catch-up")
+
+	syncService := service.NewSyncService(db, cfg)
+	backgroundPoller := poller.NewRedisDrain(syncService, poller.RedisDrainConfig{
+		IdleInterval: cfg.RedisQueueIdleInterval,
+		ErrorBackoff: cfg.RedisQueueErrorBackoff,
+	})
+	usageService := service.NewUsageService(db)
+	usageIdentityService := service.NewUsageIdentityService(db)
+	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
+	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
+	if cfg.TLSSkipVerify {
+		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
+	}
+	pricingService := service.NewPricingService(db, cpaClient)
+	quotaService := quota.NewService(db, cpaClient)
+	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
+	authHandler := api.NewAuthHandler(api.AuthConfig{
+		Enabled:       cfg.AuthEnabled,
+		LoginPassword: cfg.LoginPassword,
+		SessionTTL:    cfg.AuthSessionTTL,
+		BasePath:      cfg.AppBasePath,
+	}, sessionManager)
+
+	return &App{
+		Config: &cfg,
+		DB:     db,
+		Poller: backgroundPoller,
+		RedisPull:         poller.NewRedisPullRunner(backgroundPoller),
+		RedisProcess:      poller.NewRedisProcessRunner(backgroundPoller),
+		Maintenance:       NewStorageCleanupRunner(syncService),
+		MetadataSync:      NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval),
+		LogCloser:         logCloser,
+		Router: api.NewRouter(
+			webui.Static,
+			backgroundPoller,
+			usageService,
+			pricingService,
+			api.AuthConfig{
+				Enabled:       cfg.AuthEnabled,
+				LoginPassword: cfg.LoginPassword,
+				SessionTTL:    cfg.AuthSessionTTL,
+				BasePath:      cfg.AppBasePath,
+			},
+			authHandler,
+			cfg.AppBasePath,
+			api.OptionalProviders{UsageIdentity: usageIdentityService, Quota: quotaService, CPAAPIKeys: cpaAPIKeyService},
+		),
+	}, nil
 }
 
 func NewWithConfig(cfg config.Config) (*App, error) {
@@ -93,18 +155,6 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		IdleInterval: cfg.RedisQueueIdleInterval,
 		ErrorBackoff: cfg.RedisQueueErrorBackoff,
 	})
-	var backupMaintenance *DatabaseBackupRunner
-	if cfg.BackupEnabled {
-		sqlDB, err := db.DB()
-		if err != nil {
-			_ = closeGormDB(db)
-			_ = logCloser.Close()
-			return nil, err
-		}
-		backupStore := newDatabaseBackupStore(sqlDB, cfg.BackupDir)
-		backupMaintenance = NewDatabaseBackupRunner(backupStore, backupStore, cfg.BackupInterval, cfg.BackupRetentionDays)
-	}
-
 	usageService := service.NewUsageService(db)
 	usageIdentityService := service.NewUsageIdentityService(db)
 	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
@@ -126,12 +176,11 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		Config: &cfg,
 		DB:     db,
 		Poller: backgroundPoller,
-		// Redis pull/process 分成两个后台 runner，避免远端拉取和本地 SQLite 处理互相等待。
+		// Redis pull/process 分成两个后台 runner，避免远端拉取和本地处理互相等待。
 		RedisPull:         poller.NewRedisPullRunner(backgroundPoller),
 		RedisProcess:      poller.NewRedisProcessRunner(backgroundPoller),
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval),
-		BackupMaintenance: backupMaintenance,
 		LogCloser:         logCloser,
 		Router: api.NewRouter(
 			webui.Static,
@@ -216,14 +265,6 @@ func (a *App) Run() error {
 			}
 		})
 	}
-	if a.BackupMaintenance != nil {
-		a.startBackgroundTask(func() {
-			if err := a.BackupMaintenance.Run(ctx); err != nil {
-				logrus.Errorf("database backup stopped: %v", err)
-			}
-		})
-	}
-
 	server := &http.Server{
 		Addr:    ":" + a.Config.AppPort,
 		Handler: a.Router,

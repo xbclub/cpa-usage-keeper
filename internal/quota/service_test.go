@@ -3,14 +3,13 @@ package quota
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -175,20 +174,7 @@ func TestRefreshTaskFailureReturnsFriendlyMessage(t *testing.T) {
 
 func openQuotaTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "quota.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		sqlDB, err := db.DB()
-		if err == nil {
-			_ = sqlDB.Close()
-		}
-	})
-	if err := db.AutoMigrate(entities.All()...); err != nil {
-		t.Fatalf("AutoMigrate returned error: %v", err)
-	}
-	return db
+	return testutil.OpenTestDatabase(t)
 }
 
 func seedUsageIdentity(t *testing.T, db *gorm.DB, identity entities.UsageIdentity) {

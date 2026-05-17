@@ -204,9 +204,9 @@ func AggregateUsageIdentityStats(ctx context.Context, db *gorm.DB, now time.Time
 				"reasoning_tokens":               identity.ReasoningTokens + delta.ReasoningTokens,
 				"cached_tokens":                  identity.CachedTokens + delta.CachedTokens,
 				"total_tokens":                   identity.TotalTokens + delta.TotalTokens,
-				"first_used_at":                  formatStorageTimePtr(firstUsedAt),
-				"last_used_at":                   formatStorageTimePtr(lastUsedAt),
-				"stats_updated_at":               timeutil.FormatStorageTime(now),
+				"first_used_at":                  normalizeStorageTimePtrAny(firstUsedAt),
+				"last_used_at":                   normalizeStorageTimePtrAny(lastUsedAt),
+				"stats_updated_at":               timeutil.NormalizeStorageTime(now),
 				"last_aggregated_usage_event_id": delta.MaxUsageEventID,
 			}
 			if err := tx.Model(&entities.UsageIdentity{}).Where("id = ?", identity.ID).Updates(updates).Error; err != nil {
@@ -331,11 +331,12 @@ func normalizeStorageTimePtr(value *time.Time) *time.Time {
 	return &normalized
 }
 
-func formatStorageTimePtr(value *time.Time) any {
+func normalizeStorageTimePtrAny(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
-	return timeutil.FormatStorageTime(*value)
+	normalized := timeutil.NormalizeStorageTime(*value)
+	return &normalized
 }
 
 func trimOptionalString(value *string) *string {
@@ -400,12 +401,12 @@ func markStaleUsageIdentityRowsDeleted(tx *gorm.DB, rows []usageIdentitySyncRow,
 		staleIDs = append(staleIDs, row.ID)
 	}
 
-	// stale ID 也按批次更新，避免 id IN 在数据量大时再次触发 SQLite 变量上限。
+	// stale ID 也按批次更新，避免 id IN 在数据量大时超出参数上限。
 	for start := 0; start < len(staleIDs); start += insertBatchSize(entities.UsageIdentity{}) {
 		end := min(start+insertBatchSize(entities.UsageIdentity{}), len(staleIDs))
 		if err := tx.Model(&entities.UsageIdentity{}).
 			Where("id IN ?", staleIDs[start:end]).
-			Updates(map[string]any{"is_deleted": true, "deleted_at": timeutil.FormatStorageTime(now)}).Error; err != nil {
+			Updates(map[string]any{"is_deleted": true, "deleted_at": timeutil.NormalizeStorageTime(now)}).Error; err != nil {
 			return fmt.Errorf("%s: %w", context, err)
 		}
 	}

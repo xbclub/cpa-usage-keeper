@@ -4,25 +4,20 @@ import (
 	"context"
 	"errors"
 	"math"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
 func TestUsageServiceGetUsageWithFilterDelegatesToFilteredSnapshot(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-service-filter.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), TotalTokens: 20},
@@ -51,11 +46,7 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 	t.Cleanup(func() { time.Local = previousLocal })
 	time.Local = location
 
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-service-overview.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
@@ -96,11 +87,7 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 }
 
 func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-service-api-key-filter.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-target-key", "sk-other-key"}, time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("SyncCPAAPIKeys returned error: %v", err)
 	}
@@ -156,25 +143,17 @@ func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
 }
 
 func TestUsageServiceRejectsInvalidAPIKeyID(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-service-invalid-api-key-id.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	provider := NewUsageService(db)
 
-	_, err = provider.ListUsageEvents(context.Background(), servicedto.UsageFilter{APIKeyID: "not-an-id", Page: 1, PageSize: 100, Limit: 100})
+	_, err := provider.ListUsageEvents(context.Background(), servicedto.UsageFilter{APIKeyID: "not-an-id", Page: 1, PageSize: 100, Limit: 100})
 	if !errors.Is(err, ErrInvalidID) {
 		t.Fatalf("expected ErrInvalidID, got %v", err)
 	}
 }
 
 func TestUsageServiceRejectsDeletedAPIKeyID(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-service-deleted-api-key-id.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-deleted-key"}, time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("SyncCPAAPIKeys returned error: %v", err)
 	}

@@ -44,7 +44,7 @@ const (
 	syncMetadataRequired = true
 )
 
-// SyncService 负责把 CPA metadata 和 Redis usage 队列同步到本地 SQLite。
+// SyncService 负责把 CPA metadata 和 Redis usage 队列同步到本地数据库。
 type SyncService struct {
 	db              *gorm.DB
 	client          CPAClientFetcher
@@ -193,7 +193,7 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 		return nil, err
 	}
 	fetchedAt := timeutil.NormalizeStorageTime(s.now())
-	// process_failed 也在这里重试，避免临时 SQLite 锁或短暂解析外问题导致数据永久卡住。
+	// process_failed 也在这里重试，避免临时锁或短暂解析问题导致数据永久卡住。
 	processableRows, err := repository.ListProcessableRedisUsageInbox(s.db, redisInboxProcessLimit)
 	if err != nil {
 		return &servicedto.RedisBatchSyncResult{Status: "failed"}, fmt.Errorf("list processable redis usage inbox: %w", err)
@@ -224,7 +224,7 @@ func (s *SyncService) CleanupRedisUsageInbox(ctx context.Context) error {
 	return err
 }
 
-// CleanupStorage 是每日 03:00 维护任务调用的统一入口：先清 Redis inbox，最后 VACUUM 收缩 SQLite。
+// CleanupStorage 是每日 03:00 维护任务调用的统一入口：先清 Redis inbox，最后 清理过期数据。
 func (s *SyncService) CleanupStorage(ctx context.Context) error {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return err

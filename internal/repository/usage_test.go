@@ -2,13 +2,12 @@ package repository
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	repodto "cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -359,10 +358,5 @@ func insertAPIKeyFilterEvents(t *testing.T, db *gorm.DB) {
 
 func openUsageTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "dto.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	return db
+	return testutil.OpenTestDatabase(t)
 }

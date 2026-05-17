@@ -2,12 +2,11 @@ package repository
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
@@ -151,10 +150,5 @@ func TestSyncCPAAPIKeysDoesNotConsumeIDsForExistingKeys(t *testing.T) {
 
 func openCPAAPIKeyTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "cpa-api-key.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	return db
+	return testutil.OpenTestDatabase(t)
 }

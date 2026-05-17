@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
 
 func TestAggregateUsageOverviewStatsAggregatesIncrementallyAndIdempotently(t *testing.T) {
-	db := openTestDatabase(t)
-	defer closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 
 	insertUsageOverviewAggregationEvents(t, db, []entities.UsageEvent{
@@ -44,8 +44,7 @@ func TestAggregateUsageOverviewStatsAggregatesIncrementallyAndIdempotently(t *te
 }
 
 func TestAggregateUsageOverviewStatsNormalizesBlankDimensionsAndWritesHealthSpans(t *testing.T) {
-	db := openTestDatabase(t)
-	defer closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 
 	insertUsageOverviewAggregationEvents(t, db, []entities.UsageEvent{
@@ -73,8 +72,7 @@ func TestAggregateUsageOverviewStatsNormalizesBlankDimensionsAndWritesHealthSpan
 }
 
 func TestCleanupUsageOverviewHealthStatsRemovesRowsOutsideRetention(t *testing.T) {
-	db := openTestDatabase(t)
-	defer closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	rows := []entities.UsageOverviewHealthStat{
 		{BucketStart: now.Add(-9 * 24 * time.Hour), SpanSeconds: 900, APIGroupKey: "old", SuccessCount: 1},

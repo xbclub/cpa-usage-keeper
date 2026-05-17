@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,10 +19,9 @@ import (
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 type stubMetadataFetcher struct {
@@ -276,7 +273,10 @@ func TestProcessRedisUsageInboxRollsBackEventsWhenProcessedMarkFails(t *testing.
 	}}); err != nil {
 		t.Fatalf("seed inbox row: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_processed_mark BEFORE UPDATE OF status ON redis_usage_inboxes WHEN NEW.status = 'processed' BEGIN SELECT RAISE(ABORT, 'processed mark failed'); END;`).Error; err != nil {
+	if err := db.Exec(`CREATE OR REPLACE FUNCTION fail_processed_mark() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'processed mark failed'; END; $$ LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatalf("create failure function: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_processed_mark BEFORE UPDATE OF status ON redis_usage_inboxes FOR EACH ROW WHEN (NEW.status = 'processed') EXECUTE FUNCTION fail_processed_mark()`).Error; err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
@@ -1414,27 +1414,7 @@ func assertTableNotExists(t *testing.T, db *gorm.DB, table string) {
 
 func openSyncTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "sync.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	return db
-}
-
-func closeTestDatabase(t *testing.T, db *gorm.DB) {
-	t.Helper()
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get sql database: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Fatalf("close database: %v", err)
-		}
-	})
+	return testutil.OpenTestDatabase(t)
 }
 
 func captureSyncDebugLogs(t *testing.T) *bytes.Buffer {
@@ -1450,27 +1430,4 @@ func captureSyncDebugLogs(t *testing.T) *bytes.Buffer {
 		logrus.SetLevel(previousLevel)
 	})
 	return logs
-}
-
-func openSyncTestDatabaseWithLogs(t *testing.T) (*gorm.DB, *bytes.Buffer) {
-	t.Helper()
-
-	logs := &bytes.Buffer{}
-	gormLogger := gormlogger.New(
-		log.New(logs, "", 0),
-		gormlogger.Config{
-			LogLevel:                  gormlogger.Info,
-			IgnoreRecordNotFoundError: false,
-			Colorful:                  false,
-		},
-	)
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "sync.db")), &gorm.Config{Logger: gormLogger})
-	if err != nil {
-		t.Fatalf("gorm.Open returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	if err := db.AutoMigrate(entities.All()...); err != nil {
-		t.Fatalf("AutoMigrate returned error: %v", err)
-	}
-	return db, logs
 }

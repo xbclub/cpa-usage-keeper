@@ -4,17 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa/dto/models"
 	"cpa-usage-keeper/internal/cpa/dto/response"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -245,10 +244,5 @@ func captureDebugLogs(t *testing.T) *bytes.Buffer {
 
 func openPricingServiceTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "pricing-service.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	return db
+	return testutil.OpenTestDatabase(t)
 }

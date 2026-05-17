@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
 func TestUsageIdentityReplaceForAuthTypeMarksStaleRowsDeletedAndPreservesStats(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 	firstUsedAt := now.Add(-2 * time.Hour)
@@ -109,7 +110,7 @@ func TestUsageIdentityReplaceForAuthTypeMarksStaleRowsDeletedAndPreservesStats(t
 }
 
 func TestUsageIdentityReplaceForAuthTypeDoesNotConsumeIDsForExistingIdentities(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	firstSync := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 
@@ -158,7 +159,7 @@ func TestUsageIdentityReplaceForAuthTypeDoesNotConsumeIDsForExistingIdentities(t
 }
 
 func TestUsageIdentityReplaceForAuthTypeRefreshesProjectID(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 9, 10, 30, 0, 0, time.UTC)
 	oldProjectID := "old-project"
@@ -198,7 +199,7 @@ func TestUsageIdentityReplaceForAuthTypeRefreshesProjectID(t *testing.T) {
 }
 
 func TestUsageIdentityReplaceForAuthTypeRevivesDeletedIdentity(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	deletedAt := time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC)
 	now := deletedAt.Add(24 * time.Hour)
@@ -245,7 +246,7 @@ func TestUsageIdentityReplaceForAuthTypeRevivesDeletedIdentity(t *testing.T) {
 }
 
 func TestGetActiveAuthFileUsageIdentityByAuthIndexReturnsOnlyAuthFile(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	if err := db.Create(&[]entities.UsageIdentity{{
 		Name:         "Provider",
@@ -275,7 +276,7 @@ func TestGetActiveAuthFileUsageIdentityByAuthIndexReturnsOnlyAuthFile(t *testing
 }
 
 func TestGetActiveAuthFileUsageIdentityByAuthIndexIgnoresDeletedAuthFile(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	deletedAt := time.Date(2026, 5, 9, 11, 0, 0, 0, time.UTC)
 	if err := db.Create(&entities.UsageIdentity{
@@ -298,7 +299,7 @@ func TestGetActiveAuthFileUsageIdentityByAuthIndexIgnoresDeletedAuthFile(t *test
 }
 
 func TestGetActiveAuthFileUsageIdentityByAuthIndexIgnoresProviderOnlyIdentity(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	if err := db.Create(&entities.UsageIdentity{
 		Name:         "Provider Only",
@@ -318,7 +319,7 @@ func TestGetActiveAuthFileUsageIdentityByAuthIndexIgnoresProviderOnlyIdentity(t 
 }
 
 func TestUsageIdentityReplaceForProviderTypesMarksOnlyScopedProviderTypesDeleted(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 
@@ -373,7 +374,7 @@ func TestUsageIdentityReplaceForProviderTypesMarksOnlyScopedProviderTypesDeleted
 }
 
 func TestUsageIdentityReplaceForProviderTypesRefreshesSourceMetadataAndPreservesStats(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 	seed := entities.UsageIdentity{
@@ -422,7 +423,7 @@ func TestUsageIdentityReplaceForProviderTypesRefreshesSourceMetadataAndPreserves
 }
 
 func TestUsageIdentityReplaceForAuthTypePersistsSourceMetadataFields(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 	activeStart := now.Add(-24 * time.Hour)
@@ -458,7 +459,7 @@ func TestUsageIdentityReplaceForAuthTypePersistsSourceMetadataFields(t *testing.
 }
 
 func TestUsageIdentityReplaceForAuthTypeBatchesLargeUpsertAndMarksStaleRowsDeleted(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 
@@ -506,7 +507,7 @@ func TestUsageIdentityReplaceForAuthTypeBatchesLargeUpsertAndMarksStaleRowsDelet
 }
 
 func TestUsageIdentityReplaceForProviderTypesBatchesLargeUpsertAndDeletesOnlyScopedStaleRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 6, 12, 30, 0, 0, time.UTC)
 
@@ -564,7 +565,7 @@ func TestUsageIdentityReplaceForProviderTypesBatchesLargeUpsertAndDeletesOnlySco
 }
 
 func TestUsageIdentityReplaceForProviderTypesWithEmptyProviderTypesDoesNotDeleteExistingRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	deletedAt := time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC)
 	now := deletedAt.Add(24 * time.Hour)
@@ -608,7 +609,7 @@ func TestUsageIdentityReplaceForProviderTypesWithEmptyProviderTypesDoesNotDelete
 }
 
 func TestUsageIdentityReplaceForAuthTypeKeepsAlreadyDeletedRowsOutOfStaleCompare(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	oldDeletedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
@@ -643,7 +644,7 @@ func TestUsageIdentityReplaceForAuthTypeKeepsAlreadyDeletedRowsOutOfStaleCompare
 }
 
 func TestUsageIdentityReplaceForProviderTypesKeepsAlreadyDeletedRowsOutOfStaleCompare(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	oldDeletedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
@@ -684,7 +685,7 @@ func TestUsageIdentityReplaceForProviderTypesKeepsAlreadyDeletedRowsOutOfStaleCo
 }
 
 func TestUsageIdentityListActiveExcludesDeletedRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	deletedAt := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 
@@ -722,7 +723,7 @@ func TestUsageIdentityListActiveExcludesDeletedRows(t *testing.T) {
 }
 
 func TestUsageIdentityListActivePageOrdersByTotalRequestsDesc(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	now := time.Date(2026, 5, 11, 10, 0, 0, 0, time.UTC)
 	rows := []entities.UsageIdentity{
 		{Identity: "low", Name: "Low", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", TotalRequests: 10, CreatedAt: now, UpdatedAt: now},
@@ -759,7 +760,7 @@ func TestUsageIdentityListActivePageOrdersByTotalRequestsDesc(t *testing.T) {
 }
 
 func TestUsageIdentityListOrdersByAuthTypeNameIDAndIncludesDeletedRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	deletedAt := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 
@@ -806,7 +807,7 @@ func TestUsageIdentityListOrdersByAuthTypeNameIDAndIncludesDeletedRows(t *testin
 }
 
 func TestUsageIdentityAggregateStatsForAuthFileUsesOAuthAuthIndex(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	first := now.Add(-3 * time.Hour)
@@ -854,7 +855,7 @@ func TestUsageIdentityAggregateStatsForAuthFileUsesOAuthAuthIndex(t *testing.T) 
 }
 
 func TestUsageIdentityAggregateStatsForAIProviderUsesAPIKeyAuthIndexNotProvider(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC)
 
@@ -890,7 +891,7 @@ func TestUsageIdentityAggregateStatsForAIProviderUsesAPIKeyAuthIndexNotProvider(
 }
 
 func TestUsageIdentityAggregateStatsSecondRunOnlyIncludesEventsAfterCursor(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 14, 0, 0, 0, time.UTC)
 	first := now.Add(-2 * time.Hour)
@@ -933,7 +934,7 @@ func TestUsageIdentityAggregateStatsSecondRunOnlyIncludesEventsAfterCursor(t *te
 }
 
 func TestUsageIdentityAggregateStatsLateTimestampWithLargerIDStillAggregates(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 15, 0, 0, 0, time.UTC)
 	initialTime := now.Add(-time.Hour)
@@ -972,7 +973,7 @@ func TestUsageIdentityAggregateStatsLateTimestampWithLargerIDStillAggregates(t *
 }
 
 func TestUsageIdentityAggregateStatsUsesDatabaseIDNotRequestIDOrdering(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 16, 0, 0, 0, time.UTC)
 
@@ -1001,7 +1002,7 @@ func TestUsageIdentityAggregateStatsUsesDatabaseIDNotRequestIDOrdering(t *testin
 }
 
 func TestUsageIdentityAggregateStatsDeletedIdentityStillAggregates(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 4, 17, 0, 0, 0, time.UTC)
 	deletedAt := now.Add(-time.Hour)

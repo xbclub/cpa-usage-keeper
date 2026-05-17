@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 )
 
 func TestInsertRedisUsageInboxMessagesPersistsPendingRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
@@ -51,7 +52,7 @@ func TestInsertRedisUsageInboxMessagesPersistsPendingRows(t *testing.T) {
 }
 
 func TestInsertRedisUsageInboxMessagesBatchesLargeInsertSet(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 5, 6, 13, 0, 0, 0, time.UTC)
 	inputs := make([]dto.RedisInboxInsert, 0, 901)
 	for i := 0; i < 901; i++ {
@@ -85,7 +86,7 @@ func TestInsertRedisUsageInboxMessagesBatchesLargeInsertSet(t *testing.T) {
 }
 
 func TestInsertRedisUsageInboxMessagesAllowsEmptyInput(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 
 	rows, err := InsertRedisUsageInboxMessages(db, nil)
 	if err != nil {
@@ -97,7 +98,7 @@ func TestInsertRedisUsageInboxMessagesAllowsEmptyInput(t *testing.T) {
 }
 
 func TestRedisUsageInboxStatusTransitions(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 	processedAt := poppedAt.Add(time.Minute)
 
@@ -126,7 +127,7 @@ func TestRedisUsageInboxStatusTransitions(t *testing.T) {
 }
 
 func TestRedisUsageInboxFailureTransitionsBoundErrors(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
@@ -170,7 +171,7 @@ func TestRedisUsageInboxFailureTransitionsBoundErrors(t *testing.T) {
 }
 
 func TestMarkRedisUsageInboxProcessFailedDiscardsRowsAfterMaxAttempts(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{QueueKey: "queue", RawMessage: `{"request_id":"retry"}`, PoppedAt: poppedAt}})
@@ -208,7 +209,7 @@ func TestMarkRedisUsageInboxProcessFailedDiscardsRowsAfterMaxAttempts(t *testing
 }
 
 func TestListProcessableRedisUsageInboxIncludesProcessFailedRows(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
@@ -246,7 +247,7 @@ func TestCleanupRedisUsageInboxRemovesOldProcessedAndFailedRows(t *testing.T) {
 	}
 	time.Local = location
 	t.Cleanup(func() { time.Local = previousLocal })
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	now := time.Date(2026, 4, 27, 2, 30, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
@@ -301,7 +302,7 @@ func TestCleanupRedisUsageInboxRemovesOldProcessedAndFailedRows(t *testing.T) {
 }
 
 func TestListPendingRedisUsageInboxReturnsPendingRowsInIDOrder(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
 
 	rows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{

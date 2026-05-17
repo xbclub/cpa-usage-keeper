@@ -213,7 +213,7 @@ func (d *RedisDrain) runRedisInboxProcessLoop(ctx context.Context) {
 	logrus.WithField("interval", redisInboxProcessInterval.String()).Info("redis inbox process task started")
 	// 使用无限循环让 Process runner 持续消化本地 inbox，退出条件统一由 ctx 控制。
 	for {
-		// 每轮开始先检查退出信号，避免服务关闭时再开启一次 SQLite 写事务。
+		// 每轮开始先检查退出信号，避免服务关闭时再开启一次 database 写事务。
 		select {
 		case <-ctx.Done():
 			// 上层取消时立即退出 Process loop，把 goroutine 生命周期交还给 App。
@@ -342,9 +342,9 @@ func (d *RedisDrain) pullRedisInboxOnce(ctx context.Context) (*servicedto.RedisI
 
 // processRedisInboxOnce 只防止 Process 自身重入，不阻塞 Pull；Process 的输入必须来自已持久化的 redis_usage_inboxes。
 func (d *RedisDrain) processRedisInboxOnce(ctx context.Context) (*servicedto.RedisBatchSyncResult, error) {
-	// 加锁读取和修改 processRunning，保证同一个 Process runner 不会在慢 SQLite 写入期间重入。
+	// 加锁读取和修改 processRunning，保证同一个 Process runner 不会在慢 database 写入期间重入。
 	d.mu.Lock()
-	// 如果上一轮 Process 尚未结束，直接返回重入错误，避免两个 SQLite 写事务同时处理 inbox。
+	// 如果上一轮 Process 尚未结束，直接返回重入错误，避免两个 database 写事务同时处理 inbox。
 	if d.processRunning {
 		// 返回前释放互斥锁，避免阻塞 status 查询和 pull 状态更新。
 		d.mu.Unlock()
@@ -353,7 +353,7 @@ func (d *RedisDrain) processRedisInboxOnce(ctx context.Context) (*servicedto.Red
 	}
 	// 标记 Process 正在运行，status 的 SyncRunning 会因此变成 true。
 	d.processRunning = true
-	// 完成运行标记后立即释放锁，真正的 SQLite 处理不持有状态锁。
+	// 完成运行标记后立即释放锁，真正的 database 处理不持有状态锁。
 	d.mu.Unlock()
 
 	// 无论 Process 成功、失败还是被 ctx 取消，都必须清理 processRunning。

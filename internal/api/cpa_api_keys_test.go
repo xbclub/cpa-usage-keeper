@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
@@ -167,15 +166,5 @@ func TestUpdateCPAAPIKeyAliasRejectsInvalidInputAndDeletedRows(t *testing.T) {
 
 func openCPAAPIKeyAPITestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "api-keys.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		sqlDB, err := db.DB()
-		if err == nil {
-			_ = sqlDB.Close()
-		}
-	})
-	return db
+	return testutil.OpenTestDatabase(t)
 }

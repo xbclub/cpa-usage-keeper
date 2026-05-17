@@ -9,7 +9,6 @@ RUN npm run build
 
 FROM golang:1.22-alpine AS go-builder
 WORKDIR /app
-RUN apk add --no-cache build-base
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
@@ -17,7 +16,7 @@ COPY internal/ ./internal/
 COPY --from=web-builder /app/web/dist ./web/dist
 COPY web/static.go ./web/static.go
 ARG VERSION=dev
-RUN CGO_ENABLED=1 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" \
     -o /out/cpa-usage-keeper ./cmd/server/main.go
 
@@ -26,7 +25,7 @@ WORKDIR /
 RUN apk add --no-cache ca-certificates tzdata su-exec \
 	&& addgroup -S app \
 	&& adduser -S -G app app \
-	&& mkdir -p /data \
+	&& mkdir -p /data/logs \
 	&& chown -R app:app /data
 COPY --from=go-builder /out/cpa-usage-keeper /app/cpa-usage-keeper
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

@@ -58,7 +58,7 @@ func MarkRedisUsageInboxProcessed(db *gorm.DB, id int64, eventKey string, proces
 	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status":          RedisUsageInboxStatusProcessed,
 		"usage_event_key": eventKey,
-		"processed_at":    timeutil.FormatStorageTime(processedAt),
+		"processed_at":    timeutil.NormalizeStorageTime(processedAt),
 		"last_error":      "",
 	}).Error
 }
@@ -111,8 +111,8 @@ func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]entities.RedisUsageIn
 func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (dto.RedisUsageInboxCleanupResult, error) {
 	localNow := now.In(time.Local)
 	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
-	processedCutoff := timeutil.FormatStorageTime(localDayStart)
-	failedCutoff := timeutil.FormatStorageTime(now.AddDate(0, 0, -7))
+	processedCutoff := timeutil.NormalizeStorageTime(localDayStart)
+	failedCutoff := timeutil.NormalizeStorageTime(now.AddDate(0, 0, -7))
 	result := dto.RedisUsageInboxCleanupResult{}
 
 	processedDelete := db.Where("status = ? AND processed_at IS NOT NULL AND processed_at < ?", RedisUsageInboxStatusProcessed, processedCutoff).Delete(&entities.RedisUsageInbox{})

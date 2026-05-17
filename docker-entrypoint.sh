@@ -10,22 +10,11 @@ ensure_writable_dir() {
   chown -R app:app "$dir"
 }
 
-work_dir="${WORK_DIR:-./data}"
-ensure_writable_dir "$work_dir"
-
-case "${BACKUP_ENABLED:-true}" in
-  false|FALSE|False|0)
-    ;;
-  *)
-    ensure_writable_dir "$work_dir/backups"
-    ;;
-esac
-
 case "${LOG_FILE_ENABLED:-true}" in
   false|FALSE|False|0)
     ;;
   *)
-    ensure_writable_dir "$work_dir/logs"
+    ensure_writable_dir "${LOG_DIR:-./data/logs}"
     ;;
 esac
 

@@ -22,13 +22,8 @@ const (
 )
 
 var (
-	DefaultWorkDir      = filepath.Join(".", "data")
-	DefaultSQLitePath   = filepath.Join(DefaultWorkDir, "app.db")
-	DefaultLogDir       = filepath.Join(DefaultWorkDir, "logs")
-	DefaultBackupDir    = filepath.Join(DefaultWorkDir, "backups")
-	workDirDatabaseName = filepath.Base(DefaultSQLitePath)
-	workDirLogsName     = filepath.Base(DefaultLogDir)
-	workDirBackupsName  = filepath.Base(DefaultBackupDir)
+	DefaultLogDir   = filepath.Join(".", "data", "logs")
+	workDirLogsName = "logs"
 )
 
 type Config struct {
@@ -60,18 +55,8 @@ type Config struct {
 	RedisQueueErrorBackoff time.Duration
 	// MetadataSyncInterval 是 auth files 和 provider metadata 的固定刷新间隔。
 	MetadataSyncInterval time.Duration
-	// WorkDir 是应用工作目录，数据库、日志和备份默认从这里派生。
-	WorkDir string
-	// SQLitePath 是 SQLite 数据库文件路径。
-	SQLitePath string
-	// BackupEnabled 控制是否保存 SQLite 数据库备份文件。
-	BackupEnabled bool
-	// BackupDir 是 SQLite 数据库备份目录。
-	BackupDir string
-	// BackupInterval 是两次备份写入之间的最小间隔。
-	BackupInterval time.Duration
-	// BackupRetentionDays 是备份文件保留天数。
-	BackupRetentionDays int
+	// DatabaseURL 是 PostgreSQL 数据库连接字符串。
+	DatabaseURL string
 	// RequestTimeout 是访问 CPA HTTP 和 Redis TCP 的超时时间。
 	RequestTimeout time.Duration
 	// TLSSkipVerify 控制是否跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证。
@@ -138,27 +123,6 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, err
 	}
 
-	backupEnabled, err := getBool("BACKUP_ENABLED", true)
-	if err != nil {
-		return nil, err
-	}
-
-	backupInterval, err := getDuration("BACKUP_INTERVAL", 24*time.Hour)
-	if err != nil {
-		return nil, err
-	}
-	if backupInterval <= 0 {
-		return nil, fmt.Errorf("BACKUP_INTERVAL must be positive")
-	}
-
-	backupRetentionDays, err := getInt("BACKUP_RETENTION_DAYS", 7)
-	if err != nil {
-		return nil, err
-	}
-	if backupRetentionDays < 0 {
-		return nil, fmt.Errorf("BACKUP_RETENTION_DAYS must be non-negative")
-	}
-
 	logFileEnabled, err := getBool("LOG_FILE_ENABLED", true)
 	if err != nil {
 		return nil, err
@@ -203,8 +167,6 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("APP_BASE_PATH is invalid: %w", err)
 	}
 
-	workDir := getString("WORK_DIR", DefaultWorkDir)
-
 	cfg := &Config{
 		AppPort:                getString("APP_PORT", "8080"),
 		AppBasePath:            appBasePath,
@@ -220,17 +182,12 @@ func Load(options LoadOptions) (*Config, error) {
 		RedisQueueIdleInterval: redisQueueIdleInterval,
 		RedisQueueErrorBackoff: RedisQueueErrorBackoffDefault,
 		MetadataSyncInterval:   MetadataSyncIntervalDefault,
-		WorkDir:                workDir,
-		SQLitePath:             filepath.Join(workDir, workDirDatabaseName),
-		BackupEnabled:          backupEnabled,
-		BackupDir:              filepath.Join(workDir, workDirBackupsName),
-		BackupInterval:         backupInterval,
-		BackupRetentionDays:    backupRetentionDays,
+		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		RequestTimeout:         requestTimeout,
 		TLSSkipVerify:          tlsSkipVerify,
 		LogLevel:               getString("LOG_LEVEL", "info"),
 		LogFileEnabled:         logFileEnabled,
-		LogDir:                 filepath.Join(workDir, workDirLogsName),
+		LogDir:                 DefaultLogDir,
 		LogRetentionDays:       logRetentionDays,
 		AuthEnabled:            authEnabled,
 		LoginPassword:          strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
@@ -252,6 +209,9 @@ func Load(options LoadOptions) (*Config, error) {
 		if cfg.TLSKeyFile == "" {
 			return nil, fmt.Errorf("TLS_KEY_FILE is required when TLS_ENABLED is true")
 		}
+	}
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
 	cfg.resolveRelativePaths(envBaseDir)
 
@@ -335,10 +295,7 @@ func (cfg *Config) resolveRelativePaths(baseDir string) {
 	if baseDir == "" {
 		return
 	}
-	cfg.WorkDir = resolveRelativePath(baseDir, cfg.WorkDir)
-	cfg.SQLitePath = resolveRelativePath(baseDir, cfg.SQLitePath)
 	cfg.LogDir = resolveRelativePath(baseDir, cfg.LogDir)
-	cfg.BackupDir = resolveRelativePath(baseDir, cfg.BackupDir)
 	cfg.TLSCertFile = resolveRelativePath(baseDir, cfg.TLSCertFile)
 	cfg.TLSKeyFile = resolveRelativePath(baseDir, cfg.TLSKeyFile)
 }

@@ -18,7 +18,20 @@ jobs:
         runs-on:
           - ubuntu-latest
           - macos-latest
-          - windows-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: cpa_usage_keeper_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -29,22 +42,9 @@ jobs:
           go-version: '1.22'
           cache: true
 
-      - name: Set up MSYS2
-        if: ${{ runner.os == 'Windows' }}
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          path-type: inherit
-          install: mingw-w64-ucrt-x86_64-gcc
-
       - name: Run backend tests
-        if: ${{ runner.os != 'Windows' }}
-        run: go test ./cmd/... ./internal/...
-
-      - name: Run backend tests
-        if: ${{ runner.os == 'Windows' }}
-        shell: msys2 {0}
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/cpa_usage_keeper_test?sslmode=disable
         run: go test ./cmd/... ./internal/...
 
   frontend:

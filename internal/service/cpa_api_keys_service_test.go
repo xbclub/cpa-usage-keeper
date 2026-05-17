@@ -2,25 +2,15 @@ package service
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 )
 
 func TestUpdateCPAAPIKeyAliasAcceptsParsedInt64ID(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "api-keys-service.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		sqlDB, err := db.DB()
-		if err == nil {
-			_ = sqlDB.Close()
-		}
-	})
+	db := testutil.OpenTestDatabase(t)
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha123456"}, time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed API keys: %v", err)
 	}
