@@ -1,0 +1,14 @@
+{
+  "active": false,
+  "current_phase": "spec-complete",
+  "current_ambiguity": "0.193",
+  "spec_path": ".omc/specs/deep-interview-model-filter-tooltip.md",
+  "rounds_completed": "1",
+  "status": "PASSED",
+  "_meta": {
+    "mode": "deep-interview",
+    "sessionId": null,
+    "updatedAt": "2026-06-09T07:15:29.585Z",
+    "updatedBy": "state_write_tool"
+  }
+}

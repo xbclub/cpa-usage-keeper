@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git add CLAUDE.md && git commit -m \\\"docs: add tooltip and reset button to merge restoration checklist, fix duplicate items\\\" && git push origin pg-migration-v2\",\"description\":\"Commit and ...",
+  "error": "Exit code 128\n[pg-migration-v2 e8ba14e] docs: add tooltip and reset button to merge restoration checklist, fix duplicate items\n Committer: Y ii <yii@YdeMac-mini.local>\n您的姓名和邮件地址基于登录名和主机名进行了自动设置。请检查它们正确\n与否。您可以对其进行设置以免再出现本提示信息：\n\n    git config --global user.name \"Your Name\"\n    git config --global user.email you@example.com\n\n设置完毕后，您可以用下面的命令来修正本次提交所使用的用户身份：\n\n    git commit --amend --reset-author\n\n 1 file changed, 8 insertions(+), 5 deletions(-)\nssh: connect to host github.com port 22: Operation tim...",
+  "timestamp": "2026-06-11T08:27:46.633Z",
+  "retry_count": 1
+}

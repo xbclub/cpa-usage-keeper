@@ -1,0 +1,66 @@
+@use '../../styles/variables' as *;
+
+.container {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-lg);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+
+  th, td {
+    padding: 10px 12px;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border-color);
+
+    &:first-child {
+      text-align: left;
+    }
+  }
+
+  th {
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background-color: var(--bg-secondary);
+    position: sticky;
+    top: 0;
+  }
+
+  td {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  tbody tr:hover {
+    background-color: var(--bg-tertiary);
+  }
+}
+
+.keyCell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}

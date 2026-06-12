@@ -1,0 +1,466 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1781163828945,
+  "projectRoot": "/Users/yii/Documents/mycode/go/cpa-usage-keeper",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "go build ./cmd/... ./internal/... 2>&1; echo \"EXIT:$?\"",
+    "testCommand": "# Check vitest config for test setup\ncat web/vitest.config.ts 2>/dev/null || cat web/vite.config.ts | head -30",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cmd": {
+      "path": "cmd",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781163828941,
+      "keyFiles": []
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1781163828942,
+      "keyFiles": []
+    },
+    "deploy": {
+      "path": "deploy",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781163828942,
+      "keyFiles": []
+    },
+    "drone": {
+      "path": "drone",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1781163828942,
+      "keyFiles": [
+        "Dockerfile"
+      ]
+    },
+    "internal": {
+      "path": "internal",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781163828942,
+      "keyFiles": []
+    },
+    "web": {
+      "path": "web",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1781163828942,
+      "keyFiles": [
+        "eslint.config.js",
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "static.go"
+      ]
+    },
+    "internal/api": {
+      "path": "internal/api",
+      "purpose": "API routes",
+      "fileCount": 28,
+      "lastAccessed": 1781163828942,
+      "keyFiles": [
+        "auth.go",
+        "auth_files.go",
+        "auth_files_test.go"
+      ]
+    },
+    "internal/app": {
+      "path": "internal/app",
+      "purpose": "Application code",
+      "fileCount": 6,
+      "lastAccessed": 1781163828943,
+      "keyFiles": [
+        "app.go",
+        "app_test.go",
+        "maintenance.go"
+      ]
+    },
+    "internal/config": {
+      "path": "internal/config",
+      "purpose": "Configuration files",
+      "fileCount": 3,
+      "lastAccessed": 1781163828943,
+      "keyFiles": [
+        "config.go",
+        "config_test.go",
+        "tzdata.go"
+      ]
+    },
+    "web/dist": {
+      "path": "web/dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1781163828943,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "web/node_modules": {
+      "path": "web/node_modules",
+      "purpose": "Dependencies",
+      "fileCount": 1,
+      "lastAccessed": 1781163828944,
+      "keyFiles": []
+    },
+    "web/src": {
+      "path": "web/src",
+      "purpose": "Source code",
+      "fileCount": 7,
+      "lastAccessed": 1781163828944,
+      "keyFiles": [
+        "App.css",
+        "App.logic.test.ts",
+        "App.tsx"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "web/src/pages/UsagePage.tsx",
+      "accessCount": 122,
+      "lastAccessed": 1781248648025,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/usage.go",
+      "accessCount": 80,
+      "lastAccessed": 1781233327899,
+      "type": "file"
+    },
+    {
+      "path": "web/src/i18n/index.ts",
+      "accessCount": 72,
+      "lastAccessed": 1781236018544,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/usage_overview.go",
+      "accessCount": 49,
+      "lastAccessed": 1781233557953,
+      "type": "file"
+    },
+    {
+      "path": "internal/service/usage.go",
+      "accessCount": 37,
+      "lastAccessed": 1781233392382,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/hooks/useUsageData.ts",
+      "accessCount": 33,
+      "lastAccessed": 1781233759091,
+      "type": "file"
+    },
+    {
+      "path": "web/src/lib/api.ts",
+      "accessCount": 21,
+      "lastAccessed": 1781231617140,
+      "type": "file"
+    },
+    {
+      "path": "web/src/stores/useUsageStatsStore.ts",
+      "accessCount": 20,
+      "lastAccessed": 1781231648996,
+      "type": "file"
+    },
+    {
+      "path": "internal/service/dto/usage.go",
+      "accessCount": 20,
+      "lastAccessed": 1781233285974,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 16,
+      "lastAccessed": 1781166023121,
+      "type": "file"
+    },
+    {
+      "path": "web/src/lib/types.ts",
+      "accessCount": 16,
+      "lastAccessed": 1781233777724,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/ApiKeySummaryTable.tsx",
+      "accessCount": 14,
+      "lastAccessed": 1781233576786,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/router.go",
+      "accessCount": 13,
+      "lastAccessed": 1781231109510,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/dto/usage_overview.go",
+      "accessCount": 13,
+      "lastAccessed": 1781233283198,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/usage_apikey_summary.go",
+      "accessCount": 12,
+      "lastAccessed": 1781233367273,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/dto/usage_query_filter.go",
+      "accessCount": 11,
+      "lastAccessed": 1781230872119,
+      "type": "file"
+    },
+    {
+      "path": "internal/service/usage_service.go",
+      "accessCount": 10,
+      "lastAccessed": 1781231223202,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/index.ts",
+      "accessCount": 9,
+      "lastAccessed": 1781233588051,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/usage_overview_stats.go",
+      "accessCount": 8,
+      "lastAccessed": 1780978869974,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/usage_filter.go",
+      "accessCount": 8,
+      "lastAccessed": 1780983641007,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/usage_filter_test.go",
+      "accessCount": 6,
+      "lastAccessed": 1780976549943,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/usage_events.go",
+      "accessCount": 6,
+      "lastAccessed": 1781231275217,
+      "type": "file"
+    },
+    {
+      "path": "web/src/pages/UsagePage.module.scss",
+      "accessCount": 5,
+      "lastAccessed": 1780908923201,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/usage_window_stats.go",
+      "accessCount": 5,
+      "lastAccessed": 1780978871308,
+      "type": "file"
+    },
+    {
+      "path": "internal/helper/redact.go",
+      "accessCount": 5,
+      "lastAccessed": 1781229217217,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/StatCards.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1780901694495,
+      "type": "file"
+    },
+    {
+      "path": "web/src/pages/KeyOverviewPage.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1781163938021,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/cpa_api_key.go",
+      "accessCount": 3,
+      "lastAccessed": 1780907636575,
+      "type": "file"
+    },
+    {
+      "path": "internal/service/cpa_api_keys_service.go",
+      "accessCount": 3,
+      "lastAccessed": 1780907837832,
+      "type": "file"
+    },
+    {
+      "path": "internal/testutil/database.go",
+      "accessCount": 3,
+      "lastAccessed": 1780975099943,
+      "type": "file"
+    },
+    {
+      "path": "web/src/utils/usage.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780983567465,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/ApiKeySummaryTable.module.scss",
+      "accessCount": 3,
+      "lastAccessed": 1781233583441,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/RequestEventsDetailsCard.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780901464245,
+      "type": "file"
+    },
+    {
+      "path": "internal/service/redis_usage.go",
+      "accessCount": 2,
+      "lastAccessed": 1780901507143,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/cpa_api_keys.go",
+      "accessCount": 2,
+      "lastAccessed": 1780901788989,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/dto/usage_events.go",
+      "accessCount": 2,
+      "lastAccessed": 1780902139138,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/cpa_api_key.go",
+      "accessCount": 2,
+      "lastAccessed": 1780907642503,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/hooks/index.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780969130339,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_overview_hourly_stat.go",
+      "accessCount": 2,
+      "lastAccessed": 1780983284222,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/usage/ServiceHealthCard.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780988681013,
+      "type": "file"
+    },
+    {
+      "path": "internal/cpa/dto/apicall/api_call.go",
+      "accessCount": 1,
+      "lastAccessed": 1780900233775,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_overview_daily_stat.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901475026,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_event.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901475109,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_identity.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901475201,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_overview_health_stat.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901483424,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/usage_overview_aggregation_checkpoint.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901483644,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/dto/analysis.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901500368,
+      "type": "file"
+    },
+    {
+      "path": "internal/entities/redis_usage_inbox.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901504808,
+      "type": "file"
+    },
+    {
+      "path": "internal/repository/dto/usage_snapshot.go",
+      "accessCount": 1,
+      "lastAccessed": 1780901808512,
+      "type": "file"
+    },
+    {
+      "path": "internal/api/usage_analysis.go",
+      "accessCount": 1,
+      "lastAccessed": 1780907636783,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

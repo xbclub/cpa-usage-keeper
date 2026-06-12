@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"go build ./... 2>&1\",\"description\":\"Build check\"}",
+  "error": "Exit code 1\n# cpa-usage-keeper/internal/repository\ninternal/repository/usage.go:1106:2: syntax error: non-declaration statement outside function body\ninternal/repository/usage.go:1110:2: syntax error: non-declaration statement outside function body",
+  "timestamp": "2026-06-09T06:32:47.586Z",
+  "retry_count": 1
+}
