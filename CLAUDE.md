@@ -141,6 +141,8 @@ For each upstream commit, classify files into four buckets:
 git checkout upstream/main -- internal/api/ internal/service/dto/ internal/cpa/ internal/quota/ internal/config/ internal/timeutil/
 ```
 
+> ⚠️ `internal/config/config.go` is **fork-modified** (5 HTTP/shutdown timeout fields + `Load()` parsing from commit `e0817a6`). The checkout above overwrites it — after checkout, re-apply those 5 fields (`HTTPReadHeaderTimeout`, `HTTPReadTimeout`, `HTTPWriteTimeout`, `HTTPIdleTimeout`, `ShutdownTimeout`), their `*Default` constants, and the `Load()` parsing/validation, or restore with `git show e0817a6 -- internal/config/config.go`. See Step 4.5 #16 and Step 6.
+
 **Frontend (checkout individually, skip files in Step 5):**
 
 ```bash
@@ -182,6 +184,8 @@ Upstream may remove or alter features that our fork depends on. After every merg
 | 12 | **API key redaction** | `buildUsageOverviewAPIKeySummary` in `usage_overview.go` uses `helper.RedactSensitiveValue(item.APIGroupKey)` for the `api_key` field; frontend displays `row.api_key` directly (backend already redacted) | Use existing `helper.RedactSensitiveValue` — do NOT write custom frontend masking |
 | 13 | **Select option tooltip** | `Select.tsx` option label `<span>` has `title={opt.label}` attribute for showing full text on hover when truncated | Re-add `title={opt.label}` to the `<span className={styles.optionLabel}>` in `Select.tsx` |
 | 14 | **Reset preferences button** | `UsagePage.tsx` topBar has a "重置/Reset" pill button between theme switcher and update check button; uses `signOutPill` style; `onClick` calls `localStorage.clear()` + `window.location.reload()` after `confirm()`; i18n keys `common.clear_cache` and `common.clear_cache_confirm` exist in all three locales | Restore button JSX in topBarActions between theme switcher and update check; restore i18n keys in all three locale blocks |
+| 15 | **Graceful shutdown** | `App.Run()` in `internal/app/app.go` calls `serveUntilShutdown`/`notifyShutdown`/`buildHTTPServer` (NOT plain `ListenAndServe`); `stopBackgroundTasks` is split into `cancelBackground`+`waitBackground`; `App` struct has `httpServer` + `shutdownSignal` fields; `Close()` calls `httpServer.Shutdown`; imports `os`/`os/signal`/`syscall` | Re-apply on top of upstream's `app.go` (upstream blocks on plain `ListenAndServe`); see commit `e0817a6`. `internal/app/` is NOT in Step 3's checkout list so usually preserved — only at risk if someone runs a broad `git checkout upstream/main -- internal/app/`. |
+| 16 | **HTTP server timeouts** | `internal/config/config.go` has fields `HTTPReadHeaderTimeout`/`HTTPReadTimeout`/`HTTPWriteTimeout`/`HTTPIdleTimeout`/`ShutdownTimeout` + their `*Default` constants + `Load()` parsing & positive validation; `App.buildHTTPServer()` applies them to `http.Server`; documented in `.env.example` | ⚠️ Step 3 checks out `internal/config/` from upstream which **WIPES these**. After checkout, re-add the 5 fields, constants, and `Load()` parsing (or `git show e0817a6 -- internal/config/config.go`); verify `buildHTTPServer` sets `ReadHeaderTimeout`/`ReadTimeout`/`WriteTimeout`/`IdleTimeout`. |
 
 ### Step 4.6: Merge Lessons Learned 📌
 
@@ -222,6 +226,10 @@ These files are PG-specific or fork-unique and must **never** be overwritten by 
 - `internal/repository/usage_apikey_summary.go` — API key summary accumulator (fork-unique)
 - `CLAUDE.md` — This file, with PG-specific documentation
 - `.github/workflows/ci.yml` — PostgreSQL service container config
+
+**Backend (fork-modified — checkout upstream then re-apply our parts, never blindly overwrite):**
+- `internal/config/config.go` — Adds 5 HTTP/shutdown timeout fields (`HTTPReadHeaderTimeout`, `HTTPReadTimeout`, `HTTPWriteTimeout`, `HTTPIdleTimeout`, `ShutdownTimeout`), their `*Default` constants, and `Load()` parsing + positive validation (commit `e0817a6`). Step 3's `git checkout upstream/main -- internal/config/` overwrites this — re-apply after checkout. See Step 4.5 #16.
+- `internal/app/app.go` — Graceful shutdown: `serveUntilShutdown`/`notifyShutdown`/`buildHTTPServer`, `stopBackgroundTasks` split into `cancelBackground`+`waitBackground`, `httpServer`+`shutdownSignal` fields, defensive `httpServer.Shutdown` in `Close()`, imports `os`/`os/signal`/`syscall` (commit `e0817a6`). Upstream blocks on plain `ListenAndServe`. Not in Step 3's checkout list (usually safe); never do a broad `git checkout upstream/main -- internal/app/`. See Step 4.5 #15.
 
 **Frontend (fork-unique components):**
 - `web/src/components/ui/Combobox.tsx` / `Combobox.module.scss` — Our custom Combobox (dropdown + free-text input)
