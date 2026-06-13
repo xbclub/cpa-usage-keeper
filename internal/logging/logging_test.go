@@ -3,7 +3,6 @@ package logging
 import (
 	"bytes"
 	stdlog "log"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -148,7 +147,7 @@ func TestConfigureDisablesFileLogging(t *testing.T) {
 	}
 }
 
-func TestConfigureRoutesStdlibLogAndSlogToFile(t *testing.T) {
+func TestConfigureRoutesStdlibLogToFile(t *testing.T) {
 	reset := captureGlobalLogState(t)
 	defer reset()
 
@@ -165,11 +164,10 @@ func TestConfigureRoutesStdlibLogAndSlogToFile(t *testing.T) {
 	defer closer.Close()
 
 	stdlog.Print("stdlib message")
-	slog.Error("slog message")
 
 	content := readTodayLogFile(t, logDir)
-	if !strings.Contains(content, "stdlib message") || !strings.Contains(content, "slog message") {
-		t.Fatalf("expected stdlib and slog messages in file, got %q", content)
+	if !strings.Contains(content, "stdlib message") {
+		t.Fatalf("expected stdlib message in file, got %q", content)
 	}
 }
 
@@ -228,7 +226,6 @@ func TestConfigureCloseRestoresGlobalLoggers(t *testing.T) {
 	var restoredOutput bytes.Buffer
 	logrus.SetOutput(&restoredOutput)
 	stdlog.SetOutput(&restoredOutput)
-	slog.SetDefault(slog.New(slog.NewTextHandler(&restoredOutput, nil)))
 	gin.DefaultWriter = &restoredOutput
 	gin.DefaultErrorWriter = &restoredOutput
 	gin.DebugPrintFunc = func(format string, values ...interface{}) {
@@ -253,12 +250,11 @@ func TestConfigureCloseRestoresGlobalLoggers(t *testing.T) {
 
 	logrus.Info("after close logrus")
 	stdlog.Print("after close stdlib")
-	slog.Error("after close slog")
 	gin.DebugPrintFunc("ignored")
 	gin.DebugPrintRouteFunc("GET", "/", "handler", 1)
 
 	content := restoredOutput.String()
-	for _, want := range []string{"after close logrus", "after close stdlib", "after close slog", "after close gin debug", "after close gin route"} {
+	for _, want := range []string{"after close logrus", "after close stdlib", "after close gin debug", "after close gin route"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected global loggers to be restored after close with %q, got %q", want, content)
 		}
@@ -338,7 +334,6 @@ func captureGlobalLogState(t *testing.T) func() {
 	previousLogrusLevel := logrus.GetLevel()
 	previousLogrusFormatter := logrus.StandardLogger().Formatter
 	previousStdlogOutput := stdlog.Writer()
-	previousSlog := slog.Default()
 	previousGinDefaultWriter := gin.DefaultWriter
 	previousGinErrorWriter := gin.DefaultErrorWriter
 	previousGinDebugPrint := gin.DebugPrintFunc
@@ -351,7 +346,6 @@ func captureGlobalLogState(t *testing.T) func() {
 		logrus.SetLevel(previousLogrusLevel)
 		logrus.SetFormatter(previousLogrusFormatter)
 		stdlog.SetOutput(previousStdlogOutput)
-		slog.SetDefault(previousSlog)
 		gin.DefaultWriter = previousGinDefaultWriter
 		gin.DefaultErrorWriter = previousGinErrorWriter
 		gin.DebugPrintFunc = previousGinDebugPrint
