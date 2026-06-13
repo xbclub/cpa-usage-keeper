@@ -18,6 +18,7 @@ var configEnvKeys = []string{
 	"DATABASE_URL",
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TZ", "TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT", "QUOTA_AUTO_REFRESH_ENABLED", "QUOTA_AUTO_REFRESH_INTERVAL",
+	"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
 }
 
 func TestMain(m *testing.M) {
@@ -154,6 +155,85 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	}
 	if cfg.LogRetentionDays != 7 {
 		t.Fatalf("expected default log retention 7 days, got %d", cfg.LogRetentionDays)
+	}
+	if cfg.HTTPReadHeaderTimeout != HTTPReadHeaderTimeoutDefault {
+		t.Fatalf("expected default http read header timeout %s, got %s", HTTPReadHeaderTimeoutDefault, cfg.HTTPReadHeaderTimeout)
+	}
+	if cfg.HTTPReadTimeout != HTTPReadTimeoutDefault {
+		t.Fatalf("expected default http read timeout %s, got %s", HTTPReadTimeoutDefault, cfg.HTTPReadTimeout)
+	}
+	if cfg.HTTPWriteTimeout != HTTPWriteTimeoutDefault {
+		t.Fatalf("expected default http write timeout %s, got %s", HTTPWriteTimeoutDefault, cfg.HTTPWriteTimeout)
+	}
+	if cfg.HTTPIdleTimeout != HTTPIdleTimeoutDefault {
+		t.Fatalf("expected default http idle timeout %s, got %s", HTTPIdleTimeoutDefault, cfg.HTTPIdleTimeout)
+	}
+	if cfg.ShutdownTimeout != ShutdownTimeoutDefault {
+		t.Fatalf("expected default shutdown timeout %s, got %s", ShutdownTimeoutDefault, cfg.ShutdownTimeout)
+	}
+}
+
+func TestLoadFromEnvHTTPAndShutdownTimeouts(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	env := map[string]string{
+		"CPA_BASE_URL":             "https://cpa.example.com",
+		"CPA_MANAGEMENT_KEY":       "secret",
+		"HTTP_READ_HEADER_TIMEOUT": "12s",
+		"HTTP_READ_TIMEOUT":        "40s",
+		"HTTP_WRITE_TIMEOUT":       "60s",
+		"HTTP_IDLE_TIMEOUT":        "90s",
+		"SHUTDOWN_TIMEOUT":         "15s",
+	}
+	for key, value := range env {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("set env %s: %v", key, err)
+		}
+		t.Cleanup(func() { _ = os.Unsetenv(key) })
+	}
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.HTTPReadHeaderTimeout != 12*time.Second {
+		t.Fatalf("expected http read header timeout 12s, got %s", cfg.HTTPReadHeaderTimeout)
+	}
+	if cfg.HTTPReadTimeout != 40*time.Second {
+		t.Fatalf("expected http read timeout 40s, got %s", cfg.HTTPReadTimeout)
+	}
+	if cfg.HTTPWriteTimeout != 60*time.Second {
+		t.Fatalf("expected http write timeout 60s, got %s", cfg.HTTPWriteTimeout)
+	}
+	if cfg.HTTPIdleTimeout != 90*time.Second {
+		t.Fatalf("expected http idle timeout 90s, got %s", cfg.HTTPIdleTimeout)
+	}
+	if cfg.ShutdownTimeout != 15*time.Second {
+		t.Fatalf("expected shutdown timeout 15s, got %s", cfg.ShutdownTimeout)
+	}
+}
+
+func TestLoadRejectsNonPositiveHTTPTimeouts(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	if err := os.Setenv("CPA_BASE_URL", "https://cpa.example.com"); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("CPA_BASE_URL") })
+	if err := os.Setenv("CPA_MANAGEMENT_KEY", "secret"); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("CPA_MANAGEMENT_KEY") })
+
+	cases := []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT"}
+	for _, key := range cases {
+		if err := os.Setenv(key, "0s"); err != nil {
+			t.Fatalf("set env %s: %v", key, err)
+		}
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatalf("expected LoadFromEnv to reject non-positive %s", key)
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset env %s: %v", key, err)
+		}
 	}
 }
 

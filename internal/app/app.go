@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"cpa-usage-keeper/internal/api"
@@ -46,22 +49,27 @@ type QuotaRunner interface {
 }
 
 type App struct {
-	Config            *config.Config
-	DB                *gorm.DB
-	Router            *gin.Engine
-	Poller            StatusProvider
-	RedisIngest       Runner
-	RedisProcess      Runner
-	Maintenance       *StorageCleanupRunner
-	MetadataSync      *MetadataSyncRunner
-	QuotaService      QuotaRunner
-	QuotaAutoRefresh  QuotaRunner
-	RecentUsageCache  *repository.UsageRecentEventCache
-	LogCloser         io.Closer
+	Config           *config.Config
+	DB               *gorm.DB
+	Router           *gin.Engine
+	Poller           StatusProvider
+	RedisIngest      Runner
+	RedisProcess     Runner
+	Maintenance      *StorageCleanupRunner
+	MetadataSync     *MetadataSyncRunner
+	QuotaService     QuotaRunner
+	QuotaAutoRefresh QuotaRunner
+	RecentUsageCache *repository.UsageRecentEventCache
+	LogCloser        io.Closer
 
 	backgroundCancel context.CancelFunc
 	backgroundWG     sync.WaitGroup
 	ownedDB          bool // true when App opened the DB and should close it
+
+	// httpServer 是运行中的 HTTP 服务实例，供优雅停机时调用 Shutdown。
+	httpServer *http.Server
+	// shutdownSignal 为 nil 时使用真实 SIGINT/SIGTERM；测试可注入受控 channel。
+	shutdownSignal chan os.Signal
 }
 
 // newUsageRecentEventCache 是最近事件缓存构造入口，测试可替换它来覆盖缓存初始化失败路径。
@@ -142,8 +150,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 			TLS:           cfg.RedisQueueTLS,
 			TLSSkipVerify: cfg.TLSSkipVerify,
 		}),
-		RedisQueueKey:      cfg.RedisQueueKey,
-		RecentUsageEvents:  recentUsageCache,
+		RedisQueueKey:     cfg.RedisQueueKey,
+		RecentUsageEvents: recentUsageCache,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
@@ -207,14 +215,14 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		DB:     db,
 		Poller: backgroundPoller,
 		// Redis ingest/process 分成两个后台 runner，避免远端订阅拉取和本地数据处理互相等待。
-		RedisIngest:       redisIngestRunner,
-		RedisProcess:      redisProcessRunner,
-		Maintenance:       NewStorageCleanupRunner(syncService),
-		MetadataSync:      metadataSyncRunner,
-		QuotaService:      quotaService,
-		QuotaAutoRefresh:  quotaAutoRefreshService(cfg, quotaService),
-		RecentUsageCache:  recentUsageCache,
-		LogCloser:         logCloser,
+		RedisIngest:      redisIngestRunner,
+		RedisProcess:     redisProcessRunner,
+		Maintenance:      NewStorageCleanupRunner(syncService),
+		MetadataSync:     metadataSyncRunner,
+		QuotaService:     quotaService,
+		QuotaAutoRefresh: quotaAutoRefreshService(cfg, quotaService),
+		RecentUsageCache: recentUsageCache,
+		LogCloser:        logCloser,
 		Router: api.NewRouter(
 			webui.Static,
 			backgroundPoller,
@@ -267,6 +275,16 @@ func closeGormDB(db *gorm.DB) error {
 func (a *App) Close() error {
 	if a == nil {
 		return nil
+	}
+
+	// 兜底关闭 HTTP 服务：正常停机路径下 Run() 已调用过 Shutdown（幂等，立即返回）；
+	// 这里覆盖未走信号路径（如启动失败）就调用 Close 的场景。
+	if a.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := a.httpServer.Shutdown(ctx); err != nil {
+			logrus.WithError(err).Warn("http server shutdown during close")
+		}
+		cancel()
 	}
 
 	a.stopBackgroundTasks()
@@ -335,14 +353,71 @@ func (a *App) Run() error {
 			}
 		})
 	}
-	server := &http.Server{
-		Addr:    ":" + a.Config.AppPort,
-		Handler: a.Router,
+	a.httpServer = a.buildHTTPServer()
+	return a.serveUntilShutdown(a.httpServer)
+}
+
+// defaultShutdownSignals 是触发优雅停机的信号集合。
+var defaultShutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+// buildHTTPServer 用配置好的超时构造 HTTP 服务实例。
+func (a *App) buildHTTPServer() *http.Server {
+	return &http.Server{
+		Addr:              ":" + a.Config.AppPort,
+		Handler:           a.Router,
+		ReadHeaderTimeout: a.Config.HTTPReadHeaderTimeout,
+		ReadTimeout:       a.Config.HTTPReadTimeout,
+		WriteTimeout:      a.Config.HTTPWriteTimeout,
+		IdleTimeout:       a.Config.HTTPIdleTimeout,
 	}
-	if a.Config.TLSEnabled {
-		return server.ListenAndServeTLS(a.Config.TLSCertFile, a.Config.TLSKeyFile)
+}
+
+// serveUntilShutdown 在后台启动 HTTP 服务，并阻塞等待服务出错或收到停机信号。
+// 收到信号时先取消后台 runner（数据写入路径优先收尾），再排空在途 HTTP 请求。
+func (a *App) serveUntilShutdown(server *http.Server) error {
+	serverErr := make(chan error, 1)
+	go func() {
+		if a.Config.TLSEnabled {
+			serverErr <- server.ListenAndServeTLS(a.Config.TLSCertFile, a.Config.TLSKeyFile)
+		} else {
+			serverErr <- server.ListenAndServe()
+		}
+	}()
+
+	sigCh := a.notifyShutdown()
+	defer signal.Stop(sigCh) // 注销信号注册，避免在测试中累积
+
+	select {
+	case err := <-serverErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			// 外部已调用 Shutdown，视为正常退出。
+			return nil
+		}
+		// 如 invalid port：保留错误返回路径，Run 顶部的 defer 会取消后台任务。
+		return err
+	case <-sigCh:
+		logrus.Info("shutdown signal received, draining background runners and http server")
+		// 先取消后台 runner，让 Redis→inbox→usage_events 的当前批次在 HTTP 排空窗口内完成。
+		a.cancelBackground()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.Config.ShutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logrus.WithError(err).Error("http server shutdown exceeded grace period")
+		}
+		logrus.Info("shutdown complete")
+		return nil
 	}
-	return server.ListenAndServe()
+	// Run 顶部的 defer stopBackgroundTasks() 负责回收 runner：cancel 幂等无操作 + Wait。
+}
+
+// notifyShutdown 返回停机信号 channel；shutdownSignal 非 nil 时用注入值（测试用）。
+func (a *App) notifyShutdown() chan os.Signal {
+	if a.shutdownSignal != nil {
+		return a.shutdownSignal
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, defaultShutdownSignals...)
+	return ch
 }
 
 func (a *App) startBackgroundContext() context.Context {
@@ -360,9 +435,19 @@ func (a *App) startBackgroundTask(run func()) {
 }
 
 func (a *App) stopBackgroundTasks() {
+	a.cancelBackground()
+	a.waitBackground()
+}
+
+// cancelBackground 取消后台 context，通知所有 runner 收尾。幂等。
+func (a *App) cancelBackground() {
 	if a.backgroundCancel != nil {
 		a.backgroundCancel()
 		a.backgroundCancel = nil
 	}
+}
+
+// waitBackground 阻塞等待所有后台 runner 退出。
+func (a *App) waitBackground() {
 	a.backgroundWG.Wait()
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -385,9 +386,9 @@ func TestRunCancelsBackgroundTasksWhenRouterStops(t *testing.T) {
 	ingestCanceled := make(chan struct{})
 	ingestRunner := &appCancelRecorder{started: ingestStarted, canceled: ingestCanceled}
 	app := &App{
-		Config:       &cfg,
-		Router:       gin.New(),
-		RedisIngest:  ingestRunner,
+		Config:      &cfg,
+		Router:      gin.New(),
+		RedisIngest: ingestRunner,
 	}
 
 	if err := app.Run(); err == nil {
@@ -529,4 +530,136 @@ func testAppConfig(t *testing.T) config.Config {
 		LogFileEnabled:          false,
 		LogRetentionDays:        7,
 	}
+}
+
+func TestBuildHTTPServerAppliesConfiguredTimeouts(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.HTTPReadHeaderTimeout = 11 * time.Second
+	cfg.HTTPReadTimeout = 21 * time.Second
+	cfg.HTTPWriteTimeout = 31 * time.Second
+	cfg.HTTPIdleTimeout = 41 * time.Second
+	app := &App{Config: &cfg, Router: gin.New()}
+
+	server := app.buildHTTPServer()
+
+	if server.Addr != ":"+cfg.AppPort {
+		t.Fatalf("expected addr :%s, got %s", cfg.AppPort, server.Addr)
+	}
+	if server.ReadHeaderTimeout != 11*time.Second {
+		t.Fatalf("expected read header timeout 11s, got %s", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout != 21*time.Second {
+		t.Fatalf("expected read timeout 21s, got %s", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 31*time.Second {
+		t.Fatalf("expected write timeout 31s, got %s", server.WriteTimeout)
+	}
+	if server.IdleTimeout != 41*time.Second {
+		t.Fatalf("expected idle timeout 41s, got %s", server.IdleTimeout)
+	}
+}
+
+func TestRunGracefulShutdownOnSignal(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.AppPort = freePort(t)
+	cfg.ShutdownTimeout = 2 * time.Second
+	cfg.HTTPReadHeaderTimeout = 5 * time.Second
+	cfg.HTTPReadTimeout = 5 * time.Second
+	cfg.HTTPWriteTimeout = 5 * time.Second
+	cfg.HTTPIdleTimeout = 5 * time.Second
+
+	sigCh := make(chan os.Signal, 1)
+	app := &App{Config: &cfg, Router: gin.New(), shutdownSignal: sigCh}
+
+	done := make(chan error, 1)
+	go func() { done <- app.Run() }()
+
+	waitForServerUp(t, net.JoinHostPort("127.0.0.1", cfg.AppPort), 2*time.Second)
+	sigCh <- os.Interrupt
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected Run to return nil on graceful shutdown, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected Run to return after shutdown signal")
+	}
+}
+
+func TestRunCancelsBackgroundBeforeReturningOnSignal(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.AppPort = freePort(t)
+	cfg.ShutdownTimeout = 2 * time.Second
+	cfg.HTTPReadHeaderTimeout = 5 * time.Second
+	cfg.HTTPReadTimeout = 5 * time.Second
+	cfg.HTTPWriteTimeout = 5 * time.Second
+	cfg.HTTPIdleTimeout = 5 * time.Second
+
+	ingestStarted := make(chan struct{})
+	ingestCanceled := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	app := &App{
+		Config:         &cfg,
+		Router:         gin.New(),
+		RedisIngest:    &appCancelRecorder{started: ingestStarted, canceled: ingestCanceled},
+		shutdownSignal: sigCh,
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- app.Run() }()
+
+	select {
+	case <-ingestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected redis ingest runner to start")
+	}
+	waitForServerUp(t, net.JoinHostPort("127.0.0.1", cfg.AppPort), 2*time.Second)
+	sigCh <- os.Interrupt
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected Run to return nil on graceful shutdown, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected Run to return after shutdown signal")
+	}
+
+	// stopBackgroundTasks 必须在 Run 返回前 Wait 完 runner，因此 canceled 此时已关闭。
+	select {
+	case <-ingestCanceled:
+	default:
+		t.Fatal("expected redis ingest runner context to be canceled before Run returned")
+	}
+}
+
+// freePort 申请一个空闲 TCP 端口供测试绑定，返回端口号字符串。
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate free port: %v", err)
+	}
+	defer ln.Close()
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	return port
+}
+
+// waitForServerUp 轮询 TCP 拨号直到端口可连，确认 HTTP 服务已开始监听。
+func waitForServerUp(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("server at %s did not come up within %s", addr, timeout)
 }

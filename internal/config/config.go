@@ -23,6 +23,17 @@ const (
 	QuotaAutoRefreshIntervalMin     = 60 * time.Second
 	QuotaRefreshWorkerLimitDefault  = 10
 	QuotaRefreshWorkerLimitMax      = 100
+
+	// HTTPReadHeaderTimeoutDefault 是读取请求头的超时，也是防御 Slowloris 慢速头攻击的关键上限。
+	HTTPReadHeaderTimeoutDefault = 10 * time.Second
+	// HTTPReadTimeoutDefault 是读取完整请求（含 body）的超时。
+	HTTPReadTimeoutDefault = 30 * time.Second
+	// HTTPWriteTimeoutDefault 是写回响应的超时；数据量大的聚合/分析查询可能需要调大。
+	HTTPWriteTimeoutDefault = 30 * time.Second
+	// HTTPIdleTimeoutDefault 是 keep-alive 空闲连接的最长存活时间。
+	HTTPIdleTimeoutDefault = 120 * time.Second
+	// ShutdownTimeoutDefault 是收到 SIGINT/SIGTERM 后优雅停机的总时限（HTTP 排空 + 后台 runner 收尾）。
+	ShutdownTimeoutDefault = 10 * time.Second
 )
 
 var (
@@ -88,6 +99,16 @@ type Config struct {
 	LoginPassword string
 	// AuthSessionTTL 是登录 session 有效时长。
 	AuthSessionTTL time.Duration
+	// HTTPReadHeaderTimeout 限制读取请求头的最长时间，防御 Slowloris 慢速头攻击。
+	HTTPReadHeaderTimeout time.Duration
+	// HTTPReadTimeout 限制读取完整请求（含 body）的最长时间。
+	HTTPReadTimeout time.Duration
+	// HTTPWriteTimeout 限制写回响应的最长时间；重型聚合/分析查询可能需要调大。
+	HTTPWriteTimeout time.Duration
+	// HTTPIdleTimeout 限制 keep-alive 空闲连接的最长存活时间。
+	HTTPIdleTimeout time.Duration
+	// ShutdownTimeout 是收到 SIGINT/SIGTERM 后优雅停机的总时限。
+	ShutdownTimeout time.Duration
 }
 
 type LoadOptions struct {
@@ -161,6 +182,42 @@ func Load(options LoadOptions) (*Config, error) {
 	requestTimeout, err := getDuration("REQUEST_TIMEOUT", 30*time.Second)
 	if err != nil {
 		return nil, err
+	}
+
+	httpReadHeaderTimeout, err := getDuration("HTTP_READ_HEADER_TIMEOUT", HTTPReadHeaderTimeoutDefault)
+	if err != nil {
+		return nil, err
+	}
+	if httpReadHeaderTimeout <= 0 {
+		return nil, fmt.Errorf("HTTP_READ_HEADER_TIMEOUT must be positive")
+	}
+	httpReadTimeout, err := getDuration("HTTP_READ_TIMEOUT", HTTPReadTimeoutDefault)
+	if err != nil {
+		return nil, err
+	}
+	if httpReadTimeout <= 0 {
+		return nil, fmt.Errorf("HTTP_READ_TIMEOUT must be positive")
+	}
+	httpWriteTimeout, err := getDuration("HTTP_WRITE_TIMEOUT", HTTPWriteTimeoutDefault)
+	if err != nil {
+		return nil, err
+	}
+	if httpWriteTimeout <= 0 {
+		return nil, fmt.Errorf("HTTP_WRITE_TIMEOUT must be positive")
+	}
+	httpIdleTimeout, err := getDuration("HTTP_IDLE_TIMEOUT", HTTPIdleTimeoutDefault)
+	if err != nil {
+		return nil, err
+	}
+	if httpIdleTimeout <= 0 {
+		return nil, fmt.Errorf("HTTP_IDLE_TIMEOUT must be positive")
+	}
+	shutdownTimeout, err := getDuration("SHUTDOWN_TIMEOUT", ShutdownTimeoutDefault)
+	if err != nil {
+		return nil, err
+	}
+	if shutdownTimeout <= 0 {
+		return nil, fmt.Errorf("SHUTDOWN_TIMEOUT must be positive")
 	}
 
 	logFileEnabled, err := getBool("LOG_FILE_ENABLED", true)
@@ -238,6 +295,11 @@ func Load(options LoadOptions) (*Config, error) {
 		AuthEnabled:              authEnabled,
 		LoginPassword:            strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
 		AuthSessionTTL:           authSessionTTL,
+		HTTPReadHeaderTimeout:    httpReadHeaderTimeout,
+		HTTPReadTimeout:          httpReadTimeout,
+		HTTPWriteTimeout:         httpWriteTimeout,
+		HTTPIdleTimeout:          httpIdleTimeout,
+		ShutdownTimeout:          shutdownTimeout,
 	}
 	if cfg.CPABaseURL == "" {
 		return nil, fmt.Errorf("CPA_BASE_URL is required")
