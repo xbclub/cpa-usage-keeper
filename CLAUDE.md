@@ -209,19 +209,22 @@ These are concrete mistakes made during merges that caused production issues. **
 
 8. **Test with the actual parameter before declaring done.** The model filter looked correct in code but returned 500 on production because health stats query hit a missing column. **Run `curl` with the actual query parameters** (including model filter) against the running server before marking complete.
 
-### Step 4.7: Known test-package sync debt ⚠️ (as of 2026-06-13)
+### Step 4.7: Upstream test sync status (done 2026-06-13) + 2 remaining divergences ⚠️
 
-The fork synced upstream's overview-aggregation production refactor (commits like "Remove legacy usage snapshot path", "refactor: centralize usage cost calculation", "Add cached overview realtime backend") but **did not sync the corresponding test updates**. Result: `go test ./internal/api/ ./internal/repository/` does not compile. Specifically these test files are stale vs `upstream/main`:
+The fork had synced upstream's overview-aggregation production refactor but not the test updates, so `internal/api` + `internal/repository` test packages didn't compile. **Resolved** (commits `3bd2879`, `649ea6b`): synced the stale test files from `upstream/main` + PG-adapted:
+- `usage_filter_test.go`, `usage_events_test.go`, `usage_recent_event_cache_test.go`: PG-adapted `OpenDatabase(config.Config{SQLitePath})` → `testutil.OpenTestDatabase` (36 sites); removed the undefined `closeTestDatabase` calls (`testutil.OpenTestDatabase` cleans up via `t.Cleanup`); dropped now-unused `config`/`path/filepath` imports.
+- `api/usage_overview_test.go`: brought upstream's realtime/key-overview tests; re-applied fork-unique `ListOverviewModels` on the stub and allowed the fork-unique `api_key_summary` response field.
+- `usage.go`: `isMissingUsageEventsTableError` now also matches PostgreSQL's "does not exist" (SQLSTATE 42P01) so the stats-only analysis path degrades gracefully (was SQLite/MySQL-only).
 
-- `internal/repository/usage_filter_test.go` — references removed API (`latestHourlySeriesStart`, `loadUsageOverviewBoundaryEventsWithFilter`, `loadUsageOverviewEventsWithFilter`, `UsageOverviewRecord.HourlySeries`/`DailySeries`); upstream's version is current (~1098 lines ahead).
-- `internal/repository/usage_events_test.go` — uses removed `UsageQueryFilter.Source` (upstream renamed the test to `...AuthIndexAndResultFilters`).
-- `internal/api/usage_overview_test.go` — stale fixtures (`StatisticsSnapshot.RequestsByHour`/`TokensByHour`, `UsageOverviewSeries.InputTokens` etc.); upstream's version has the realtime/key-overview tests the fork lacks.
+`internal/api` passes fully; `internal/repository` passes **except 2 fork/upstream production-code divergences** (not test rot — each needs fork-overview-architecture review):
+1. `TestBuildUsageOverviewWithFilterReusesBoundaryEventsForHealth` — fork's `usage.go` boundary-events path issues **4 queries** where upstream expects **2** (the boundary-event-reuse optimization). Decide whether the extra queries are intentional (recent-cache/PG path) or a regression.
+2. `TestRepositoryQueriesAvoidKnownFullEntityReads` — fork's `usage.go` lacks `Select(usageEventProjectionColumns).Order("timestamp asc")` that this guardrail demands. Decide whether the fork's boundary read uses a valid alternative projection or regressed to full-entity reads.
 
-**Fix = sync from upstream + PG-adapt** (do this with PostgreSQL running so tests execute):
-1. `git checkout upstream/main -- internal/repository/usage_filter_test.go internal/repository/usage_events_test.go internal/api/usage_overview_test.go`
-2. PG-adapt each: replace `db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "x.db")})` + its `if err != nil` block with `db := testutil.OpenTestDatabase(t)` (~36 sites total).
-3. `closeTestDatabase` is **undefined in the fork** (it lived in upstream's `db_test.go`, which the fork's PG-adapt removed) but is referenced in these files AND in `internal/repository/usage_recent_event_cache_test.go`. Remove all `closeTestDatabase(t, db)` calls — `testutil.OpenTestDatabase` already drops the schema + closes via `t.Cleanup`. Fix imports (drop `config`/`path/filepath`, add `internal/testutil`).
-4. Re-apply fork-unique: the fork's `service.UsageProvider` has `ListOverviewModels` (upstream's does not) — add a no-op `ListOverviewModels` to every `UsageProvider` stub the checkout brings (see Step 4.5 #5).
+**Do NOT blindly `git checkout upstream/main -- internal/repository/usage.go` to fix these** — it carries fork-unique logic (recent-event cache, API-key-summary accumulator, model filter, PG adaptations). Investigate the boundary-events query path specifically.
+
+### Step 4.8: PG test-isolation caveat
+
+`testutil.OpenTestDatabase` does `CREATE SCHEMA` + `SET search_path` (session-scoped) + `AutoMigrate`. GORM pools connections, so a query landing on a non-`search_path`'d pooled connection won't see the test schema. In practice the fork's sequential tests rarely hit this, but if a test fails with `relation "..." does not exist` intermittently, the fix is to pin the test pool (`sqlDB.SetMaxOpenConns(1)`) or set `search_path` via the DSN `options`.
 
 ### Step 5: Adapt SQLite→PG Files
 
