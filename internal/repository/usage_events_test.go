@@ -1,17 +1,22 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/repository/dto"
-	"cpa-usage-keeper/internal/testutil"
 )
 
 func TestListUsageEventsWithFilterAppliesTimeBoundsAndPagination(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", TotalTokens: 10},
@@ -51,7 +56,11 @@ func TestListUsageEventsWithFilterFindsProjectTimezoneStorageTimestamp(t *testin
 	time.Local = location
 	t.Cleanup(func() { time.Local = previousLocal })
 
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-project-tz.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 
 	eventTime := time.Date(2026, 5, 12, 21, 59, 18, 353569620, location)
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "event-project-tz", Model: "claude-sonnet", Timestamp: eventTime, TotalTokens: 10}}); err != nil {
@@ -70,7 +79,11 @@ func TestListUsageEventsWithFilterFindsProjectTimezoneStorageTimestamp(t *testin
 }
 
 func TestListUsageEventsWithFilterPagesByTimestampAndID(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-pages.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	timestamp := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: timestamp, Source: "source-a", AuthIndex: "1", TotalTokens: 10},
@@ -100,8 +113,12 @@ func TestListUsageEventsWithFilterPagesByTimestampAndID(t *testing.T) {
 	}
 }
 
-func TestListUsageEventsWithFilterAppliesModelSourceAndResultFilters(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+func TestListUsageEventsWithFilterAppliesModelAuthIndexAndResultFilters(t *testing.T) {
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-filtered.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-a", Failed: false, TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-a", Failed: true, TotalTokens: 20},
@@ -125,7 +142,11 @@ func TestListUsageEventsWithFilterAppliesModelSourceAndResultFilters(t *testing.
 }
 
 func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-cost.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                   "claude-sonnet",
 		PricingStyle:            entities.ModelPricingStyleClaude,
@@ -166,7 +187,11 @@ func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
 }
 
 func TestListUsageEventsWithFilterMarksCostUnavailableWhenPriceMissing(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-missing-cost.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "event-missing-cost",
 		APIGroupKey: "provider-a",
@@ -188,7 +213,11 @@ func TestListUsageEventsWithFilterMarksCostUnavailableWhenPriceMissing(t *testin
 }
 
 func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-auth-filter.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "auth-1", AuthIndex: "auth-1", TotalTokens: 10},
 		{EventKey: "event-2", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-alias", AuthIndex: "auth-1", TotalTokens: 20},
@@ -199,7 +228,7 @@ func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Source: "auth-1", AuthIndex: "auth-1", Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthIndex: "auth-1", Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -214,7 +243,11 @@ func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
 }
 
 func TestListUsageEventFilterOptionsWithFilterReturnsStableModels(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-filter-options.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-b", Failed: true, TotalTokens: 20},

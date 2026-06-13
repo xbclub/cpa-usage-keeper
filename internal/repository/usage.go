@@ -447,7 +447,9 @@ func isMissingUsageEventsTableError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "usage_events") && (strings.Contains(message, "no such table") || strings.Contains(message, "doesn't exist"))
+	// "no such table"/"doesn't exist" 覆盖 SQLite/MySQL；"does not exist" 覆盖 PostgreSQL 的
+	// `relation "usage_events" does not exist (SQLSTATE 42P01)`。
+	return strings.Contains(message, "usage_events") && (strings.Contains(message, "no such table") || strings.Contains(message, "doesn't exist") || strings.Contains(message, "does not exist"))
 }
 
 func buildAnalysisLatencyDiagnostics(ttftValues, latencyValues []int64) dto.AnalysisLatencyDiagnosticsRecord {
