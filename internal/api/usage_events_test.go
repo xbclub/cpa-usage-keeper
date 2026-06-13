@@ -26,6 +26,14 @@ func (s *usageEventsStub) GetUsageOverview(context.Context, servicedto.UsageFilt
 	return nil, nil
 }
 
+func (s *usageEventsStub) GetUsageOverviewRealtime(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
+	return nil, nil
+}
+
+func (s *usageEventsStub) ListOverviewModels(context.Context, servicedto.UsageFilter) ([]string, error) {
+	return nil, nil
+}
+
 func (s *usageEventsStub) ListUsageEvents(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	s.lastFilter = filter
 	s.filterCalls++

@@ -46,6 +46,14 @@ func (s *usageAnalysisStub) GetUsageOverview(context.Context, servicedto.UsageFi
 	return nil, nil
 }
 
+func (s *usageAnalysisStub) GetUsageOverviewRealtime(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
+	return nil, nil
+}
+
+func (s *usageAnalysisStub) ListOverviewModels(context.Context, servicedto.UsageFilter) ([]string, error) {
+	return nil, nil
+}
+
 func (s *usageAnalysisStub) ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	return nil, nil
 }
