@@ -83,6 +83,7 @@ Single-page app with login page and usage dashboard. Uses Zustand for state, i18
 - **Field redaction at API level** — sensitive data masked in responses, not at storage layer
 - **Code comments are in Chinese** — domain terms and inline docs use Chinese alongside English identifiers
 - **No backup runner** — PostgreSQL backup should be handled externally (pg_dump, cloud snapshots, etc.)
+- **Logging via logrus only** — the fork uses logrus uniformly; `log/slog` is not used. When merging upstream `internal/api/` (Step 3 checks it out), convert any `slog` calls back to logrus (e.g., `slog.Error(msg,"error",err)` → `logrus.WithError(err).Error(msg)`). See commit `b4e4fa1`.
 
 ## Configuration
 
