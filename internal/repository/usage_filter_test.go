@@ -3,16 +3,15 @@ package repository
 import (
 	"context"
 	"math"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
@@ -56,11 +55,7 @@ func loadUsageOverviewOracleEventsForTest(db *gorm.DB, filter dto.UsageQueryFilt
 func TestBuildUsageOverviewWithFilterRequiresResolvedTimeRange(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-requires-time-range.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "4h"}); err == nil || !strings.Contains(err.Error(), "requires start_time and end_time") {
 		t.Fatalf("expected missing resolved time range error, got %v", err)
@@ -70,11 +65,7 @@ func TestBuildUsageOverviewWithFilterRequiresResolvedTimeRange(t *testing.T) {
 func TestBuildUsageOverviewWithFilterDoesNotRunAggregationCatchup(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-no-query-catchup.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 10, 0, 0, time.UTC), InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
@@ -101,11 +92,7 @@ func TestBuildUsageOverviewWithFilterDoesNotRunAggregationCatchup(t *testing.T) 
 func TestLoadUsageOverviewRawEventWindowsUsesSeparateRangeQueries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-boundary-sql.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 12, 40, 0, 0, time.UTC)
@@ -140,11 +127,7 @@ func TestLoadUsageOverviewRawEventWindowsUsesSeparateRangeQueries(t *testing.T) 
 func TestBuildUsageOverviewWithFilterIncludesHealthBoundaryInsideFullHour(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-health-inner-boundary.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 	for start.Truncate(usageOverviewHealthPresetSpan).Equal(start) {
@@ -178,11 +161,7 @@ func TestBuildUsageOverviewWithFilterIncludesHealthBoundaryInsideFullHour(t *tes
 func TestBuildUsageOverviewWithFilterIncludesEndBoundaryWhenNoFullHour(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-end-boundary-no-full-hour.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 9, 40, 0, 0, time.UTC)
@@ -204,11 +183,7 @@ func TestBuildUsageOverviewWithFilterIncludesEndBoundaryWhenNoFullHour(t *testin
 func TestBuildUsageOverviewWithFilterReusesBoundaryEventsForHealth(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-reuse-boundaries.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 12, 40, 0, 0, time.UTC)
@@ -261,11 +236,7 @@ func TestBuildUsageOverviewWithFilterKeepsRawEventQueriesAtBoundaries(t *testing
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-boundary-sql.db")})
-			if err != nil {
-				t.Fatalf("OpenDatabase returned error: %v", err)
-			}
-			closeTestDatabase(t, db)
+			db := testutil.OpenTestDatabase(t)
 
 			filter := dto.UsageQueryFilter{Range: tc.rangeValue, StartTime: &tc.start, EndTime: &tc.end}
 			var ranges []usageEventQueryRange
@@ -328,11 +299,7 @@ func usageEventQueryTime(value any) (time.Time, bool) {
 func TestBuildUsageOverviewWithFilterUsesStatsForFullHoursAndRawEventsForBoundaries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-stats-backed.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -400,11 +367,7 @@ func TestBuildUsageOverviewWithFilterUsesStatsForFullHoursAndRawEventsForBoundar
 func TestBuildUsageOverviewWithFilterKeepsHealthWindowExactAtStatsBoundaries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-health-boundary.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "outside-health-bucket", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 19, 30, 0, time.UTC), Failed: true, TotalTokens: 10},
@@ -444,11 +407,7 @@ func TestBuildUsageOverviewWithFilterKeepsHealthWindowExactAtStatsBoundaries(t *
 func TestBuildUsageOverviewWithFilterKeepsHourlyBucketsWhenShortWindowContainsCompleteDay(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-short-complete-day.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "hour-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 2, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -490,11 +449,7 @@ func TestBuildUsageOverviewWithFilterKeepsHourlyBucketsWhenShortWindowContainsCo
 func TestBuildUsageOverviewWithFilterKeepsHealthTotalsForFullQueryWindow(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-health-totals.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "old-success", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -533,11 +488,7 @@ func TestBuildUsageOverviewWithFilterKeepsHealthTotalsForFullQueryWindow(t *test
 func TestBuildUsageOverviewWithFilterUsesDailyStatsForCompleteDays(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-daily-stats-backed.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -598,11 +549,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyStatsForCompleteDays(t *testing.T)
 func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -791,11 +738,7 @@ func TestBuildUsageOverviewFromEventsBuildsSnapshotAndOverviewInOnePass(t *testi
 }
 
 func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-health-24h.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-success", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 17, 9, 31, 0, 0, time.UTC), Failed: false, TotalTokens: 10},
@@ -905,11 +848,7 @@ func TestBuildUsageOverviewCalculatesClaudeCacheReadAndCreationCost(t *testing.T
 }
 
 func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-partial-pricing.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
@@ -955,11 +894,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 }
 
 func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveNoBillableTokens(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-zero-token-unpriced.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
@@ -1004,11 +939,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 }
 
 func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-no-pricing.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{{
 		EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
@@ -1040,11 +971,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *tes
 func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-preset-window.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	cases := []struct {
 		name            string
@@ -1113,11 +1040,7 @@ func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) 
 
 func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-custom-buckets.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 20, 8, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -1153,11 +1076,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *test
 
 func TestBuildUsageOverviewRealtimeWithFilterBuildsRealtimeBlockFromRecentCache(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-realtime.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "gpt-5", PromptPricePer1M: 1, CompletionPricePer1M: 1, CachePricePer1M: 0.5}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting gpt-5 returned error: %v", err)
@@ -1287,11 +1206,7 @@ func TestBuildUsageOverviewRealtimeWithFilterBuildsRealtimeBlockFromRecentCache(
 
 func TestBuildUsageOverviewRealtimeWithFilterUsesWarmupEventsForSlidingBucketsOnly(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-realtime-warmup.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	windowStart := now.Add(-15 * time.Minute)
@@ -1327,11 +1242,7 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesWarmupEventsForSlidingBucketsOn
 
 func TestBuildUsageOverviewRealtimeWithFilterUsesRecentCacheFallbackLabels(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-realtime-fallback.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	cache := newEmptyUsageRecentEventCache(UsageRecentEventCacheOptions{Now: func() time.Time { return now }})
@@ -1381,11 +1292,7 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesRecentCacheFallbackLabels(t *te
 
 func TestBuildUsageOverviewRealtimeWithFilterFallsBackToDBWhenRecentCacheIsNil(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-realtime-db-fallback.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{{
@@ -1422,11 +1329,7 @@ func TestBuildUsageOverviewRealtimeWithFilterFallsBackToDBWhenRecentCacheIsNil(t
 
 func TestBuildUsageOverviewWithFilterUsesRecentCacheForCoveredBoundaryEvents(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-cache-boundary.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1484,11 +1387,7 @@ func TestBuildUsageOverviewWithFilterUsesRecentCacheForCoveredBoundaryEvents(t *
 
 func TestBuildUsageOverviewWithFilterUsesOpenEndedRecentCacheForCurrentRightBoundary(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-cache-open-right.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 0, 5, 0, time.UTC)
 	start := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
@@ -1523,11 +1422,7 @@ func TestBuildUsageOverviewWithFilterUsesOpenEndedRecentCacheForCurrentRightBoun
 
 func TestBuildUsageOverviewWithFilterUsesBoundedRecentCacheForHistoricalCustomRightBoundary(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-cache-bounded-custom.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1575,11 +1470,7 @@ func TestBuildUsageOverviewWithFilterUsesBoundedRecentCacheForHistoricalCustomRi
 
 func TestBuildUsageOverviewWithFilterClampsFutureCustomEndToQueryNow(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-cache-future-custom.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	queryNow := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1618,11 +1509,7 @@ func TestBuildUsageOverviewWithFilterClampsFutureCustomEndToQueryNow(t *testing.
 
 func TestBuildUsageOverviewWithFilterDoesNotFallbackToDBForEmptyCoveredRightBoundaryCache(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-overview-cache-empty-right.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 20, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)

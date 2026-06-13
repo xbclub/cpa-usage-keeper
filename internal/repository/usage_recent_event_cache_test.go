@@ -1,22 +1,17 @@
 package repository
 
 import (
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 )
 
 func TestUsageRecentEventCacheLoadsOnlyRecentProjectionAndDerivesFallbackLabels(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "recent-cache.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := testutil.OpenTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	ttft := int64(120)

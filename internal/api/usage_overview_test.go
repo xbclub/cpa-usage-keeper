@@ -38,6 +38,11 @@ func (s *usageFilterStub) GetUsageOverviewRealtime(_ context.Context, filter ser
 	return s.realtime, s.err
 }
 
+// ListOverviewModels is fork-unique (dedicated /usage/models endpoint); upstream's UsageProvider lacks it.
+func (s *usageFilterStub) ListOverviewModels(context.Context, servicedto.UsageFilter) ([]string, error) {
+	return nil, s.err
+}
+
 func (s *usageFilterStub) ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	return nil, s.err
 }
@@ -615,7 +620,7 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 		t.Fatalf("failed to decode overview response: %v\n%s", err, body)
 	}
-	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "service_health", "timezone", "range_start", "range_end")
+	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "service_health", "api_key_summary", "timezone", "range_start", "range_end")
 
 	usage, ok := decoded["usage"].(map[string]any)
 	if !ok {
