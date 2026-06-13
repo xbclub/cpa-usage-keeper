@@ -19,6 +19,7 @@ var configEnvKeys = []string{
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TZ", "TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT", "QUOTA_AUTO_REFRESH_ENABLED", "QUOTA_AUTO_REFRESH_INTERVAL",
 	"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
+	"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 }
 
 func TestMain(m *testing.M) {
@@ -170,6 +171,107 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != ShutdownTimeoutDefault {
 		t.Fatalf("expected default shutdown timeout %s, got %s", ShutdownTimeoutDefault, cfg.ShutdownTimeout)
+	}
+	if cfg.DBMaxOpenConns != DBMaxOpenConnsDefault {
+		t.Fatalf("expected default db max open conns %d, got %d", DBMaxOpenConnsDefault, cfg.DBMaxOpenConns)
+	}
+	if cfg.DBMaxIdleConns != DBMaxIdleConnsDefault {
+		t.Fatalf("expected default db max idle conns %d, got %d", DBMaxIdleConnsDefault, cfg.DBMaxIdleConns)
+	}
+	if cfg.DBConnMaxLifetime != DBConnMaxLifetimeDefault {
+		t.Fatalf("expected default db conn max lifetime %s, got %s", DBConnMaxLifetimeDefault, cfg.DBConnMaxLifetime)
+	}
+	if cfg.DBConnMaxIdleTime != DBConnMaxIdleTimeDefault {
+		t.Fatalf("expected default db conn max idle time %s, got %s", DBConnMaxIdleTimeDefault, cfg.DBConnMaxIdleTime)
+	}
+}
+
+func TestLoadFromEnvDBPool(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	env := map[string]string{
+		"CPA_BASE_URL":          "https://cpa.example.com",
+		"CPA_MANAGEMENT_KEY":    "secret",
+		"DB_MAX_OPEN_CONNS":     "40",
+		"DB_MAX_IDLE_CONNS":     "20",
+		"DB_CONN_MAX_LIFETIME":  "15m",
+		"DB_CONN_MAX_IDLE_TIME": "5m",
+	}
+	for key, value := range env {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("set env %s: %v", key, err)
+		}
+		t.Cleanup(func() { _ = os.Unsetenv(key) })
+	}
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.DBMaxOpenConns != 40 {
+		t.Fatalf("expected db max open conns 40, got %d", cfg.DBMaxOpenConns)
+	}
+	if cfg.DBMaxIdleConns != 20 {
+		t.Fatalf("expected db max idle conns 20, got %d", cfg.DBMaxIdleConns)
+	}
+	if cfg.DBConnMaxLifetime != 15*time.Minute {
+		t.Fatalf("expected db conn max lifetime 15m, got %s", cfg.DBConnMaxLifetime)
+	}
+	if cfg.DBConnMaxIdleTime != 5*time.Minute {
+		t.Fatalf("expected db conn max idle time 5m, got %s", cfg.DBConnMaxIdleTime)
+	}
+}
+
+func TestLoadClampsDBIdleConnsToOpenConns(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	env := map[string]string{
+		"CPA_BASE_URL":       "https://cpa.example.com",
+		"CPA_MANAGEMENT_KEY": "secret",
+		"DB_MAX_OPEN_CONNS":  "10",
+		"DB_MAX_IDLE_CONNS":  "50", // 大于 open，应被夹到 10
+	}
+	for key, value := range env {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("set env %s: %v", key, err)
+		}
+		t.Cleanup(func() { _ = os.Unsetenv(key) })
+	}
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.DBMaxIdleConns != 10 {
+		t.Fatalf("expected idle conns clamped to open (10), got %d", cfg.DBMaxIdleConns)
+	}
+}
+
+func TestLoadRejectsNonPositiveDBPool(t *testing.T) {
+	withIsolatedEnvFiles(t)
+	if err := os.Setenv("CPA_BASE_URL", "https://cpa.example.com"); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("CPA_BASE_URL") })
+	if err := os.Setenv("CPA_MANAGEMENT_KEY", "secret"); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("CPA_MANAGEMENT_KEY") })
+
+	cases := map[string]string{
+		"DB_MAX_OPEN_CONNS":     "0",
+		"DB_MAX_IDLE_CONNS":     "0",
+		"DB_CONN_MAX_LIFETIME":  "0s",
+		"DB_CONN_MAX_IDLE_TIME": "0s",
+	}
+	for key, value := range cases {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("set env %s: %v", key, err)
+		}
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatalf("expected LoadFromEnv to reject non-positive %s", key)
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset env %s: %v", key, err)
+		}
 	}
 }
 

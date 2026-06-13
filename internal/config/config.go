@@ -34,6 +34,13 @@ const (
 	HTTPIdleTimeoutDefault = 120 * time.Second
 	// ShutdownTimeoutDefault 是收到 SIGINT/SIGTERM 后优雅停机的总时限（HTTP 排空 + 后台 runner 收尾）。
 	ShutdownTimeoutDefault = 10 * time.Second
+
+	// DB pool 默认值。MaxOpenConns 给后台 runner + HTTP + quota worker 短查询留余量；
+	// MaxIdleConns 按稳态并发设定（开-空闲比 ~2.5），突发由 MaxOpenConns 兜底，空闲连接 10m 内复用避免 churn。
+	DBMaxOpenConnsDefault    = 25
+	DBMaxIdleConnsDefault    = 10
+	DBConnMaxLifetimeDefault = 30 * time.Minute
+	DBConnMaxIdleTimeDefault = 10 * time.Minute
 )
 
 var (
@@ -109,6 +116,14 @@ type Config struct {
 	HTTPIdleTimeout time.Duration
 	// ShutdownTimeout 是收到 SIGINT/SIGTERM 后优雅停机的总时限。
 	ShutdownTimeout time.Duration
+	// DBMaxOpenConns 是数据库连接池最大打开连接数。
+	DBMaxOpenConns int
+	// DBMaxIdleConns 是数据库连接池最大空闲连接数。
+	DBMaxIdleConns int
+	// DBConnMaxLifetime 是单个连接的最长存活时间；云负载均衡（RDS/Azure ~4-5min 超时）下应调小。
+	DBConnMaxLifetime time.Duration
+	// DBConnMaxIdleTime 是空闲连接被回收前的最长存活时间。
+	DBConnMaxIdleTime time.Duration
 }
 
 type LoadOptions struct {
@@ -220,6 +235,39 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("SHUTDOWN_TIMEOUT must be positive")
 	}
 
+	dbMaxOpenConns, err := getInt("DB_MAX_OPEN_CONNS", DBMaxOpenConnsDefault)
+	if err != nil {
+		return nil, err
+	}
+	if dbMaxOpenConns <= 0 {
+		return nil, fmt.Errorf("DB_MAX_OPEN_CONNS must be positive")
+	}
+	dbMaxIdleConns, err := getInt("DB_MAX_IDLE_CONNS", DBMaxIdleConnsDefault)
+	if err != nil {
+		return nil, err
+	}
+	if dbMaxIdleConns <= 0 {
+		return nil, fmt.Errorf("DB_MAX_IDLE_CONNS must be positive")
+	}
+	if dbMaxIdleConns > dbMaxOpenConns {
+		// database/sql 会把 idle 自动夹到 open，这里提前规整并给操作者一个明确信号。
+		dbMaxIdleConns = dbMaxOpenConns
+	}
+	dbConnMaxLifetime, err := getDuration("DB_CONN_MAX_LIFETIME", DBConnMaxLifetimeDefault)
+	if err != nil {
+		return nil, err
+	}
+	if dbConnMaxLifetime <= 0 {
+		return nil, fmt.Errorf("DB_CONN_MAX_LIFETIME must be positive")
+	}
+	dbConnMaxIdleTime, err := getDuration("DB_CONN_MAX_IDLE_TIME", DBConnMaxIdleTimeDefault)
+	if err != nil {
+		return nil, err
+	}
+	if dbConnMaxIdleTime <= 0 {
+		return nil, fmt.Errorf("DB_CONN_MAX_IDLE_TIME must be positive")
+	}
+
 	logFileEnabled, err := getBool("LOG_FILE_ENABLED", true)
 	if err != nil {
 		return nil, err
@@ -300,6 +348,10 @@ func Load(options LoadOptions) (*Config, error) {
 		HTTPWriteTimeout:         httpWriteTimeout,
 		HTTPIdleTimeout:          httpIdleTimeout,
 		ShutdownTimeout:          shutdownTimeout,
+		DBMaxOpenConns:           dbMaxOpenConns,
+		DBMaxIdleConns:           dbMaxIdleConns,
+		DBConnMaxLifetime:        dbConnMaxLifetime,
+		DBConnMaxIdleTime:        dbConnMaxIdleTime,
 	}
 	if cfg.CPABaseURL == "" {
 		return nil, fmt.Errorf("CPA_BASE_URL is required")
