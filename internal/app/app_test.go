@@ -517,13 +517,17 @@ func readAppLogFile(t *testing.T, logDir string) string {
 
 func testAppConfig(t *testing.T) config.Config {
 	t.Helper()
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://test:test@localhost:5432/test?sslmode=disable"
+	}
 	return config.Config{
 		AppPort:                 "8080",
 		CPABaseURL:              "https://cpa.example.com",
 		CPAManagementKey:        "secret",
 		RedisQueueIdleInterval:  time.Second,
 		MetadataSyncInterval:    30 * time.Second,
-		DatabaseURL:             "postgres://test:test@localhost:5432/test?sslmode=disable",
+		DatabaseURL:             databaseURL,
 		RequestTimeout:          5 * time.Second,
 		QuotaAutoRefreshEnabled: true,
 		LogLevel:                "info",
