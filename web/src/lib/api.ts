@@ -1,4 +1,4 @@
-import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
+import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -202,27 +202,6 @@ export async function fetchUsageOverview(range: string, start?: string, end?: st
   return response.json()
 }
 
-export async function fetchUsageOverviewRealtime(options: FetchUsageOverviewRealtimeOptions = {}): Promise<OverviewRealtimeBlock> {
-  const { signal, apiKeyId, window } = options
-  const params = new URLSearchParams()
-  const selectedAPIKeyId = apiKeyId?.trim()
-  if (selectedAPIKeyId) {
-    params.set('api_key_id', selectedAPIKeyId)
-  }
-  if (window) {
-    params.set('window', window)
-  }
-  const query = params.toString()
-  const response = await apiFetch(`${apiPath('/usage/overview/realtime')}${query ? `?${query}` : ''}`, { signal })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to load usage overview realtime: ${response.status}`)
-  }
-  const payload = await response.json() as Partial<OverviewRealtimeBlock> & {
-    current_usage?: Partial<OverviewRealtimeBlock['current_usage']>;
-  }
-  return normalizeOverviewRealtimeBlock(payload, window)
-}
-
 export async function fetchOverviewModels(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string): Promise<{ models: string[] }> {
   const params = new URLSearchParams()
   params.set('range', range)
@@ -242,6 +221,27 @@ export async function fetchOverviewModels(range: string, start?: string, end?: s
     await parseApiError(response, `Failed to load overview models: ${response.status}`)
   }
   return response.json()
+}
+
+export async function fetchUsageOverviewRealtime(options: FetchUsageOverviewRealtimeOptions = {}): Promise<OverviewRealtimeBlock> {
+  const { signal, apiKeyId, window } = options
+  const params = new URLSearchParams()
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
+  if (window) {
+    params.set('window', window)
+  }
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/overview/realtime')}${query ? `?${query}` : ''}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage overview realtime: ${response.status}`)
+  }
+  const payload = await response.json() as Partial<OverviewRealtimeBlock> & {
+    current_usage?: Partial<OverviewRealtimeBlock['current_usage']>;
+  }
+  return normalizeOverviewRealtimeBlock(payload, window)
 }
 
 export interface FetchUsageEventsOptions {
@@ -542,6 +542,14 @@ export async function fetchPricing(signal?: AbortSignal): Promise<PricingRespons
   const response = await apiFetch(apiPath('/pricing'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load pricing: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchPricingSyncPreview(signal?: AbortSignal): Promise<PricingSyncPreviewResponse> {
+  const response = await apiFetch(apiPath('/pricing/sync/preview'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to preview pricing sync: ${response.status}`)
   }
   return response.json()
 }

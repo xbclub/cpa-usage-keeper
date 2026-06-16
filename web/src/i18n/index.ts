@@ -2,7 +2,7 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
 const LANGUAGE_STORAGE_KEY = 'cpa-usage-keeper-language';
-const DEFAULT_LANGUAGE = typeof window === 'undefined' ? 'en' : 'zh';
+const DEFAULT_LANGUAGE = 'zh';
 export const SUPPORTED_LANGUAGES = ['en', 'zh', 'zh-TW'] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -357,6 +357,25 @@ const resources = {
         model_price_edit_success: 'Model price updated.',
         model_price_edit_failed: 'Enter valid non-negative prices before saving changes.',
         model_price_delete_success: 'Model price deleted.',
+        model_price_sync: 'Sync Prices',
+        model_price_sync_title: 'Sync Model Prices',
+        model_price_sync_source: 'Source',
+        model_price_sync_matched: 'Matched',
+        model_price_sync_unmatched: 'Unmatched',
+        model_price_sync_matched_model: 'Matched: {{model}}',
+        model_price_sync_provider: 'Provider: {{provider}} ({{id}})',
+        model_price_sync_existing: 'Current',
+        model_price_sync_toggle: 'Select {{model}}',
+        model_price_sync_select_all: 'Select all',
+        model_price_sync_select_none: 'Clear selection',
+        model_price_sync_update_selected: 'Update selected ({{count}})',
+        model_price_sync_no_matches: 'No matched model prices found.',
+        model_price_sync_none_selected: 'Select at least one matched model to update.',
+        model_price_sync_failed: 'Unable to sync model prices',
+        model_price_sync_invalid: 'Check the price values for {{model}} before updating.',
+        model_price_sync_apply_success: 'Updated {{count}} model prices.',
+        model_price_sync_apply_partial: 'Updated {{success}} model prices, {{failed}} failed.',
+        model_price_sync_failed_label: 'Price sync failed for {{model}}.',
         service_health: 'Service Health',
         service_health_title: 'Request Health Timeline',
         service_health_subtitle: 'A compact reliability strip mapped to the selected range, with timeline detail capped at 7 days.',
@@ -399,12 +418,12 @@ const resources = {
         analysis_heatmap_title: 'API Key & Models Heatmap',
         analysis_heatmap_subtitle: 'Token distribution across API keys and models with hover details.',
         analysis_heatmap_api_key: 'API Key',
+        api_key_summary_title: 'API Key Summary',
+        api_key: 'API Key',
         analysis_heatmap_low: 'Low',
         analysis_heatmap_high: 'High',
         analysis_heatmap_legend: 'Heatmap intensity legend',
-        analysis_others: 'Others',
-        api_key_summary_title: 'API Key Summary',
-        api_key: 'API Key'
+        analysis_others: 'Others'
       }
     }
   },
@@ -499,6 +518,8 @@ const resources = {
         range_filter: '范围',
         api_key_filter: 'API Key',
         api_key_filter_all: '全部',
+        model_filter: '模型篩選',
+        all_models: '所有模型',
         model_filter: '模型筛选',
         all_models: '所有模型',
         range_all: '全部',
@@ -747,6 +768,25 @@ const resources = {
         model_price_edit_success: '模型价格已更新。',
         model_price_edit_failed: '请输入有效的非负价格后再保存修改。',
         model_price_delete_success: '模型价格已删除。',
+        model_price_sync: '同步价格',
+        model_price_sync_title: '同步模型价格',
+        model_price_sync_source: '来源',
+        model_price_sync_matched: '已匹配',
+        model_price_sync_unmatched: '未匹配',
+        model_price_sync_matched_model: '匹配到：{{model}}',
+        model_price_sync_provider: '提供商：{{provider}}（{{id}}）',
+        model_price_sync_existing: '当前已有',
+        model_price_sync_toggle: '选择 {{model}}',
+        model_price_sync_select_all: '全选',
+        model_price_sync_select_none: '清空选择',
+        model_price_sync_update_selected: '更新所选（{{count}}）',
+        model_price_sync_no_matches: '没有找到可匹配的模型价格。',
+        model_price_sync_none_selected: '请至少选择一个匹配模型再更新。',
+        model_price_sync_failed: '无法同步模型价格',
+        model_price_sync_invalid: '请先检查 {{model}} 的价格值。',
+        model_price_sync_apply_success: '已更新 {{count}} 个模型价格。',
+        model_price_sync_apply_partial: '已更新 {{success}} 个模型价格，{{failed}} 个失败。',
+        model_price_sync_failed_label: '{{model}} 价格同步失败。',
         service_health: '服务健康',
         service_health_title: '请求健康时间线',
         service_health_subtitle: '用紧凑的可靠性条带展示当前筛选范围内的请求结果，时间线最多展示 7 天细节。',
@@ -789,12 +829,12 @@ const resources = {
         analysis_heatmap_title: 'API Key 与模型热力图',
         analysis_heatmap_subtitle: '展示 API Key 与模型组合下的 Token 分布，悬浮查看明细。',
         analysis_heatmap_api_key: 'API Key',
+        api_key_summary_title: 'API Key Summary',
+        api_key: 'API Key',
         analysis_heatmap_low: '低',
         analysis_heatmap_high: '高',
         analysis_heatmap_legend: '热力强度示例',
-        analysis_others: '其他',
-        api_key_summary_title: 'API Key 汇总',
-        api_key: 'API Key'
+        analysis_others: '其他'
       }
     }
   },
@@ -889,8 +929,6 @@ const resources = {
         range_filter: '範圍',
         api_key_filter: 'API Key',
         api_key_filter_all: '全部',
-        model_filter: '模型篩選',
-        all_models: '所有模型',
         range_all: '全部',
         range_4h: '4 小時',
         range_8h: '8 小時',
@@ -1137,6 +1175,25 @@ const resources = {
         model_price_edit_success: '模型價格已更新。',
         model_price_edit_failed: '請輸入有效的非負價格後再儲存修改。',
         model_price_delete_success: '模型價格已刪除。',
+        model_price_sync: '同步價格',
+        model_price_sync_title: '同步模型價格',
+        model_price_sync_source: '來源',
+        model_price_sync_matched: '已匹配',
+        model_price_sync_unmatched: '未匹配',
+        model_price_sync_matched_model: '匹配到：{{model}}',
+        model_price_sync_provider: '提供商：{{provider}}（{{id}}）',
+        model_price_sync_existing: '目前已有',
+        model_price_sync_toggle: '選擇 {{model}}',
+        model_price_sync_select_all: '全選',
+        model_price_sync_select_none: '清空選擇',
+        model_price_sync_update_selected: '更新所選（{{count}}）',
+        model_price_sync_no_matches: '沒有找到可匹配的模型價格。',
+        model_price_sync_none_selected: '請至少選擇一個匹配模型再更新。',
+        model_price_sync_failed: '無法同步模型價格',
+        model_price_sync_invalid: '請先檢查 {{model}} 的價格值。',
+        model_price_sync_apply_success: '已更新 {{count}} 個模型價格。',
+        model_price_sync_apply_partial: '已更新 {{success}} 個模型價格，{{failed}} 個失敗。',
+        model_price_sync_failed_label: '{{model}} 價格同步失敗。',
         service_health: '服務健康',
         service_health_title: '請求健康時間軸',
         service_health_subtitle: '用緊湊的可靠性條帶呈現目前篩選範圍內的請求結果，時間軸最多顯示 7 天細節。',
@@ -1179,12 +1236,12 @@ const resources = {
         analysis_heatmap_title: 'API Key 與模型熱力圖',
         analysis_heatmap_subtitle: '顯示 API Key 與模型組合下的 Token 分布，懸浮查看明細。',
         analysis_heatmap_api_key: 'API Key',
+        api_key_summary_title: 'API Key Summary',
+        api_key: 'API Key',
         analysis_heatmap_low: '低',
         analysis_heatmap_high: '高',
         analysis_heatmap_legend: '熱力強度示例',
-        analysis_others: '其他',
-        api_key_summary_title: 'API Key 摘要',
-        api_key: 'API Key'
+        analysis_others: '其他'
       }
     }
   }

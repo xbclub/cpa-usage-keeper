@@ -161,24 +161,11 @@ export interface OverviewRealtimeBlock {
   cache_level: RealtimeCacheLevelPoint[]
 }
 
-export interface UsageOverviewAPIKeySummary {
-  api_key: string
-  request_count: number
-  total_tokens: number
-  input_tokens: number
-  output_tokens: number
-  cached_tokens: number
-  cost_usd: number
-  cost_available: boolean
-  display_name?: string
-}
-
 export interface UsageOverviewResponse {
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
   service_health?: UsageOverviewServiceHealth
-  api_key_summary?: UsageOverviewAPIKeySummary[]
   timezone?: string
   range_start?: string
   range_end?: string
@@ -553,6 +540,17 @@ export interface ModelPrice {
   cacheCreation: number
 }
 
+export interface PricingSaveFailure {
+  model: string
+  message: string
+  error?: unknown
+}
+
+export interface PricingSaveResult {
+  successModels: string[]
+  failures: PricingSaveFailure[]
+}
+
 export interface PricingEntry {
   model: string
   pricing_style: PricingStyle
@@ -568,6 +566,27 @@ export interface UsedModelsResponse {
 
 export interface PricingResponse {
   pricing: PricingEntry[]
+}
+
+export interface PricingSyncMatch {
+  model: string
+  matched_model: string
+  match_type: string
+  source_provider_id: string
+  source_provider_name: string
+  pricing_style: PricingStyle
+  prompt_price_per_1m: number
+  completion_price_per_1m: number
+  cache_price_per_1m: number
+  cache_creation_price_per_1m: number
+}
+
+export interface PricingSyncPreviewResponse {
+  source: string
+  source_url: string
+  metadata_models: number
+  matches: PricingSyncMatch[]
+  unmatched_models: string[]
 }
 
 export type KeyOverviewTimeRange = '4h' | '8h' | '12h' | '24h' | 'today' | 'yesterday' | '7d' | '30d'
