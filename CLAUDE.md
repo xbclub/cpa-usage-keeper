@@ -692,7 +692,21 @@ The fork had synced upstream's overview-aggregation production refactor but not 
 
 7. **`testAppConfig` hardcodes `localhost:5432`.** `internal/app/app_test.go`'s `testAppConfig` helper hardcoded `DatabaseURL: "postgres://test:test@localhost:5432/test?sslmode=disable"`. On machines without local PG, all `TestNewWithConfig*` / `TestAppClose*` tests fail. Fix once: read `DATABASE_URL` env, fall back to localhost. This is a recurring fork test-debt — re-apply if upstream or a later merge reverts it.
 
-8. **Diverged remote ⇒ reset-and-redo beats rebase when there's no shared ancestry.** When pushing was rejected (`47795c3` had 11 commits we lacked, and our base `34a8ec7` was a different-hash copy of remote's `e0e6c32` — same message, no git common ancestor), `git rebase` would fight every overlapping file. Instead: `git branch backup`, `git reset --hard origin/pg-migration-v2`, re-apply the PRs on the new base. The new base already had test fixes (commit `649ea6b`) that obviated manual work from the first attempt. **Before redoing, diff the target files between upstream and the new base to skip already-fixed ones** (e.g. remote had already added the `UsageProvider` stub methods and repaired `usage_filter_test.go`).
+8. **Diverged remote ⇒ reset-and-reda beats rebase when there's no shared ancestry.** When pushing was rejected (`47795c3` had 11 commits we lacked, and our base `34a8ec7` was a different-hash copy of remote's `e0e6c32` — same message, no git common ancestor), `git rebase` would fight every overlapping file. Instead: `git branch backup`, `git reset --hard origin/pg-migration-v2`, re-apply the PRs on the new base. The new base already had test fixes (commit `649ea6b`) that obviated manual work from the first attempt. **Before redoing, diff the target files between upstream and the new base to skip already-fixed ones** (e.g. remote had already added the `UsageProvider` stub methods and repaired `usage_filter_test.go`).
+
+### Step 4.10: v1.10.8 merge notes (2026-06-16, commit `938552d`)
+
+Merged upstream `v1.10.8` (`997495c..1016ee6`) — 2 PRs, 19 files. A clean, small merge: model pricing sync (#216, pull prices from Models.dev with preview/confirm/error UI) + analysis composition colors (#220). No schema changes, no migration. Lessons specific to this merge:
+
+1. **`pricing_service_test.go` needs the same SQLite→PG adaptation as every other `service` test.** Upstream uses `OpenDatabase(config.Config{SQLitePath:...})`; fork uses `testutil.OpenTestDatabase(t)`. After `git checkout upstream/main -- internal/service/pricing_service_test.go`, convert `openPricingServiceTestDatabase` to `return testutil.OpenTestDatabase(t)` and drop `config`/`path/filepath` imports. This is the same recurring pattern as `sync_test.go` (Step 4.9 #6) — **every upstream test file that opens a DB will reintroduce SQLite setup on checkout.**
+
+2. **`pricing_service.go` upstream already uses `logrus` (not `slog`).** The fork's "logrus-only" convention (commit `b4e4fa1`) is now reflected upstream for this file, so no logging conversion was needed. **But always verify** — grep `slog` in the checked-out file before assuming; future upstream files may still carry `slog`.
+
+3. **`PriceSettingsCard.tsx` upstream now carries `onNotice` too.** Previously fork-unique (Step 4.5 #10), upstream adopted the same prop in the pricing-sync feature. After checkout, the only fork restoration needed was the **model-name input `<Select>` → `<Combobox>`** (Step 4.5 #9) + the `import { Combobox }` line. `onNotice` no longer needs manual re-application.
+
+4. **`UsagePage.module.scss` upstream additions are additive and non-conflicting.** The +260 lines were all `pricing*`/`sync*` classes for the sync panel — none touched fork's `signOut*`/`apiKeyFilterGroup` classes. Safe to checkout directly; just verify fork classes survived (grep after checkout).
+
+5. **i18n fork keys get wiped on every `git checkout upstream/main -- web/src/i18n/index.ts`.** The 6 fork-unique keys (`model_filter`, `all_models`, `api_key_summary_title`, `api_key`, `clear_cache`, `clear_cache_confirm`) across 3 locales were deleted again. Re-inserted via a Python script keyed on locale-block anchors (`api_key_filter_all`, `analysis_heatmap_api_key`, `logout`). **This is now a known recurring cost of any i18n checkout** — consider extracting fork i18n keys into a separate file to avoid this.
 
 ### Step 5: Adapt SQLite→PG Files
 
