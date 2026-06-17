@@ -39,6 +39,19 @@ func TestParseUsageFilterQueryPresetRange(t *testing.T) {
 	}
 }
 
+func TestParseUsageFilterQueryIgnoresRealtimeWindow(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=24h&realtime_window=45m", nil)
+	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+
+	filter, err := parseUsageFilterQuery(req, anchor)
+	if err != nil {
+		t.Fatalf("parseUsageFilterQuery returned error for ignored realtime_window: %v", err)
+	}
+	if filter.RealtimeWindow != "" || filter.RealtimeEndTime != nil {
+		t.Fatalf("expected main overview filter not to carry realtime fields, got %+v", filter)
+	}
+}
+
 func TestParseUsageFilterQueryTodayRangeUsesLocalDayBoundary(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
@@ -211,6 +224,44 @@ func TestParseUsageFilterQueryRejectsInvalidCustomRange(t *testing.T) {
 	}
 }
 
+func TestParseUsageFilterQueryRejectsCustomRangeBeforeRetentionStart(t *testing.T) {
+	previousLocal := time.Local
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	t.Cleanup(func() { time.Local = previousLocal })
+	time.Local = location
+	anchor := time.Date(2026, 6, 16, 9, 0, 0, 0, location)
+
+	for _, tc := range []struct {
+		name      string
+		path      string
+		wantError bool
+	}{
+		{name: "before retention", path: "/api/v1/usage/overview?range=custom&start=2026-04-30&end=2026-05-01", wantError: true},
+		{name: "at retention boundary", path: "/api/v1/usage/overview?range=custom&start=2026-05-01&end=2026-05-01"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			filter, err := parseUsageFilterQuery(req, anchor)
+			if tc.wantError {
+				if err == nil {
+					t.Fatal("expected custom range before retention start to be rejected")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected retention boundary custom range to be accepted: %v", err)
+			}
+			expectedStart := time.Date(2026, 5, 1, 0, 0, 0, 0, location)
+			if filter.StartTime == nil || !filter.StartTime.Equal(expectedStart) {
+				t.Fatalf("expected boundary start %s, got %+v", expectedStart, filter)
+			}
+		})
+	}
+}
+
 func TestParseUsageFilterQueryRejectsMissingRange(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events", nil)
 
@@ -265,6 +316,24 @@ func TestParseUsageFilterQueryAcceptsAPIKeyID(t *testing.T) {
 	}
 	if timeFilter.APIKeyID != "1234567890123456789" {
 		t.Fatalf("expected time filter to preserve api key id, got %+v", timeFilter)
+	}
+}
+
+func TestParseUsageFilterQueryRejectsInvalidAPIKeyID(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=24h&api_key_id=not-an-id", nil)
+
+	_, err := parseUsageFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("expected invalid api_key_id error")
+	}
+}
+
+func TestParseUsageRealtimeFilterQueryRejectsInvalidAPIKeyID(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview/realtime?window=60m&api_key_id=not-an-id", nil)
+
+	_, err := parseUsageRealtimeFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("expected invalid realtime api_key_id error")
 	}
 }
 

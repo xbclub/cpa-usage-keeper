@@ -124,14 +124,37 @@ func migrateRedisInboxQueueKeyToSource(db *gorm.DB) error {
 	return nil
 }
 
-// CleanupStorage 是每日维护任务的统一仓储清理入口。
+// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox 和过期 usage_events，再清 Overview health 细粒度统计。
 func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	if err := CleanupUsageOverviewHealthStats(db, now); err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
+	usageEventsDeleted, err := CleanupUsageEvents(db, now)
+	if err != nil {
+		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
 	}
-	return dto.StorageCleanupResult{RedisInbox: redisResult}, nil
+	if err := CleanupUsageOverviewHealthStats(db, now); err != nil {
+		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+	}
+	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
+}
+
+// CleanupUsageEvents 删除当前页面查询窗口外的原始 usage_events，保留从上个月 1 日本地零点开始的数据。
+func CleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
+	if db == nil {
+		return 0, fmt.Errorf("database is nil")
+	}
+	cutoff := usageEventsCleanupCutoff(now)
+	result := db.Unscoped().Where("timestamp < ?", timeutil.FormatStorageTime(cutoff)).Delete(&entities.UsageEvent{})
+	if result.Error != nil {
+		return result.RowsAffected, fmt.Errorf("cleanup usage events: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func usageEventsCleanupCutoff(now time.Time) time.Time {
+	localNow := now.In(time.Local)
+	currentMonthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
+	return currentMonthStart.AddDate(0, -1, 0)
 }

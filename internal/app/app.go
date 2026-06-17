@@ -183,7 +183,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	// backgroundPoller 继续组合远端 ingest 和本地 process 的状态展示。
 	backgroundPoller := poller.NewRedisPoller(redisIngestRunner, redisProcessRunner)
 	usageService := service.NewUsageServiceWithRecentCache(db, recentUsageCache)
-	usageIdentityService := service.NewUsageIdentityService(db)
+	usageIdentityService := service.NewUsageIdentityServiceWithRecentCache(db, recentUsageCache)
 	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	authFilesManagementService := service.NewAuthFilesManagementService(cpaClient)
