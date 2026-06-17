@@ -308,7 +308,7 @@ func TestUsageEventsResolvesAPIKeySourceFromProviderIdentity(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
-	if !contains(body, `"source":"Provider Name(Team Prefix)"`) {
+	if !contains(body, `"source":"Team Prefix"`) {
 		t.Fatalf("expected source to use provider identity displayName, got %s", body)
 	}
 	if !contains(body, `"source_type":"openai"`) {
@@ -352,7 +352,7 @@ func TestUsageEventsDoesNotResolveProviderIdentityFromSource(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
-	if contains(body, `"source":"Provider Name(Team Prefix)"`) || contains(body, `"source_key"`) {
+	if contains(body, `"source":"Team Prefix"`) || contains(body, `"source_key"`) {
 		t.Fatalf("expected event source not to resolve identity through usage event source, got %s", body)
 	}
 	if !contains(body, `"source":"Fallback Provider"`) {
