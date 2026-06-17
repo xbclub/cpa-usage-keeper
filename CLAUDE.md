@@ -708,6 +708,22 @@ Merged upstream `v1.10.8` (`997495c..1016ee6`) — 2 PRs, 19 files. A clean, sma
 
 5. **i18n fork keys get wiped on every `git checkout upstream/main -- web/src/i18n/index.ts`.** The 6 fork-unique keys (`model_filter`, `all_models`, `api_key_summary_title`, `api_key`, `clear_cache`, `clear_cache_confirm`) across 3 locales were deleted again. Re-inserted via a Python script keyed on locale-block anchors (`api_key_filter_all`, `analysis_heatmap_api_key`, `logout`). **This is now a known recurring cost of any i18n checkout** — consider extracting fork i18n keys into a separate file to avoid this.
 
+### Step 4.11: v1.11.0 merge notes (2026-06-17, commit `c1a716c`)
+
+Merged upstream `v1.11.0` (`1016ee6..018db26`) — 12 commits, 41 files, +2856/-260. Three features: credential health cache + UI, usage event hard-deletion cleanup, custom date range bounds refresh. No schema changes, no migration. Lessons specific to this merge:
+
+1. **`db.go` VACUUM must be skipped — PG does not need it.** Upstream's `CleanupStorage` now ends with `db.Exec("VACUUM")` (SQLite file shrink). The fork must NOT add this line — PG's VACUUM needs exclusive lock and has different semantics (AGENTS.md: "no SQLite PRAGMA/WAL/VACUUM needed"). **When merging db.go cleanup changes, add only the pure-GORM `CleanupUsageEvents` function; skip the VACUUM line and the standalone `Vacuum` helper.** The upstream `CleanupUsageEvents` itself is PG-safe (`db.Unscoped().Where(...).Delete(...)` is dialect-agnostic).
+
+2. **`usage_identities_service.go` gained a `recentUsage` field — checkout brings it, app.go wires it.** Upstream added `NewUsageIdentityServiceWithRecentCache(db, recentUsage)`; the old `NewUsageIdentityService(db)` now delegates to it with `nil`. **Checkout the service file (pure upstream) then change app.go's call site** from `NewUsageIdentityService(db)` → `NewUsageIdentityServiceWithRecentCache(db, recentUsageCache)`. `recentUsageCache` is already in scope in `NewWithConfig`.
+
+3. **`git apply --3way` is the fastest path for large fork-divergent files like `UsagePage.tsx`.** A 12-hunk, 205-line diff against a file the fork has heavily modified (model filter, ApiKeySummary, reset button) cannot `git checkout` wholesale and is painful to hand-apply. `git diff 1016ee6..upstream/main -- UsagePage.tsx > patch; git apply --3way patch` applied 10/12 hunks automatically and left only 2 conflict regions — both the same pattern: fork's `isOverviewTab`/`model:` props interleaved with upstream's `effectiveCustomTimeRange`/`activeTab === 'overview'`. **Resolution: keep both (fork's guard + upstream's effective range).** This is far less error-prone than manual block-by-block insertion.
+
+4. **`usage_recent_event_cache_test.go` gained 5 credential-health tests using SQLite — checkout + batch PG-adapt works.** The perl one-liner `s/db, err := OpenDatabase\(config.Config{SQLitePath:.*\}\)\n.*\n.*\n.*\n/db := testutil.OpenTestDatabase(t)/g` + deleting `closeTestDatabase` calls + import swap handles it. **One gotcha:** a test that used `err =` (assignment, not declaration) after the DB-open block breaks because the `err` binding from `OpenDatabase` is gone — fix `err =` → `err :=` at that one call site.
+
+5. **`db_test.go` tests `OpenDatabase` itself (SQLite runtime config) — do NOT checkout.** Upstream's `db_test.go` has `TestOpenDatabaseConfiguresSQLiteRuntime` and similar SQLite-specific tests. Fork's `db_test.go` is PG-adapted. **Restore fork version, then append only the new upstream test functions** (the 3 `TestCleanupStorageCleansUsageEvents*` tests) — they use `openTestDatabase(t)` which fork already provides, and are pure GORM. Extract via `git show upstream/main:db_test.go | sed -n '/^func Test.*CleanupUsageEvents/,/^func <next-helper>/p'`.
+
+6. **`maintenance.go` upstream now uses logrus (not slog).** The fork's logrus-only convention is reflected upstream for this file (cleanup time changed 03:00→04:30). Safe to checkout directly — but always grep `slog` first.
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
