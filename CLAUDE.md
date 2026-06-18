@@ -724,6 +724,18 @@ Merged upstream `v1.11.0` (`1016ee6..018db26`) — 12 commits, 41 files, +2856/-
 
 6. **`maintenance.go` upstream now uses logrus (not slog).** The fork's logrus-only convention is reflected upstream for this file (cleanup time changed 03:00→04:30). Safe to checkout directly — but always grep `slog` first.
 
+### Step 4.12: v1.11.1 merge notes (2026-06-18, commit `fc813e0`)
+
+Merged upstream `v1.11.1` (`018db26..ea90ca4`) — 4 commits, 30 files, +1746/-191. Single feature: Codex quota reset credits (#229 — POST /quota/reset endpoint + Auth Files UI button). No schema changes, no migration. Lessons specific to this merge:
+
+1. **Initial file scan missed ALL 11 backend Go files.** The first pass only looked at frontend files (`git diff --stat` output was frontend-heavy). The entire backend stack (quota/reset.go NEW, service.go, codex.go, types.go, config.go, payloads.go, errors.go, api/quota.go, api/quota_test.go, router.go, service_test.go) was absent from the initial plan. **Always run `git diff --name-only` on the full upstream range and cross-check against your plan's file list before starting.** The "规划前再次检查" step caught this — without it the feature would have been dead (404 on /quota/reset).
+
+2. **`router.go` checkout silently drops `registerUsageModelsRoute`.** Upstream's router.go doesn't have the fork-unique `registerUsageModelsRoute(adminProtected, usageProvider)` line (fork feature). A `git checkout upstream/main -- internal/api/router.go` succeeds (no compile error — Go allows unused functions), but the `/usage/models` route vanishes. **After any router.go checkout, grep for `registerUsageModelsRoute` and re-add if missing.** Alternatively, manual-merge by adding only the upstream's `Reset` method to the `QuotaProvider` interface.
+
+3. **i18n python insert script broke AGAIN (third time).** The "first `'全部'` = zh, second = zh-TW" assumption is fragile — it breaks every time upstream adds i18n keys that shift line positions. This time it inserted 繁体 `model_filter` into the zh (simplified) block AND left zh-TW block without it (TS1117 duplicate key + missing key). **The script MUST verify the locale block context after insertion, not just count occurrences.** Until the script is fixed, manually verify each locale's `model_filter` value after every i18n checkout: en=Model, zh=模型筛选 (simplified), zh-TW=模型篩選 (traditional).
+
+4. **Concurrent test `TestResetAllowsConcurrentRequestsForDifferentAuthIndexes` times out on cross-network PG.** The test waits 2s for two concurrent goroutines to enter the provider — fast on local SQLite, but cross-network PG adds ~60ms/query latency that accumulates past 2s. **This is an environment artifact, not a bug.** Passes on local PG / CI same-machine PG. Do not modify upstream test thresholds.
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
