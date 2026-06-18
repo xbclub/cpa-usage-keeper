@@ -33,6 +33,13 @@ func OpenTestDatabaseForB(b *testing.B) *gorm.DB {
 	return openTestDatabaseCore(b)
 }
 
+// openTestDatabaseCore creates an isolated PG schema for each test, runs
+// AutoMigrate inside it, and registers a cleanup to drop the schema.
+//
+// The search_path is injected via the DSN options parameter (not SET) so that
+// every pooled connection adopts it — concurrent tests that hit separate pool
+// connections would otherwise land on the public schema and miss the seeded rows.
+// See AGENTS.md Step 4.8 for the caveat this addresses.
 func openTestDatabaseCore(tb testingTB) *gorm.DB {
 	tb.Helper()
 
@@ -41,20 +48,30 @@ func openTestDatabaseCore(tb testingTB) *gorm.DB {
 		tb.Fatalf("%s is required for database tests", testDatabaseURLEnv)
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	// First open a raw connection just to create the isolated schema.
+	bootstrap, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
 	})
 	if err != nil {
 		tb.Fatalf("open test database: %v", err)
 	}
-
 	schemaName := fmt.Sprintf("test_%d", rand.Int63())
-
-	if err := db.Exec(fmt.Sprintf(`CREATE SCHEMA "%s"`, schemaName)).Error; err != nil {
+	if err := bootstrap.Exec(fmt.Sprintf(`CREATE SCHEMA "%s"`, schemaName)).Error; err != nil {
 		tb.Fatalf("create test schema %s: %v", schemaName, err)
 	}
-	if err := db.Exec(fmt.Sprintf(`SET search_path TO "%s"`, schemaName)).Error; err != nil {
-		tb.Fatalf("set search_path to %s: %v", schemaName, err)
+	if sqlDB, err := bootstrap.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+
+	// Reopen with the schema pinned via DSN options so all pooled connections
+	// inherit the search_path (SET search_path is session-scoped and won't reach
+	// connections handed out by the pool that weren't the one that ran SET).
+	testDSN := pinSchemaInDSN(dsn, schemaName)
+	db, err := gorm.Open(postgres.Open(testDSN), &gorm.Config{
+		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+	})
+	if err != nil {
+		tb.Fatalf("open test database with schema %s: %v", schemaName, err)
 	}
 
 	if err := db.AutoMigrate(entities.All()...); err != nil {
@@ -62,13 +79,56 @@ func openTestDatabaseCore(tb testingTB) *gorm.DB {
 	}
 
 	tb.Cleanup(func() {
-		_ = db.Exec("SET search_path TO public").Error
-		_ = db.Exec(fmt.Sprintf(`DROP SCHEMA "%s" CASCADE`, schemaName)).Error
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
 		}
+		dropDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+			NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+		})
+		if err == nil {
+			_ = dropDB.Exec(fmt.Sprintf(`DROP SCHEMA IF EXISTS "%s" CASCADE`, schemaName)).Error
+			if dropSQL, e := dropDB.DB(); e == nil {
+				_ = dropSQL.Close()
+			}
+		}
 	})
 
 	return db
+}
+
+// pinSchemaInDSN appends (or merges into) a `options=--search_path=<schema>`
+// query parameter so that every connection drawn from the pool adopts the
+// isolated test schema regardless of which backend session it lands on.
+func pinSchemaInDSN(dsn string, schema string) string {
+	option := "--search_path=" + schema
+	separator := "&"
+	if !containsQuery(dsn) {
+		separator = "?"
+	}
+	return dsn + separator + "options=" + urlEncode(option)
+}
+
+func containsQuery(dsn string) bool {
+	for i := 0; i < len(dsn); i++ {
+		if dsn[i] == '?' {
+			return true
+		}
+	}
+	return false
+}
+
+func urlEncode(s string) string {
+	// lib/pq accepts URL-encoded options; spaces and = are the only chars
+	// in --search_path=test_xxx that need escaping in practice.
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' {
+			b = append(b, '+')
+			continue
+		}
+		b = append(b, c)
+	}
+	return string(b)
 }
