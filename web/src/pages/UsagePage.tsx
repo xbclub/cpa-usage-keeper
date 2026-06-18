@@ -1957,6 +1957,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       onSortChange={credentialsData.setAuthFileSort}
                       onRefreshQuota={credentialsData.refreshQuotaForCurrentAuthFilePage}
                       onRefreshQuotaForAuthIndex={credentialsData.refreshQuotaForAuthIndex}
+                      onResetQuotaForAuthIndex={credentialsData.resetQuotaForAuthIndex}
                       onRefreshInspectionStatus={credentialsData.refreshQuotaInspectionStatus}
                       onStartInspection={credentialsData.startQuotaInspection}
                       onAfterInvalidAccountAction={credentialsData.refresh}
