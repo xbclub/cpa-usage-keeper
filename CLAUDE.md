@@ -222,9 +222,11 @@ The fork had synced upstream's overview-aggregation production refactor but not 
 
 **Do NOT blindly `git checkout upstream/main -- internal/repository/usage.go` to fix these** — it carries fork-unique logic (recent-event cache, API-key-summary accumulator, model filter, PG adaptations). Investigate the boundary-events query path specifically.
 
-### Step 4.8: PG test-isolation caveat
+### Step 4.8: PG test-isolation caveat (RESOLVED)
 
-`testutil.OpenTestDatabase` does `CREATE SCHEMA` + `SET search_path` (session-scoped) + `AutoMigrate`. GORM pools connections, so a query landing on a non-`search_path`'d pooled connection won't see the test schema. In practice the fork's sequential tests rarely hit this, but if a test fails with `relation "..." does not exist` intermittently, the fix is to pin the test pool (`sqlDB.SetMaxOpenConns(1)`) or set `search_path` via the DSN `options`.
+`testutil.OpenTestDatabase` originally did `CREATE SCHEMA` + `SET search_path` (session-scoped) + `AutoMigrate`. GORM pools connections, so a query landing on a non-`search_path`'d pooled connection won't see the test schema. **This was a latent bug** — sequential tests rarely hit it, but v1.11.1's first concurrent-DB-query test (`TestResetAllowsConcurrentRequestsForDifferentAuthIndexes`) exposed it: one goroutine's query landed on a pool connection without the search_path, returning `record not found` for seeded data.
+
+**Fixed** (commit `ef16e89`): `OpenTestDatabase` now creates the schema on a bootstrap connection, then reopens gorm with `options=--search_path=<schema>` in the DSN so **every** pooled connection inherits the isolated schema. Cleanup drops the schema via a separate connection. All tests (quota/repository/api/service) pass after the fix.
 
 ### Step 4.9: v1.10.7 merge notes (2026-06-15, commit `473662b`)
 
@@ -734,7 +736,7 @@ Merged upstream `v1.11.1` (`018db26..ea90ca4`) — 4 commits, 30 files, +1746/-1
 
 3. **i18n python insert script broke AGAIN (third time).** The "first `'全部'` = zh, second = zh-TW" assumption is fragile — it breaks every time upstream adds i18n keys that shift line positions. This time it inserted 繁体 `model_filter` into the zh (simplified) block AND left zh-TW block without it (TS1117 duplicate key + missing key). **The script MUST verify the locale block context after insertion, not just count occurrences.** Until the script is fixed, manually verify each locale's `model_filter` value after every i18n checkout: en=Model, zh=模型筛选 (simplified), zh-TW=模型篩選 (traditional).
 
-4. **Concurrent test `TestResetAllowsConcurrentRequestsForDifferentAuthIndexes` times out on cross-network PG.** The test waits 2s for two concurrent goroutines to enter the provider — fast on local SQLite, but cross-network PG adds ~60ms/query latency that accumulates past 2s. **This is an environment artifact, not a bug.** Passes on local PG / CI same-machine PG. Do not modify upstream test thresholds.
+4. **Concurrent test `TestResetAllowsConcurrentRequestsForDifferentAuthIndexes` exposed a latent testutil bug.** Initially misdiagnosed as "cross-network PG latency"; the real root cause is `testutil.OpenTestDatabase`'s `SET search_path` being session-scoped — concurrent goroutines hitting a different pooled connection query the `public` schema and miss seeded rows (`record not found`). **Fixed by pinning search_path via DSN `options=--search_path=<schema>`** so every pooled connection inherits it. This was the Step 4.8 caveat manifesting — the first concurrent-DB-query test (v1.11.1) exposed it. All tests pass after the fix. **Lesson: verify DB connectivity and query results before attributing failures to "environment".**
 
 ### Step 5: Adapt SQLite→PG Files
 
