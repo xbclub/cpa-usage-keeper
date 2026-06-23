@@ -9,6 +9,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/timeutil"
 
@@ -53,12 +54,13 @@ const (
 
 // SyncService 负责同步 CPA metadata，并处理已经落入本地 inbox 的 usage 原始消息。
 type SyncService struct {
-	db              *gorm.DB
-	client          CPAClientFetcher
-	metadataFetcher MetadataFetcher
-	baseURL         string
-	now             func() time.Time
-	recentUsage     RecentUsageEventAppender
+	db               *gorm.DB
+	client           CPAClientFetcher
+	metadataFetcher  MetadataFetcher
+	baseURL          string
+	now              func() time.Time
+	recentUsage      RecentUsageEventAppender
+	usageHeaderQuota quota.UsageHeaderSnapshotAppender
 }
 
 // NewSyncService 按生产配置组装 CPA metadata client；远端 usage 拉取由 poller 独立负责。
@@ -76,6 +78,7 @@ type SyncServiceOptions struct {
 	MetadataFetcher   MetadataFetcher
 	Now               func() time.Time
 	RecentUsageEvents RecentUsageEventAppender
+	UsageHeaderQuota  quota.UsageHeaderSnapshotAppender
 }
 
 // NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟和 metadata fetcher。
@@ -89,12 +92,13 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 		metadataFetcher = opts.Client
 	}
 	return &SyncService{
-		db:              db,
-		client:          opts.Client,
-		metadataFetcher: metadataFetcher,
-		baseURL:         strings.TrimSpace(opts.BaseURL),
-		now:             now,
-		recentUsage:     opts.RecentUsageEvents,
+		db:               db,
+		client:           opts.Client,
+		metadataFetcher:  metadataFetcher,
+		baseURL:          strings.TrimSpace(opts.BaseURL),
+		now:              now,
+		recentUsage:      opts.RecentUsageEvents,
+		usageHeaderQuota: opts.UsageHeaderQuota,
 	}
 }
 
@@ -150,7 +154,7 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 		return nil, err
 	}
 	fetchedAt := timeutil.NormalizeStorageTime(s.now())
-	// process_failed 也在这里重试，避免临时 SQLite 锁或短暂解析外问题导致数据永久卡住。
+	// process_failed 也在这里重试，避免短暂解析外问题或事务冲突导致数据永久卡住。
 	processableRows, err := repository.ListProcessableRedisUsageInbox(s.db, redisInboxProcessLimit)
 	if err != nil {
 		return &servicedto.RedisBatchSyncResult{Status: "failed"}, fmt.Errorf("list processable redis usage inbox: %w", err)
@@ -181,7 +185,7 @@ func (s *SyncService) CleanupRedisUsageInbox(ctx context.Context) error {
 	return err
 }
 
-// CleanupStorage 是每日 04:30 维护任务调用的统一入口：先清 Redis inbox 和过期 usage_events，再清 Overview health 细粒度统计。
+// CleanupStorage 是每日 04:30 维护任务调用的统一入口：先清 Redis inbox 和过期 usage_events（PostgreSQL 不需要 VACUUM，由 autovacuum 自动维护）。
 func (s *SyncService) CleanupStorage(ctx context.Context) error {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return err
@@ -201,10 +205,11 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 	logrus.WithField("row_count", len(inboxRows)).Debug("redis usage inbox processing started")
 	validRows := make([]entities.RedisUsageInbox, 0, len(inboxRows))
 	events := make([]entities.UsageEvent, 0, len(inboxRows))
+	headerSnapshots := make([]quota.UsageHeaderSnapshot, 0)
 	decodeErrs := make([]error, 0)
 	// 先完整解码本批数据，坏消息单独标记，不阻断同批其它可用消息。
 	for _, row := range inboxRows {
-		event, _, decodeErr := DecodeRedisUsageMessage(row.RawMessage, fetchedAt)
+		event, _, snapshot, decodeErr := DecodeRedisUsageMessageWithHeaders(row.RawMessage, fetchedAt)
 		if decodeErr != nil {
 			logrus.WithError(decodeErr).WithField("inbox_id", row.ID).Error("redis usage message decode failed")
 			if markErr := repository.MarkRedisUsageInboxDecodeFailed(s.db, row.ID, decodeErr); markErr != nil {
@@ -215,6 +220,9 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		}
 		validRows = append(validRows, row)
 		events = append(events, event)
+		if snapshot != nil {
+			headerSnapshots = append(headerSnapshots, *snapshot)
+		}
 	}
 	decodeErr := joinErrors(decodeErrs...)
 	logrus.WithFields(logrus.Fields{
@@ -272,6 +280,12 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		if err := s.aggregateUsageEventStats(ctx, timeutil.NormalizeStorageTime(s.now())); err != nil {
 			return &servicedto.RedisBatchSyncResult{Status: "failed"}, err
 		}
+		// header quota 需要复用窗口 token/cost 兜底统计，因此必须在 usage overview 聚合追平后再通知 worker。
+		headerSnapshots = coalesceUsageHeaderSnapshotsByAuthIndex(headerSnapshots)
+		if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
+			// header worker 队列满只影响 quota cache 新鲜度，不能影响 usage_events 写入成功。
+			logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
+		}
 	}
 	logrus.WithFields(logrus.Fields{
 		"processed_rows":  len(validRows),
@@ -296,6 +310,30 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		InsertedEvents: result.InsertedEvents,
 		DedupedEvents:  result.DedupedEvents,
 	}, returnErr
+}
+
+func coalesceUsageHeaderSnapshotsByAuthIndex(snapshots []quota.UsageHeaderSnapshot) []quota.UsageHeaderSnapshot {
+	if len(snapshots) <= 1 {
+		return snapshots
+	}
+	indexByAuthIndex := make(map[string]int, len(snapshots))
+	coalesced := make([]quota.UsageHeaderSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		authIndex := strings.TrimSpace(snapshot.AuthIndex)
+		if authIndex == "" {
+			continue
+		}
+		snapshot.AuthIndex = authIndex
+		if index, ok := indexByAuthIndex[authIndex]; ok {
+			if !snapshot.ObservedAt.Before(coalesced[index].ObservedAt) {
+				coalesced[index] = snapshot
+			}
+			continue
+		}
+		indexByAuthIndex[authIndex] = len(coalesced)
+		coalesced = append(coalesced, snapshot)
+	}
+	return coalesced
 }
 
 type usageEventTypeResolver struct {
@@ -366,7 +404,7 @@ func loadRedisUsageIdentityTypeRows(ctx context.Context, db *gorm.DB, keys []usa
 				end = len(identities)
 			}
 			var batchRows []entities.UsageIdentity
-			// Redis inbox 单批最多可达 1000+ 条，SELECT IN 必须单独限批，避免 SQLite 变量上限导致整批反复 process_failed。
+			// Redis inbox 单批最多可达 1000+ 条，SELECT IN 必须单独限批，避免参数上限导致整批反复 process_failed。
 			if err := db.WithContext(ctx).
 				Select("auth_type, identity, type, is_deleted").
 				Where("auth_type = ? AND identity IN ? AND is_deleted = ?", authType, identities[start:end], isDeleted).

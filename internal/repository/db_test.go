@@ -28,6 +28,9 @@ func TestOpenDatabaseAutoMigratesCoreTables(t *testing.T) {
 	if !db.Migrator().HasTable("redis_usage_inboxes") {
 		t.Fatal("expected redis_usage_inboxes table to exist")
 	}
+	if !db.Migrator().HasTable("auth_sessions") {
+		t.Fatal("expected auth_sessions table to exist")
+	}
 }
 
 func TestInsertUsageEventsPersistsDuplicateEventKeys(t *testing.T) {

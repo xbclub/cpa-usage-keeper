@@ -136,12 +136,19 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		recentUsageCache = nil
 	}
 
+	// cpaClient / quotaService 提前创建：syncService 需要把 quotaService 作为 UsageHeaderQuota 注入，
+	// 用于 Redis usage response_headers 提交后异步 patch quota cache（不参与 usage_events 入库事务）。
+	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
+	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit, AutoRefreshInterval: cfg.QuotaAutoRefreshInterval})
+
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		BaseURL: cfg.CPABaseURL,
-		Client:  cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
+		Client:  cpaClient,
 		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
+		// Redis usage response_headers 提交后异步 patch quota cache，不参与 usage_events 入库事务。
+		UsageHeaderQuota: quotaService,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
@@ -185,14 +192,16 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	usageService := service.NewUsageServiceWithRecentCache(db, recentUsageCache)
 	usageIdentityService := service.NewUsageIdentityServiceWithRecentCache(db, recentUsageCache)
 	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
-	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	authFilesManagementService := service.NewAuthFilesManagementService(cpaClient)
 	if cfg.TLSSkipVerify {
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
 	pricingService := service.NewPricingService(db, cpaClient)
-	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit, AutoRefreshInterval: cfg.QuotaAutoRefreshInterval})
+	// 启用登录保护时把 session 持久化到 PostgreSQL，重启后已登录浏览器仍保留有效会话。
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
+	if cfg.AuthEnabled {
+		sessionManager = auth.NewPersistentSessionManager(cfg.AuthSessionTTL, auth.NewGormSessionStore(db))
+	}
 	authHandler := api.NewAuthHandler(api.AuthConfig{
 		Enabled:       cfg.AuthEnabled,
 		LoginPassword: cfg.LoginPassword,

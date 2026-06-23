@@ -17,26 +17,13 @@ import (
 )
 
 type usageOverviewResponse struct {
-	Usage         usageOverviewPayload           `json:"usage"`
-	Summary       usageOverviewSummary           `json:"summary"`
-	Series        usageOverviewSeries            `json:"series"`
-	ServiceHealth usageOverviewServiceHealth     `json:"service_health"`
-	APIKeySummary []usageOverviewAPIKeySummary   `json:"api_key_summary"`
-	Timezone      string                         `json:"timezone"`
-	RangeStart    *time.Time                     `json:"range_start,omitempty"`
-	RangeEnd      *time.Time                     `json:"range_end,omitempty"`
-}
-
-type usageOverviewAPIKeySummary struct {
-	APIGroupKey   string  `json:"api_key"`
-	RequestCount  int64   `json:"request_count"`
-	TotalTokens   int64   `json:"total_tokens"`
-	InputTokens   int64   `json:"input_tokens"`
-	OutputTokens  int64   `json:"output_tokens"`
-	CachedTokens  int64   `json:"cached_tokens"`
-	CostUSD       float64 `json:"cost_usd"`
-	CostAvailable bool    `json:"cost_available"`
-	DisplayName   string  `json:"display_name,omitempty"`
+	Usage         usageOverviewPayload       `json:"usage"`
+	Summary       usageOverviewSummary       `json:"summary"`
+	Series        usageOverviewSeries        `json:"series"`
+	ServiceHealth usageOverviewServiceHealth `json:"service_health"`
+	Timezone      string                     `json:"timezone"`
+	RangeStart    *time.Time                 `json:"range_start,omitempty"`
+	RangeEnd      *time.Time                 `json:"range_end,omitempty"`
 }
 
 type usageOverviewPayload struct {
@@ -47,16 +34,20 @@ type usageOverviewPayload struct {
 }
 
 type usageOverviewSummary struct {
-	RequestCount    int64   `json:"request_count"`
-	TokenCount      int64   `json:"token_count"`
-	WindowMinutes   int64   `json:"window_minutes"`
-	RPM             float64 `json:"rpm"`
-	TPM             float64 `json:"tpm"`
-	TotalCost       float64 `json:"total_cost"`
-	CostAvailable   bool    `json:"cost_available"`
-	InputTokens     int64   `json:"input_tokens"`
-	CachedTokens    int64   `json:"cached_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
+	RequestCount          int64    `json:"request_count"`
+	TokenCount            int64    `json:"token_count"`
+	WindowMinutes         int64    `json:"window_minutes"`
+	RPM                   float64  `json:"rpm"`
+	TPM                   float64  `json:"tpm"`
+	TotalCost             float64  `json:"total_cost"`
+	CostAvailable         bool     `json:"cost_available"`
+	InputTokens           int64    `json:"input_tokens"`
+	CachedTokens          int64    `json:"cached_tokens"`
+	ReasoningTokens       int64    `json:"reasoning_tokens"`
+	DailyAverageRequests  *float64 `json:"daily_average_requests,omitempty"`
+	DailyAverageTokens    *float64 `json:"daily_average_tokens,omitempty"`
+	DailyAverageCost      *float64 `json:"daily_average_cost,omitempty"`
+	DailyAverageRangeDays *float64 `json:"daily_average_range_days,omitempty"`
 }
 
 type usageOverviewSeries struct {
@@ -92,6 +83,8 @@ type usageOverviewRealtime struct {
 	Window               string                            `json:"window"`
 	Timezone             string                            `json:"timezone"`
 	BucketSeconds        int64                             `json:"bucket_seconds"`
+	WindowStart          *time.Time                        `json:"window_start,omitempty"`
+	WindowEnd            *time.Time                        `json:"window_end,omitempty"`
 	TokenVelocity        []usageOverviewTokenVelocityPoint `json:"token_velocity"`
 	ResponseLevel        []usageOverviewResponseLevelPoint `json:"response_level"`
 	ResponseDistribution usageOverviewResponseDistribution `json:"response_distribution"`
@@ -104,6 +97,8 @@ type keyUsageOverviewRealtime struct {
 	Window               string                               `json:"window"`
 	Timezone             string                               `json:"timezone"`
 	BucketSeconds        int64                                `json:"bucket_seconds"`
+	WindowStart          *time.Time                           `json:"window_start,omitempty"`
+	WindowEnd            *time.Time                           `json:"window_end,omitempty"`
 	TokenVelocity        []usageOverviewTokenVelocityPoint    `json:"token_velocity"`
 	ResponseLevel        []usageOverviewResponseLevelPoint    `json:"response_level"`
 	ResponseDistribution usageOverviewResponseDistribution    `json:"response_distribution"`
@@ -133,14 +128,18 @@ type usageOverviewResponseAveragePoint struct {
 }
 
 type usageOverviewResponseParticle struct {
-	Bucket string `json:"bucket"`
-	MS     int64  `json:"ms"`
-	Count  int64  `json:"count"`
+	Bucket    string `json:"bucket"`
+	Timestamp string `json:"timestamp,omitempty"`
+	MS        int64  `json:"ms"`
+	Count     int64  `json:"count"`
 }
 
 type usageOverviewResponseDistributionSeries struct {
-	AverageLine []usageOverviewResponseAveragePoint `json:"average_line"`
-	Particles   []usageOverviewResponseParticle     `json:"particles"`
+	AverageLine    []usageOverviewResponseAveragePoint `json:"average_line"`
+	Particles      []usageOverviewResponseParticle     `json:"particles"`
+	TotalParticles int64                               `json:"total_particles"`
+	Sampled        bool                                `json:"sampled"`
+	MaxParticles   int                                 `json:"max_particles"`
 }
 
 type usageOverviewResponseDistribution struct {
@@ -163,6 +162,8 @@ type usageOverviewRealtimeBase struct {
 	Window               string
 	Timezone             string
 	BucketSeconds        int64
+	WindowStart          *time.Time
+	WindowEnd            *time.Time
 	TokenVelocity        []usageOverviewTokenVelocityPoint
 	ResponseLevel        []usageOverviewResponseLevelPoint
 	ResponseDistribution usageOverviewResponseDistribution
@@ -263,6 +264,8 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 	})
 }
 
+// registerUsageModelsRoute 提供 Overview 过滤器专用的去重 model 列表 endpoint。
+// 独立于 /usage/overview，保证 model 过滤激活时下拉列表不会被收窄。
 func registerUsageModelsRoute(router gin.IRoutes, usageProvider service.UsageProvider) {
 	router.GET("/usage/models", func(c *gin.Context) {
 		if usageProvider == nil {
@@ -325,7 +328,6 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 			Summary:       usageOverviewSummary{},
 			Series:        emptyUsageOverviewSeries(),
 			ServiceHealth: usageOverviewServiceHealth{BlockDetails: []usageOverviewServiceHealthBlock{}},
-			APIKeySummary: nil,
 			Timezone:      time.Local.String(),
 			RangeStart:    filter.StartTime,
 			RangeEnd:      filter.EndTime,
@@ -348,7 +350,6 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 		Summary:       buildUsageOverviewSummary(overview),
 		Series:        buildUsageOverviewSeries(overview),
 		ServiceHealth: buildUsageOverviewServiceHealth(overview),
-		APIKeySummary: buildUsageOverviewAPIKeySummary(overview),
 		Timezone:      time.Local.String(),
 		RangeStart:    filter.StartTime,
 		RangeEnd:      filter.EndTime,
@@ -417,16 +418,20 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 		return usageOverviewSummary{}
 	}
 	return usageOverviewSummary{
-		RequestCount:    overview.Summary.RequestCount,
-		TokenCount:      overview.Summary.TokenCount,
-		WindowMinutes:   overview.Summary.WindowMinutes,
-		RPM:             overview.Summary.RPM,
-		TPM:             overview.Summary.TPM,
-		TotalCost:       overview.Summary.TotalCost,
-		CostAvailable:   overview.Summary.CostAvailable,
-		InputTokens:     overview.Summary.InputTokens,
-		CachedTokens:    overview.Summary.CachedTokens,
-		ReasoningTokens: overview.Summary.ReasoningTokens,
+		RequestCount:          overview.Summary.RequestCount,
+		TokenCount:            overview.Summary.TokenCount,
+		WindowMinutes:         overview.Summary.WindowMinutes,
+		RPM:                   overview.Summary.RPM,
+		TPM:                   overview.Summary.TPM,
+		TotalCost:             overview.Summary.TotalCost,
+		CostAvailable:         overview.Summary.CostAvailable,
+		InputTokens:           overview.Summary.InputTokens,
+		CachedTokens:          overview.Summary.CachedTokens,
+		ReasoningTokens:       overview.Summary.ReasoningTokens,
+		DailyAverageRequests:  overview.Summary.DailyAverageRequests,
+		DailyAverageTokens:    overview.Summary.DailyAverageTokens,
+		DailyAverageCost:      overview.Summary.DailyAverageCost,
+		DailyAverageRangeDays: overview.Summary.DailyAverageRangeDays,
 	}
 }
 
@@ -492,6 +497,8 @@ func emptyUsageOverviewRealtime(window string) usageOverviewRealtime {
 		Window:               base.Window,
 		Timezone:             base.Timezone,
 		BucketSeconds:        base.BucketSeconds,
+		WindowStart:          base.WindowStart,
+		WindowEnd:            base.WindowEnd,
 		TokenVelocity:        base.TokenVelocity,
 		ResponseLevel:        base.ResponseLevel,
 		ResponseDistribution: base.ResponseDistribution,
@@ -512,6 +519,8 @@ func emptyKeyUsageOverviewRealtime(window string) keyUsageOverviewRealtime {
 		Window:               base.Window,
 		Timezone:             base.Timezone,
 		BucketSeconds:        base.BucketSeconds,
+		WindowStart:          base.WindowStart,
+		WindowEnd:            base.WindowEnd,
 		TokenVelocity:        base.TokenVelocity,
 		ResponseLevel:        base.ResponseLevel,
 		ResponseDistribution: base.ResponseDistribution,
@@ -560,6 +569,14 @@ func realtimeBucketSeconds(window string) int64 {
 	}
 }
 
+func usageOverviewOptionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	normalized := timeutil.NormalizeStorageTime(value)
+	return &normalized
+}
+
 func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, window string, apiKeyInfos map[string]analysisAPIKeyInfo) usageOverviewRealtime {
 	if realtime == nil {
 		return emptyUsageOverviewRealtime(window)
@@ -568,6 +585,8 @@ func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, wind
 		Window:               realtime.Window,
 		Timezone:             time.Local.String(),
 		BucketSeconds:        realtime.BucketSeconds,
+		WindowStart:          usageOverviewOptionalTime(realtime.WindowStart),
+		WindowEnd:            usageOverviewOptionalTime(realtime.WindowEnd),
 		TokenVelocity:        make([]usageOverviewTokenVelocityPoint, 0, len(realtime.TokenVelocity)),
 		ResponseLevel:        make([]usageOverviewResponseLevelPoint, 0, len(realtime.ResponseLevel)),
 		ResponseDistribution: mapUsageOverviewResponseDistribution(realtime.ResponseDistribution),
@@ -621,27 +640,6 @@ func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, wind
 	return result
 }
 
-func buildUsageOverviewAPIKeySummary(overview *servicedto.UsageOverviewSnapshot) []usageOverviewAPIKeySummary {
-	if overview == nil {
-		return nil
-	}
-	items := overview.APIKeySummary
-	result := make([]usageOverviewAPIKeySummary, 0, len(items))
-	for _, item := range items {
-		result = append(result, usageOverviewAPIKeySummary{
-			APIGroupKey:   helper.RedactSensitiveValue(item.APIGroupKey),
-			RequestCount:  item.RequestCount,
-			TotalTokens:   item.TotalTokens,
-			InputTokens:   item.InputTokens,
-			OutputTokens:  item.OutputTokens,
-			CachedTokens:  item.CachedTokens,
-			CostUSD:       item.CostUSD,
-			CostAvailable: item.CostAvailable,
-		})
-	}
-	return result
-}
-
 func buildKeyUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, window string) keyUsageOverviewRealtime {
 	if realtime == nil {
 		return emptyKeyUsageOverviewRealtime(window)
@@ -650,6 +648,8 @@ func buildKeyUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, w
 		Window:               realtime.Window,
 		Timezone:             time.Local.String(),
 		BucketSeconds:        realtime.BucketSeconds,
+		WindowStart:          usageOverviewOptionalTime(realtime.WindowStart),
+		WindowEnd:            usageOverviewOptionalTime(realtime.WindowEnd),
 		TokenVelocity:        make([]usageOverviewTokenVelocityPoint, 0, len(realtime.TokenVelocity)),
 		ResponseLevel:        make([]usageOverviewResponseLevelPoint, 0, len(realtime.ResponseLevel)),
 		ResponseDistribution: mapUsageOverviewResponseDistribution(realtime.ResponseDistribution),
@@ -709,8 +709,11 @@ func mapUsageOverviewResponseDistribution(distribution servicedto.RealtimeRespon
 
 func mapUsageOverviewResponseDistributionSeries(series servicedto.RealtimeResponseDistributionSeries) usageOverviewResponseDistributionSeries {
 	return usageOverviewResponseDistributionSeries{
-		AverageLine: mapUsageOverviewResponseAveragePoints(series.AverageLine),
-		Particles:   mapUsageOverviewResponseParticles(series.Particles),
+		AverageLine:    mapUsageOverviewResponseAveragePoints(series.AverageLine),
+		Particles:      mapUsageOverviewResponseParticles(series.Particles),
+		TotalParticles: series.TotalParticles,
+		Sampled:        series.Sampled,
+		MaxParticles:   series.MaxParticles,
 	}
 }
 
@@ -729,9 +732,10 @@ func mapUsageOverviewResponseParticles(points []servicedto.RealtimeResponseParti
 	result := make([]usageOverviewResponseParticle, 0, len(points))
 	for _, point := range points {
 		result = append(result, usageOverviewResponseParticle{
-			Bucket: point.Bucket,
-			MS:     point.MS,
-			Count:  point.Count,
+			Bucket:    point.Bucket,
+			Timestamp: point.Timestamp,
+			MS:        point.MS,
+			Count:     point.Count,
 		})
 	}
 	return result

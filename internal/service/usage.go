@@ -40,7 +40,7 @@ func (s *usageService) resolveAPIGroupKey(apiKeyID string) (string, error) {
 	return apiKey.APIKey, nil
 }
 
-// Usage 页面里的 Overview tab 下传时间窗口和全局 API-Key，仓储层负责构建 overview 聚合。
+// ListOverviewModels 返回 Overview 过滤器用的去重 model 列表。专用 endpoint，避免 model 过滤激活时下拉列表被收窄。
 func (s *usageService) ListOverviewModels(_ context.Context, filter servicedto.UsageFilter) ([]string, error) {
 	apiGroupKey, err := s.resolveAPIGroupKey(filter.APIKeyID)
 	if err != nil {
@@ -65,7 +65,6 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.Usa
 		EndTime:     filter.EndTime,
 		QueryNow:    filter.QueryNow,
 		APIGroupKey: apiGroupKey,
-		Model:       filter.Model,
 	}, s.recentUsage)
 	if err != nil {
 		return nil, err
@@ -73,19 +72,22 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.Usa
 	return &servicedto.UsageOverviewSnapshot{
 		Usage: overview.Usage,
 		Summary: servicedto.UsageOverviewSummary{
-			RequestCount:    overview.Summary.RequestCount,
-			TokenCount:      overview.Summary.TokenCount,
-			WindowMinutes:   overview.Summary.WindowMinutes,
-			RPM:             overview.Summary.RPM,
-			TPM:             overview.Summary.TPM,
-			TotalCost:       overview.Summary.TotalCost,
-			CostAvailable:   overview.Summary.CostAvailable,
-			InputTokens:     overview.Summary.InputTokens,
-			CachedTokens:    overview.Summary.CachedTokens,
-			ReasoningTokens: overview.Summary.ReasoningTokens,
+			RequestCount:          overview.Summary.RequestCount,
+			TokenCount:            overview.Summary.TokenCount,
+			WindowMinutes:         overview.Summary.WindowMinutes,
+			RPM:                   overview.Summary.RPM,
+			TPM:                   overview.Summary.TPM,
+			TotalCost:             overview.Summary.TotalCost,
+			CostAvailable:         overview.Summary.CostAvailable,
+			InputTokens:           overview.Summary.InputTokens,
+			CachedTokens:          overview.Summary.CachedTokens,
+			ReasoningTokens:       overview.Summary.ReasoningTokens,
+			DailyAverageRequests:  overview.Summary.DailyAverageRequests,
+			DailyAverageTokens:    overview.Summary.DailyAverageTokens,
+			DailyAverageCost:      overview.Summary.DailyAverageCost,
+			DailyAverageRangeDays: overview.Summary.DailyAverageRangeDays,
 		},
 		Series: mapUsageOverviewSeries(overview.Series),
-		APIKeySummary: overview.APIKeySummary,
 		Health: servicedto.UsageOverviewHealth{
 			TotalSuccess:  overview.Health.TotalSuccess,
 			TotalFailure:  overview.Health.TotalFailure,
@@ -109,6 +111,7 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.Usa
 				return blocks
 			}(),
 		},
+		APIKeySummary: overview.APIKeySummary,
 	}, nil
 }
 
@@ -144,6 +147,8 @@ func mapUsageOverviewRealtime(realtime repodto.UsageOverviewRealtimeRecord) serv
 	return servicedto.UsageOverviewRealtime{
 		Window:               realtime.Window,
 		BucketSeconds:        realtime.BucketSeconds,
+		WindowStart:          realtime.WindowStart,
+		WindowEnd:            realtime.WindowEnd,
 		TokenVelocity:        mapRealtimeTokenVelocity(realtime.TokenVelocity),
 		ResponseLevel:        mapRealtimeResponseLevel(realtime.ResponseLevel),
 		ResponseDistribution: mapRealtimeResponseDistribution(realtime.ResponseDistribution),
@@ -189,8 +194,11 @@ func mapRealtimeResponseDistribution(distribution repodto.RealtimeResponseDistri
 
 func mapRealtimeResponseDistributionSeries(series repodto.RealtimeResponseDistributionSeriesRecord) servicedto.RealtimeResponseDistributionSeries {
 	return servicedto.RealtimeResponseDistributionSeries{
-		AverageLine: mapRealtimeResponseAveragePoints(series.AverageLine),
-		Particles:   mapRealtimeResponseParticles(series.Particles),
+		AverageLine:    mapRealtimeResponseAveragePoints(series.AverageLine),
+		Particles:      mapRealtimeResponseParticles(series.Particles),
+		TotalParticles: series.TotalParticles,
+		Sampled:        series.Sampled,
+		MaxParticles:   series.MaxParticles,
 	}
 }
 
@@ -209,9 +217,10 @@ func mapRealtimeResponseParticles(points []repodto.RealtimeResponseParticleRecor
 	result := make([]servicedto.RealtimeResponseParticle, 0, len(points))
 	for _, point := range points {
 		result = append(result, servicedto.RealtimeResponseParticle{
-			Bucket: point.Bucket,
-			MS:     point.MS,
-			Count:  point.Count,
+			Bucket:    point.Bucket,
+			Timestamp: point.Timestamp,
+			MS:        point.MS,
+			Count:     point.Count,
 		})
 	}
 	return result
@@ -442,6 +451,7 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.Usag
 			APIGroupKey:         row.APIGroupKey,
 			Model:               row.Model,
 			ReasoningEffort:     row.ReasoningEffort,
+			ServiceTier:         row.ServiceTier,
 			ExecutorType:        row.ExecutorType,
 			Endpoint:            row.Endpoint,
 			AuthType:            row.AuthType,
