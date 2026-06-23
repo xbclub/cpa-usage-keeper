@@ -1821,7 +1821,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       />
                     </label>
                   </div>
-                    {isOverviewTab && overviewModelNames.length > 0 && (
+                    {isOverviewTab && (
                     <div className={styles.apiKeyFilterGroup}>
                     <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
                       <span className={styles.usageFilterLabel}>{t('usage_stats.model_filter')}</span>
