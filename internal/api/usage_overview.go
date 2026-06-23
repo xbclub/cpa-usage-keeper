@@ -17,13 +17,27 @@ import (
 )
 
 type usageOverviewResponse struct {
-	Usage         usageOverviewPayload       `json:"usage"`
-	Summary       usageOverviewSummary       `json:"summary"`
-	Series        usageOverviewSeries        `json:"series"`
-	ServiceHealth usageOverviewServiceHealth `json:"service_health"`
-	Timezone      string                     `json:"timezone"`
-	RangeStart    *time.Time                 `json:"range_start,omitempty"`
-	RangeEnd      *time.Time                 `json:"range_end,omitempty"`
+	Usage         usageOverviewPayload         `json:"usage"`
+	Summary       usageOverviewSummary         `json:"summary"`
+	Series        usageOverviewSeries          `json:"series"`
+	ServiceHealth usageOverviewServiceHealth   `json:"service_health"`
+	APIKeySummary []usageOverviewAPIKeySummary `json:"api_key_summary"`
+	Timezone      string                       `json:"timezone"`
+	RangeStart    *time.Time                   `json:"range_start,omitempty"`
+	RangeEnd      *time.Time                   `json:"range_end,omitempty"`
+}
+
+// usageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行 json 投影。api_key 字段在后端用
+// helper.RedactSensitiveValue 脱敏，前端 ApiKeySummaryTable 直接展示（不再额外遮罩）。
+type usageOverviewAPIKeySummary struct {
+	APIKey        string  `json:"api_key"`
+	RequestCount  int64   `json:"request_count"`
+	TotalTokens   int64   `json:"total_tokens"`
+	InputTokens   int64   `json:"input_tokens"`
+	OutputTokens  int64   `json:"output_tokens"`
+	CachedTokens  int64   `json:"cached_tokens"`
+	CostUSD       float64 `json:"cost_usd"`
+	CostAvailable bool    `json:"cost_available"`
 }
 
 type usageOverviewPayload struct {
@@ -328,6 +342,7 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 			Summary:       usageOverviewSummary{},
 			Series:        emptyUsageOverviewSeries(),
 			ServiceHealth: usageOverviewServiceHealth{BlockDetails: []usageOverviewServiceHealthBlock{}},
+			APIKeySummary: []usageOverviewAPIKeySummary{},
 			Timezone:      time.Local.String(),
 			RangeStart:    filter.StartTime,
 			RangeEnd:      filter.EndTime,
@@ -350,10 +365,33 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 		Summary:       buildUsageOverviewSummary(overview),
 		Series:        buildUsageOverviewSeries(overview),
 		ServiceHealth: buildUsageOverviewServiceHealth(overview),
+		APIKeySummary: buildUsageOverviewAPIKeySummary(overview),
 		Timezone:      time.Local.String(),
 		RangeStart:    filter.StartTime,
 		RangeEnd:      filter.EndTime,
 	})
+}
+
+// buildUsageOverviewAPIKeySummary 把 service 层的 APIKeySummary 投影成 json 行，api_key 用
+// helper.RedactSensitiveValue 统一脱敏（与 cpa-api-keys 等其它接口一致，前端不再二次遮罩）。
+func buildUsageOverviewAPIKeySummary(overview *servicedto.UsageOverviewSnapshot) []usageOverviewAPIKeySummary {
+	if overview == nil || len(overview.APIKeySummary) == 0 {
+		return []usageOverviewAPIKeySummary{}
+	}
+	rows := make([]usageOverviewAPIKeySummary, 0, len(overview.APIKeySummary))
+	for _, item := range overview.APIKeySummary {
+		rows = append(rows, usageOverviewAPIKeySummary{
+			APIKey:        helper.RedactSensitiveValue(item.APIGroupKey),
+			RequestCount:  item.RequestCount,
+			TotalTokens:   item.TotalTokens,
+			InputTokens:   item.InputTokens,
+			OutputTokens:  item.OutputTokens,
+			CachedTokens:  item.CachedTokens,
+			CostUSD:       item.CostUSD,
+			CostAvailable: item.CostAvailable,
+		})
+	}
+	return rows
 }
 
 func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider, filter servicedto.UsageFilter) {

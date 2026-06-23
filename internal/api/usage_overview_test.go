@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -683,7 +684,8 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 		t.Fatalf("failed to decode overview response: %v\n%s", err, body)
 	}
-	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "service_health", "timezone", "range_start", "range_end")
+	// api_key_summary 是 fork-unique 字段（ApiKeySummaryTable 用），需加入白名单
+	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "service_health", "api_key_summary", "timezone", "range_start", "range_end")
 
 	usage, ok := decoded["usage"].(map[string]any)
 	if !ok {
@@ -726,4 +728,49 @@ func float64Ptr(value float64) *float64 {
 
 func int64Ptr(value int64) *int64 {
 	return &value
+}
+
+// TestUsageOverviewSerializesAPIKeySummaryWithRedaction 是 fork-unique ApiKeySummaryTable 的防回归测试：
+// 验证 overview response 的 api_key_summary 字段存在、包含数据行，且 api_key 已用 helper.RedactSensitiveValue 脱敏
+// （后端脱敏，前端不再二次遮罩 —— Step 4.5 #2/#12）。
+func TestUsageOverviewSerializesAPIKeySummaryWithRedaction(t *testing.T) {
+	config := AuthConfig{Enabled: false}
+	sessions := auth.NewSessionManager(0)
+	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{
+		APIKeySummary: []dto.UsageOverviewAPIKeySummary{
+			{APIGroupKey: "sk-supersecretkey1234567890", RequestCount: 5, TotalTokens: 100, CostUSD: 0.5, CostAvailable: true},
+		},
+	}}
+	router := NewRouter(nil, nil, provider, nil, config, NewAuthHandler(config, sessions), "")
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview?range=8h", nil)
+	router.ServeHTTP(resp, req)
+
+	var decoded struct {
+		APIKeySummary []struct {
+			APIKey        string  `json:"api_key"`
+			RequestCount  int64   `json:"request_count"`
+			TotalTokens   int64   `json:"total_tokens"`
+			CostUSD       float64 `json:"cost_usd"`
+			CostAvailable bool    `json:"cost_available"`
+		} `json:"api_key_summary"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, resp.Body.String())
+	}
+	if len(decoded.APIKeySummary) != 1 {
+		t.Fatalf("expected 1 api_key_summary row, got %d", len(decoded.APIKeySummary))
+	}
+	row := decoded.APIKeySummary[0]
+	// 脱敏后 api_key 不应是原始 key（sk-... 应被遮罩成 sk-*********7890）
+	if row.APIKey == "sk-supersecretkey1234567890" {
+		t.Fatalf("api_key not redacted: %s", row.APIKey)
+	}
+	if !strings.Contains(row.APIKey, "*") {
+		t.Fatalf("api_key should contain mask characters, got: %s", row.APIKey)
+	}
+	if row.RequestCount != 5 || row.TotalTokens != 100 {
+		t.Fatalf("unexpected row values: %+v", row)
+	}
 }
