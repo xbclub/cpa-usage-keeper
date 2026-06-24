@@ -2245,3 +2245,76 @@ func captureSyncDebugLogs(t *testing.T) *bytes.Buffer {
 	return logs
 }
 
+
+// 以下两个测试来自上游 ee143eb..18e593c（#246 batch draining），经 fork 的 openSyncTestDatabase（PG）开库。
+func TestProcessRedisUsageInboxReturnsBatchSignalWhenTransactionCannotStart(t *testing.T) {
+	// 准备独立测试数据库，避免关闭连接影响其它用例。
+	db := openSyncTestDatabase(t)
+	// 写入一条不需要 identity 查询的消息，使下一次数据库访问发生在事务开始阶段。
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"transaction-start-fails","tokens":{"input_tokens":1,"output_tokens":2}}`)
+	// callbackClosed 保护测试回调只关闭一次底层连接。
+	callbackClosed := false
+	// callbackName 使用测试专属名称，避免污染同一进程里的其它 GORM 回调。
+	callbackName := "test:close_db_after_redis_inbox_list"
+	// 注册查询后回调，在取出 redis_usage_inboxes 后关闭底层连接。
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		// 只在目标表查询后触发，避免关闭迁移或 seed 阶段使用的连接。
+		if callbackClosed || tx.Statement == nil || tx.Statement.Table != "redis_usage_inboxes" {
+			// 非目标查询不做任何处理。
+			return
+		}
+		// 标记已关闭，防止后续回调重复关闭连接。
+		callbackClosed = true
+		// 取出底层 sql.DB，用来模拟事务开始前连接不可用。
+		sqlDB, dbErr := tx.DB()
+		// 如果底层连接可取出，就关闭它制造事务启动失败。
+		if dbErr == nil {
+			// 关闭连接只作用于本测试临时数据库。
+			_ = sqlDB.Close()
+		}
+	}); err != nil {
+		t.Fatalf("register query callback returned error: %v", err)
+	}
+	// 测试退出时尽力移除 callback，保持 GORM 回调链干净。
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+	// 构造 sync service，走真实 ProcessRedisUsageInbox 链路。
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	// 执行处理，事务启动应因连接关闭而失败。
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	// 失败必须暴露给调用方，避免静默丢消息。
+	if err == nil {
+		t.Fatalf("expected transaction start failure, got nil")
+	}
+	// 即使事务未能开始，也应返回本轮取出的 inbox 行数。
+	if result == nil || result.Status != "failed" || result.ProcessedRows != 1 || result.BatchFull {
+		t.Fatalf("expected failed result with one processed row, got %+v", result)
+	}
+}
+
+func TestProcessRedisUsageInboxMarksFullMalformedBatch(t *testing.T) {
+	// 准备独立数据库，用真实 service 路径处理满批坏消息。
+	db := openSyncTestDatabase(t)
+	// messages 保存一整批无法解码的 Redis 原始消息。
+	messages := make([]string, 0, redisInboxProcessLimit)
+	// 构造刚好达到 Redis process 批次上限的坏消息集合。
+	for i := 0; i < redisInboxProcessLimit; i++ {
+		// 每条坏消息内容不同，便于插入 inbox 时保持独立行。
+		messages = append(messages, fmt.Sprintf("{bad-json-%d}", i))
+	}
+	// 将满批坏消息写入 durable inbox，模拟真实 backlog 输入。
+	seedRedisInboxMessagesForTest(t, db, messages...)
+	// 构造 sync service，后续走真实 ProcessRedisUsageInbox 链路。
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	// 执行本地 inbox 处理，预期全部进入 decode_failed warning 路径。
+	result, err := processRedisUsageInboxForTest(t, service)
+	// 全坏消息应返回 decode warning，不能被静默吞掉。
+	if err == nil || !strings.Contains(err.Error(), "decode redis usage message") {
+		t.Fatalf("expected decode warning, got %v", err)
+	}
+	// 即使没有事件写入，满批坏消息也应报告 BatchFull，供 runner 继续 drain。
+	if result == nil || result.Status != "completed_with_warnings" || result.ProcessedRows != redisInboxProcessLimit || !result.BatchFull {
+		t.Fatalf("expected warning result with full malformed batch, got %+v", result)
+	}
+}
