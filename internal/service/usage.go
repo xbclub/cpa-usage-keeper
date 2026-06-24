@@ -65,6 +65,7 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.Usa
 		EndTime:     filter.EndTime,
 		QueryNow:    filter.QueryNow,
 		APIGroupKey: apiGroupKey,
+		Models:      filter.Models,
 	}, s.recentUsage)
 	if err != nil {
 		return nil, err
@@ -285,6 +286,7 @@ func (s *usageService) GetAnalysis(_ context.Context, filter servicedto.UsageFil
 		StartTime:   filter.StartTime,
 		EndTime:     filter.EndTime,
 		APIGroupKey: apiGroupKey,
+		Models:      filter.Models,
 	})
 	if err != nil {
 		return nil, err
