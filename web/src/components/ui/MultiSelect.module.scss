@@ -67,21 +67,55 @@
   }
 }
 
-// 下拉面板复用全局 _dropdown-panel.scss 的基础样式
+// 下拉面板：内联样式（与 Select.module.scss 一致，避免 composes from 跨 partial 失效）
 .dropdown {
-  composes: dropdown from '../../styles/dropdown-panel.scss';
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  padding: 6px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .option {
-  composes: option from '../../styles/dropdown-panel.scss';
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: $radius-md;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
 }
 
 .optionLabel {
-  composes: optionLabel from '../../styles/dropdown-panel.scss';
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .optionActive {
-  composes: optionActive from '../../styles/dropdown-panel.scss';
+  border-color: rgba($primary-color, 0.5);
+  background: rgba($primary-color, 0.1);
+  font-weight: 600;
 }
 
 // checkbox 占位符：选中时显示 ✓
