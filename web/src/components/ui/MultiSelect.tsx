@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { IconChevronDown } from './icons';
 import { useDropdownPosition } from './useDropdownPosition';
 import styles from './MultiSelect.module.scss';
@@ -91,7 +92,7 @@ export function MultiSelect({
           <IconChevronDown />
         </span>
       </button>
-      {isOpen && dropdownStyle && (
+      {isOpen && dropdownStyle && createPortal(
         <div id={dropdownId} className={styles.dropdown} style={dropdownStyle} role="listbox" aria-multiselectable="true">
           {options.map((option) => {
             const checked = selectedSet.has(option.value);
@@ -113,7 +114,8 @@ export function MultiSelect({
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
