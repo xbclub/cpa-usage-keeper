@@ -85,7 +85,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
     });
   }, [apiKeyId, customRangeReady, enabled, loadUsageStats, model, onAuthRequired, requestEnd, requestStart, resolvedRange]);
 
-  const currentQueryKey = customRangeReady ? buildUsageStatsQueryKey(resolvedRange, requestStart, requestEnd, apiKeyId) : null;
+  const currentQueryKey = customRangeReady ? buildUsageStatsQueryKey(resolvedRange, requestStart, requestEnd, apiKeyId, model) : null;
   const usage = usageSnapshot as UsageOverviewPayload | null;
 
   return {
