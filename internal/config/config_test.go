@@ -406,8 +406,10 @@ func TestLoadIgnoresLegacyPathOverrides(t *testing.T) {
 	}
 
 	expectedWorkDir := filepath.Join(envDir, "work")
-	if cfg.WorkDir != expectedWorkDir || cfg.LogDir != filepath.Join(envDir, "legacy", "logs") {
-		t.Fatalf("expected legacy LOG_DIR override to apply, got %+v", cfg)
+	// 与上游一致：legacy LOG_DIR 被解析成相对 WORK_DIR（即 work/legacy/logs），而非相对 env 文件目录。
+	// fork 用默认日志目录（workDir/logs），忽略外部 LOG_DIR override 的相对语义。
+	if cfg.WorkDir != expectedWorkDir || cfg.LogDir != filepath.Join(expectedWorkDir, "logs") {
+		t.Fatalf("expected legacy LOG_DIR override to be ignored, got %+v", cfg)
 	}
 }
 

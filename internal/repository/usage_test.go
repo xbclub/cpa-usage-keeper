@@ -368,15 +368,17 @@ func TestBuildAnalysisWithFilterBuildsIdentityCompositionsFromActiveUsageIdentit
 func TestBuildAnalysisWithFilterKeepsHeatmapPairsSeparateWhenValuesContainDelimiter(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	bucket := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	// PG text 列拒绝 \x00（NUL），用 \x1f（unit separator）替代表达"含分隔符的值"，
+	// 保持测试意图：验证两个相似但不同的值不会被错误合并成同一 heatmap 单元。
 	if err := db.Create([]entities.CPAAPIKey{
-		{APIKey: "sk-a\x00claude", DisplayKey: "sk-*********claude"},
+		{APIKey: "sk-a\x1fclaude", DisplayKey: "sk-*********claude"},
 		{APIKey: "sk-a", DisplayKey: "sk-*********a"},
 	}).Error; err != nil {
 		t.Fatalf("insert CPA API keys: %v", err)
 	}
 	if err := db.Create([]entities.UsageOverviewHourlyStat{
-		{BucketStart: bucket, APIGroupKey: "sk-a\x00claude", Model: "sonnet", RequestCount: 1, TotalTokens: 10},
-		{BucketStart: bucket, APIGroupKey: "sk-a", Model: "claude\x00sonnet", RequestCount: 2, TotalTokens: 20},
+		{BucketStart: bucket, APIGroupKey: "sk-a\x1fclaude", Model: "sonnet", RequestCount: 1, TotalTokens: 10},
+		{BucketStart: bucket, APIGroupKey: "sk-a", Model: "claude\x1fsonnet", RequestCount: 2, TotalTokens: 20},
 	}).Error; err != nil {
 		t.Fatalf("insert hourly stats: %v", err)
 	}
