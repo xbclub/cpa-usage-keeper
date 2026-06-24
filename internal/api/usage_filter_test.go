@@ -293,7 +293,7 @@ func TestParseUsageFilterQueryAcceptsEventsPaginationAndFilters(t *testing.T) {
 	if filter.Page != 3 || filter.PageSize != 100 || filter.Offset != 200 {
 		t.Fatalf("expected page 3/page size 100 offset 200, got %+v", filter)
 	}
-	if filter.Model != "claude-sonnet" || filter.Source != "source-a" || filter.AuthIndex != "2" {
+	if len(filter.Models) != 1 || filter.Models[0] != "claude-sonnet" || filter.Source != "source-a" || filter.AuthIndex != "2" {
 		t.Fatalf("expected trimmed server-side filters, got %+v", filter)
 	}
 }

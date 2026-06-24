@@ -435,7 +435,7 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.Usag
 		Page:        filter.Page,
 		PageSize:    filter.PageSize,
 		Offset:      filter.Offset,
-		Model:       filter.Model,
+		Models:      filter.Models,
 		AuthIndex:   filter.AuthIndex,
 		APIGroupKey: apiGroupKey,
 		Result:      filter.Result,

@@ -462,7 +462,7 @@ func TestUsageEventsPassesPaginationAndAuthIndexSourceFilter(t *testing.T) {
 	if provider.lastFilter.Page != 3 || provider.lastFilter.PageSize != 100 || provider.lastFilter.Offset != 200 {
 		t.Fatalf("expected pagination filter, got %+v", provider.lastFilter)
 	}
-	if provider.lastFilter.Model != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
+	if len(provider.lastFilter.Models) != 1 || provider.lastFilter.Models[0] != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
 		t.Fatalf("expected source filter to be translated to auth_index only, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()
@@ -525,7 +525,7 @@ func TestUsageEventModelFilterOptionsReturnsStableModels(t *testing.T) {
 	if provider.filterOptionCalls != 1 || provider.filterCalls != 0 {
 		t.Fatalf("expected model filter options endpoint only, events=%d filterOptions=%d", provider.filterCalls, provider.filterOptionCalls)
 	}
-	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil || provider.lastFilter.Model != "" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "" || provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 {
+	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil || len(provider.lastFilter.Models) > 0 || provider.lastFilter.Source != "" || provider.lastFilter.Result != "" || provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 {
 		t.Fatalf("expected model filters endpoint to ignore query filters, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()

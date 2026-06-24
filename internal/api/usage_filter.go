@@ -37,7 +37,7 @@ func parseUsageTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.
 	filter.Page = 0
 	filter.PageSize = 0
 	filter.Offset = 0
-	filter.Model = ""
+	filter.Models = nil
 	filter.Source = ""
 	filter.AuthIndex = ""
 	filter.Result = ""
@@ -101,7 +101,8 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (servicedto.Usag
 		filter.Limit = pageSize
 	}
 	filter.Offset = (filter.Page - 1) * filter.PageSize
-	filter.Model = strings.TrimSpace(query.Get("model"))
+	// model 支持多选，前端以逗号分隔传入（如 model=claude-sonnet,gpt-4o）；逐个 trim 后去空。
+	filter.Models = parseModelFilterValues(query.Get("model"))
 	// Request Events 前端参数仍叫 source，但它的值是 usage identity；路由层会转换成 auth_index 查询。
 	filter.Source = strings.TrimSpace(query.Get("source"))
 	filter.AuthIndex = strings.TrimSpace(query.Get("auth_index"))
@@ -201,4 +202,31 @@ func parseUsageRealtimeFilterQuery(req *http.Request, anchor time.Time) (service
 	default:
 		return servicedto.UsageFilter{}, fmt.Errorf("unsupported realtime window %q", realtimeWindow)
 	}
+}
+
+
+// parseModelFilterValues 把 model 查询参数按逗号拆成去重的非空 model 列表。
+// 空字符串返回 nil，使仓储层 len(filter.Models) == 0 跳过 model 过滤。
+func parseModelFilterValues(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	models := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		models = append(models, name)
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
 }

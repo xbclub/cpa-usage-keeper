@@ -11,7 +11,7 @@ interface LoadUsageStatsOptions {
   start?: string;
   end?: string;
   apiKeyId?: string;
-  model?: string;
+  model?: string[];
 }
 
 interface LoadUsageStatsRealtimeOptions {
@@ -45,8 +45,8 @@ let activeRealtimeRequest: Promise<void> | null = null;
 let activeRealtimeRequestKey: string | null = null;
 let activeRealtimeRequestController: AbortController | null = null;
 
-export const buildUsageStatsQueryKey = (range: UsageTimeRange, start?: string, end?: string, apiKeyId?: string, model?: string): string =>
-  `${range}:${start ?? ''}:${end ?? ''}:${apiKeyId ?? ''}:${model ?? ''}`;
+export const buildUsageStatsQueryKey = (range: UsageTimeRange, start?: string, end?: string, apiKeyId?: string, model?: string[]): string =>
+  `${range}:${start ?? ''}:${end ?? ''}:${apiKeyId ?? ''}:${model?.join(',') ?? ''}`;
 
 const buildRealtimeQueryKey = (apiKeyId?: string, realtimeWindow?: OverviewRealtimeWindow): string =>
   `${apiKeyId ?? ''}:${realtimeWindow ?? ''}`;

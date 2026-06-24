@@ -22,7 +22,7 @@ type UsageFilter struct {
 	Page            int
 	PageSize        int
 	Offset          int
-	Model           string
+	Models          []string
 	Source          string
 	AuthIndex       string
 	APIKeyID        string

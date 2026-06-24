@@ -5,6 +5,7 @@ import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiK
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { IconRefreshCw } from '@/components/ui/icons';
@@ -773,7 +774,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [customTimeRange, setCustomTimeRange] = useState<{ start: string; end: string }>(loadCustomTimeRange);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState('');
-  const [overviewModelFilter, setOverviewModelFilter] = useState('');
+  const [overviewModelFilter, setOverviewModelFilter] = useState<string[]>([]);
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [customDateRangeAnchorMs, setCustomDateRangeAnchorMs] = useState(() => Date.now());
@@ -1227,7 +1228,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
   useEffect(() => {
     setEventsPage(1);
-    setOverviewModelFilter('');
+    setOverviewModelFilter([]);
   }, [customTimeRange.end, customTimeRange.start, selectedApiKeyId, timeRange]);
 
   useEffect(() => {
@@ -1825,13 +1826,12 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                     <div className={styles.apiKeyFilterGroup}>
                     <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
                       <span className={styles.usageFilterLabel}>{t('usage_stats.model_filter')}</span>
-                      <Select
+                      <MultiSelect
                         value={overviewModelFilter}
-                        options={[
-                          { value: '', label: t('usage_stats.all_models') },
-                          ...overviewModelNames.map((name) => ({ value: name, label: name })),
-                        ]}
+                        options={overviewModelNames.map((name) => ({ value: name, label: name }))}
                         onChange={setOverviewModelFilter}
+                        selectedLabel={(count) => t('usage_stats.model_filter_selected', { count })}
+                        placeholder={t('usage_stats.all_models')}
                         className={styles.apiKeySelectControl}
                         ariaLabel={t('usage_stats.model_filter')}
                         fullWidth

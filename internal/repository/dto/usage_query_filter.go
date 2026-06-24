@@ -15,7 +15,7 @@ type UsageQueryFilter struct {
 	Page            int
 	PageSize        int
 	Offset          int
-	Model           string
+	Models          []string
 	AuthIndex       string
 	APIGroupKey     string
 	Result          string

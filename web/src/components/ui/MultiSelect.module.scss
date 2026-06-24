@@ -1,0 +1,100 @@
+@use '../../styles/variables' as *;
+
+.wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background-color: var(--bg-primary);
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  text-align: left;
+  box-sizing: border-box;
+
+  &:hover {
+    border-color: var(--border-hover);
+  }
+
+  &:focus {
+    outline: none;
+    box-shadow: var(--shadow), 0 0 0 3px rgba($primary-color, 0.18);
+  }
+
+  &[aria-expanded='true'] {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow), 0 0 0 3px rgba($primary-color, 0.18);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.triggerText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triggerIcon {
+  display: inline-flex;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+
+  [aria-expanded='true'] > & {
+    transform: rotate(180deg);
+  }
+}
+
+// 下拉面板复用全局 _dropdown-panel.scss 的基础样式
+.dropdown {
+  composes: dropdown from '../../styles/dropdown-panel.scss';
+}
+
+.option {
+  composes: option from '../../styles/dropdown-panel.scss';
+}
+
+.optionLabel {
+  composes: optionLabel from '../../styles/dropdown-panel.scss';
+}
+
+.optionActive {
+  composes: optionActive from '../../styles/dropdown-panel.scss';
+}
+
+// checkbox 占位符：选中时显示 ✓
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}

@@ -273,8 +273,8 @@ func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if model := strings.TrimSpace(filter.Model); model != "" {
-		query = query.Where("model = ?", model)
+	if len(filter.Models) > 0 {
+		query = query.Where("model IN ?", filter.Models)
 	}
 	if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" {
 		// Source 下拉在 API 层已转换成 auth_index，仓储层只保留真实查询维度。
@@ -1222,8 +1222,8 @@ func loadUsageOverviewHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, star
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if model := strings.TrimSpace(filter.Model); model != "" {
-		query = query.Where("model = ?", model)
+	if len(filter.Models) > 0 {
+		query = query.Where("model IN ?", filter.Models)
 	}
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load usage overview hourly stats: %w", err)
@@ -1251,8 +1251,8 @@ func loadUsageOverviewDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if model := strings.TrimSpace(filter.Model); model != "" {
-		query = query.Where("model = ?", model)
+	if len(filter.Models) > 0 {
+		query = query.Where("model IN ?", filter.Models)
 	}
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load usage overview daily stats: %w", err)
@@ -1332,8 +1332,8 @@ func loadUsageOverviewEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFil
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if model := strings.TrimSpace(filter.Model); model != "" {
-		query = query.Where("model = ?", model)
+	if len(filter.Models) > 0 {
+		query = query.Where("model IN ?", filter.Models)
 	}
 	var rows []usageEventProjection
 	if err := query.Find(&rows).Error; err != nil {

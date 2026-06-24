@@ -208,7 +208,7 @@ export async function fetchKeyOverviewRealtime(options: FetchKeyOverviewRealtime
   return normalizeOverviewRealtimeBlock(payload, window)
 }
 
-export async function fetchUsageOverview(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string, model?: string): Promise<UsageOverviewResponse> {
+export async function fetchUsageOverview(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string, model?: string[]): Promise<UsageOverviewResponse> {
   const params = new URLSearchParams()
   params.set('range', range)
   if (start) {
@@ -221,9 +221,9 @@ export async function fetchUsageOverview(range: string, start?: string, end?: st
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
   }
-  const selectedModel = model?.trim()
-  if (selectedModel) {
-    params.set('model', selectedModel)
+  const selectedModels = model?.map((m) => m.trim()).filter(Boolean) ?? []
+  if (selectedModels.length > 0) {
+    params.set('model', selectedModels.join(','))
   }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })

@@ -27,7 +27,7 @@ export interface UseUsageDataOptions {
   customEnd?: string;
   enabled?: boolean;
   apiKeyId?: string;
-  model?: string;
+  model?: string[];
 }
 
 export const normalizeUsageOverviewRange = normalizeUsageRange;
