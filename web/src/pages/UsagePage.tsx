@@ -39,6 +39,7 @@ import {
 } from '@/components/usage/RequestEventsDetailsCard';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import { getDailyAveragePanelUsage, isDailyAverageRange } from '@/utils/usage/overview';
+import { clearAppStorage } from '@/utils/storage';
 import {
   type UsageTimeRange
 } from '@/utils/usage';
@@ -846,6 +847,18 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const topNoticeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  const showTopNotice = useCallback((kind: TopNoticeKind, message: string) => {
+    if (topNoticeTimerRef.current !== null) {
+      window.clearTimeout(topNoticeTimerRef.current);
+    }
+    setTopNotice({ kind, message });
+    topNoticeTimerRef.current = window.setTimeout(() => {
+      setTopNotice(null);
+      topNoticeTimerRef.current = null;
+    }, getUpdateCheckToastDuration(kind));
+  }, []);
+
   const [customRangeError, setCustomRangeError] = useState('');
   const [customRangeHint, setCustomRangeHint] = useState('');
   const [initialRequestEventsPreferences] = useState(loadRequestEventsPreferences);
@@ -872,6 +885,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     enabledAiProviders: credentialSectionVisibility.showAiProvider && pageVisible,
     quotaAutoRefreshEnabled: status?.quotaAutoRefreshEnabled === true,
     onAuthRequired,
+    onNotice: showTopNotice,
   });
   const refreshCredentials = credentialsData.refresh;
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -911,17 +925,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     return styles.updateCheckToastInfo;
   })() : '';
   const cpaManagementURL = useMemo(() => getBackToCPALinkURL(status), [status]);
-
-  const showTopNotice = useCallback((kind: TopNoticeKind, message: string) => {
-    if (topNoticeTimerRef.current !== null) {
-      window.clearTimeout(topNoticeTimerRef.current);
-    }
-    setTopNotice({ kind, message });
-    topNoticeTimerRef.current = window.setTimeout(() => {
-      setTopNotice(null);
-      topNoticeTimerRef.current = null;
-    }, getUpdateCheckToastDuration(kind));
-  }, []);
 
   useEffect(() => {
     if (timeRange !== 'custom') {
@@ -1226,10 +1229,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     });
   }, [eventsModelFilter, eventsPageSize, eventsResultFilter, eventsSourceFilter, eventsVisibleColumnIds]);
 
+  // 时间范围变化只重置 events 分页；模型筛选不随时间范围清空（扩大窗口不会让已选模型无效）。
   useEffect(() => {
     setEventsPage(1);
+  }, [customTimeRange.end, customTimeRange.start, timeRange]);
+
+  // API key 变化时重置模型筛选，因为不同 key 的模型列表可能不同。
+  useEffect(() => {
     setOverviewModelFilter([]);
-  }, [customTimeRange.end, customTimeRange.start, selectedApiKeyId, timeRange]);
+  }, [selectedApiKeyId]);
 
   useEffect(() => {
     if (timeRange !== 'custom') return;
@@ -1684,7 +1692,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               <button
                 type="button"
                 className={`${styles.signOutPill} ${styles.signOutPillActive}`.trim()}
-                onClick={() => { if (window.confirm(t('common.clear_cache_confirm'))) { localStorage.clear(); window.location.reload(); } }}
+                onClick={() => { if (window.confirm(t('common.clear_cache_confirm'))) { clearAppStorage(); window.location.reload(); } }}
               >
                 <span className={styles.signOutPillInner}>{t('common.clear_cache')}</span>
               </button>

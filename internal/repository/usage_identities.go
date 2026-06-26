@@ -538,7 +538,7 @@ func markStaleUsageIdentityRowsDeleted(tx *gorm.DB, rows []usageIdentitySyncRow,
 		staleIDs = append(staleIDs, row.ID)
 	}
 
-	// stale ID 也按批次更新，避免 id IN 在数据量大时再次触发 SQLite 变量上限。
+	// stale ID 也按批次更新，避免 id IN 在数据量大时触发参数上限。
 	for start := 0; start < len(staleIDs); start += insertBatchSize(entities.UsageIdentity{}) {
 		end := min(start+insertBatchSize(entities.UsageIdentity{}), len(staleIDs))
 		if err := tx.Model(&entities.UsageIdentity{}).

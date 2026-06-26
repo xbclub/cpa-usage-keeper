@@ -114,7 +114,7 @@ func loadUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, e
 		// raw 查询本身会按 model group by，不再逐条读 usage_events。
 		return sumRawUsageWindowTokenStats(db, authIndex, start, nil)
 	}
-	// 结束时间归一化为存储时区，避免和 SQLite 文本时间比较口径不一致。
+	// 结束时间归一化为存储时区，确保时间比较口径一致。
 	windowEnd := timeutil.NormalizeStorageTime(*end)
 	// 开始时间归一化为存储时区，确保后续整点切分与查询参数一致。
 	windowStart := timeutil.NormalizeStorageTime(start)
@@ -215,7 +215,7 @@ func sumRawUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time,
 		Group("model")
 	// 如果调用方传入结束时间，就用半开区间避免边界重复累计。
 	if end != nil {
-		// end 统一格式化为 storage time，确保 SQLite 文本比较稳定。
+		// end 统一格式化为 storage time，确保时间比较稳定。
 		query = query.Where("timestamp < ?", timeutil.FormatStorageTime(*end))
 	}
 	// rows 只承接聚合后的少量 model 行。

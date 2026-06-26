@@ -234,7 +234,7 @@ func usageEventProjectionToEntity(event usageEventProjection) entities.UsageEven
 
 // applyUsageQueryWindow 给 usage 查询追加闭区间时间过滤。
 func applyUsageQueryWindow(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
-	// 查询参数和落库 timestamp 使用同一格式，避免 SQLite TEXT 范围比较失真。
+	// 查询参数和落库 timestamp 使用同一格式，确保时间范围比较口径与落库格式一致。
 	if filter.StartTime != nil {
 		query = query.Where("timestamp >= ?", timeutil.FormatStorageTime(*filter.StartTime))
 	}
@@ -450,9 +450,8 @@ func isMissingUsageEventsTableError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	// "no such table"/"doesn't exist" 覆盖 SQLite/MySQL；"does not exist" 覆盖 PostgreSQL 的
-	// `relation "usage_events" does not exist (SQLSTATE 42P01)`。
-	return strings.Contains(message, "usage_events") && (strings.Contains(message, "no such table") || strings.Contains(message, "doesn't exist") || strings.Contains(message, "does not exist"))
+	// 匹配 PostgreSQL 的 `relation "usage_events" does not exist (SQLSTATE 42P01)`。
+	return strings.Contains(message, "usage_events") && strings.Contains(message, "does not exist")
 }
 
 func buildAnalysisLatencyDiagnostics(ttftValues, latencyValues []int64) dto.AnalysisLatencyDiagnosticsRecord {
@@ -1319,7 +1318,7 @@ func loadUsageOverviewEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFil
 	if end.Before(start) || (!includeEnd && end.Equal(start)) {
 		return nil, nil
 	}
-	// 单段范围让 SQLite 可以稳定使用 timestamp 索引，不把左右边界拼成 OR 查询。
+	// 单段范围让 timestamp 索引保持稳定，不把左右边界拼成 OR 查询。
 	query := db.Model(&entities.UsageEvent{}).
 		Where("timestamp >= ?", timeutil.FormatStorageTime(start)).
 		Select(usageOverviewRawEventProjectionColumns).
