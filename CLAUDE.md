@@ -790,6 +790,18 @@ Merged 2 PRs: test reorganization (#253) + Request Events export (#254, CSV/JSON
 
 3. **`UsageProvider` interface gained `StreamUsageEvents` — all stubs must implement it.** This is the recurring stub-debt pattern (Step 4.12 #1): every upstream interface addition requires updating every test stub. Grep for the new method name across `*_test.go` files after checkout.
 
+### Step 4.16: PR #250 + #251 backfill merge notes (2026-06-29, commit `a8f75da`)
+
+Merged 2 PRs that were skipped during the v1.12.1 merge (commit `6463015` only merged #253/#254, not #250/#251). Detected via code-level diff (not commit ancestry) after user questioned "有这个 api 吗". Lessons:
+
+1. **PRs can be skipped when merging by feature-selection rather than by range.** The v1.12.1 merge picked #253 (test reorg) + #254 (events export) but skipped #250 (version API) + #251 (model filter optimization) — even though #250/#251 are earlier in the upstream sequence. **When a merge commit says "merged PRs #X, #Y", verify there are no other PRs in the upstream range that were silently dropped.** Use `git log --oneline --merges <base>..<upstream-head>` to get the full PR list.
+
+2. **#251 (model filter optimization) does NOT conflict with fork's model multi-select.** #251 optimizes `listUsageEventModelFilterOptions` (candidate dropdown query: removes `WHERE model <> ''`, filters blanks in-memory). Multi-select lives in a different function (`applyUsageEventListQuery` uses `model IN ?`). **The two coexist cleanly** — apply #251 verbatim, multi-select is untouched.
+
+3. **#250 removes `version`/`updateCheckEnabled` from `StatusResponse` — tests must follow.** Two tests (`TestStatusReturnsVersionAndUpdateCheckFlag`, `TestStatusHidesUpdateCheckForDevVersion`) asserted on `/status` returning version. After moving version to `/version`, these must be renamed + retargeted to `/api/v1/version`. **When removing fields from a response struct, grep tests for that field + endpoint.**
+
+4. **Mobile footer version display** (`App.css` `@media max-width:640px`): hides the `·` separator, wraps version to its own centered line. This is the "改进移动端 footer 版本显示" part of #250 — a CSS-only change that ships with the AppFooter refactor.
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
