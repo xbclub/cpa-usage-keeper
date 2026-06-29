@@ -768,6 +768,28 @@ Merged upstream `ea90ca4..ee143eb` — 12 PRs, ~71 files. Features: persistent a
 
 13. **The Step 4.5 #2 "API Key Summary backend chain" checklist was INCOMPLETE at the API serialization layer — even in fork HEAD.** Steps ①-④ (repository accumulator called → service passes `overview.APIKeySummary` → service-dto field exists → repo-dto type exists) all verified present during the merge. But ⑤ (API response serialization) was **missing in fork HEAD's `usageOverviewResponse` struct** — the `api_key_summary` json field was never added. Result: `ApiKeySummaryTable.tsx` (which reads `usage?.api_key_summary`) always rendered empty in production, despite the entire backend pipeline computing the data. **This was a pre-existing fork bug, not a merge regression, but fixing it required 3 coordinated changes:** (a) add `APIKeySummary []usageOverviewAPIKeySummary \`json:"api_key_summary"\`` to `usageOverviewResponse` (NO `omitempty` — empty slice must serialize as `[]` so the frontend field is always present, matching `ServiceHealth`'s no-omitempty pattern), (b) add `buildUsageOverviewAPIKeySummary(overview)` that maps `APIGroupKey` → `helper.RedactSensitiveValue(...)` (Step 4.5 #12 redaction), (c) add `"api_key_summary"` to `assertUsageOverviewResponseShape`'s `assertAllowedJSONKeys` whitelist in `usage_overview_test.go`. **A persistent regression test (`TestUsageOverviewSerializesAPIKeySummaryWithRedaction`) was added.** **Lesson: the Step 4.5 #2 checklist item must be expanded to explicitly check the API serialization layer (response struct field + handler fill + test whitelist), not just the service/repository chain. "backend code exists ≠ wired" applies to the final HTTP response too.** End-to-end verification method: `httptest.NewRequest` → decode body as `map[string]json.RawMessage` → assert `"api_key_summary"` key exists.
 
+### Step 4.14: v1.12.0 merge notes (2026-06-24, commit `4683b60`)
+
+Merged upstream `v1.12.0` (`ee143eb..18e593c`) — 4 PRs, 16 files. Features: realtime window stability (#245), redis inbox process draining (#246, 3s→1s), usage header flush interval (#247, 30s→1min), Go toolchain 1.22→1.26 (#248). No schema changes. Lessons:
+
+1. **`sync.go` 3-way merge worked for upstream's `processRedisInboxRows` rewrite.** Upstream substantially rewrote this function; `git merge-file` brought it in cleanly while preserving fork's 3 PG comment fixes (SQLite→PG convention). The new `newRedisBatchSyncResult` + `BatchFull`/`ProcessedRows` fields in `dto/sync.go` merged trivially (fork had no changes there).
+
+2. **Go toolchain bump is non-trivial.** `go.mod` go directive 1.22→1.26 + Dockerfile `golang:1.24-alpine`→`golang:1.26-alpine`. Verify no `go-sqlite3` (CGO) dependency sneaks in — fork uses pure-Go `gorm.io/driver/postgres`.
+
+3. **`header_cache_worker_test.go` 3-way merge preserved fork's `-time.Microsecond` precision fix.** PG `timestamptz` has microsecond (not nanosecond) precision — upstream's `time.Nanosecond` boundary assertions collapse on PG. The merge kept fork's fix while taking upstream's new test cases.
+
+4. **`sync_test.go` extracted 2 new test functions** to avoid reintroducing SQLite patterns (fork's `openSyncTestDatabase` PG helper preserved).
+
+### Step 4.15: v1.12.0/v1.12.1 merge notes (2026-06-25, commit `6463015`)
+
+Merged 2 PRs: test reorganization (#253) + Request Events export (#254, CSV/JSON streaming download). Lessons:
+
+1. **Test reorganization moved poller/quota tests into `test/` subdirectories.** PG adaptation needed: `openQuotaTestDatabase` → `testutil.OpenTestDatabase`. `quota/test/service_test.go` required manual merge (preserve fork PG version + add upstream helper). `header_cache_worker_test.go` needed `Nanosecond` → `Microsecond` (PG precision, recurring pattern from Step 4.11).
+
+2. **Request Events export is a streaming feature** — `StreamUsageEventsWithFilter`/`ExportUsageEventsWithFilter` in repository, `StreamUsageEvents` in service (uses `Models []string` to adapt fork's multi-select filter), `GET /usage/events/export` route with CSV/JSON writers. Frontend: `exportUsageEvents` API + `RequestEventsExportMenu` component. All `UsageProvider` test stubs needed `StreamUsageEvents` added.
+
+3. **`UsageProvider` interface gained `StreamUsageEvents` — all stubs must implement it.** This is the recurring stub-debt pattern (Step 4.12 #1): every upstream interface addition requires updating every test stub. Grep for the new method name across `*_test.go` files after checkout.
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
