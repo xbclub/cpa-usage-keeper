@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias } from '@/lib/api';
+import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
 import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
@@ -763,6 +763,17 @@ const loadRealtimeWindow = (): OverviewRealtimeWindow => {
   }
 };
 
+export const triggerBrowserFileDownload = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -875,6 +886,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [eventsSourceFilter, setEventsSourceFilter] = useState(initialRequestEventsPreferences.filters.source);
   const [eventsResultFilter, setEventsResultFilter] = useState(initialRequestEventsPreferences.filters.result);
   const [eventsVisibleColumnIds, setEventsVisibleColumnIds] = useState<RequestEventColumnId[]>(initialRequestEventsPreferences.visibleColumnIds);
+  const [eventsExportingFormat, setEventsExportingFormat] = useState<UsageEventsExportFormat | null>(null);
   const [eventsFilterOptionsLoaded, setEventsFilterOptionsLoaded] = useState(false);
   const eventsRequestControllerRef = useRef<AbortController | null>(null);
   const eventsFilterOptionsRequestControllerRef = useRef<AbortController | null>(null);
@@ -1439,6 +1451,32 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setEventsResultFilter(result);
     resetEventsPage();
   }, [resetEventsPage]);
+
+  const handleEventsExport = useCallback(async (format: UsageEventsExportFormat) => {
+    const queryWindow = getEventQueryWindow();
+    if (!queryWindow.valid) {
+      return;
+    }
+    setEventsExportingFormat(format);
+    try {
+      const file = await exportUsageEvents(timeRange, queryWindow.start, queryWindow.end, format, {
+        model: eventsModelFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsModelFilter,
+        source: eventsSourceFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsSourceFilter,
+        result: eventsResultFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsResultFilter,
+        apiKeyId: selectedApiKeyId,
+      });
+      triggerBrowserFileDownload(file.blob, file.filename);
+      showTopNotice('success', t('usage_stats.export_success'));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      showTopNotice('error', t('notification.download_failed'));
+    } finally {
+      setEventsExportingFormat(null);
+    }
+  }, [eventsModelFilter, eventsResultFilter, eventsSourceFilter, getEventQueryWindow, onAuthRequired, selectedApiKeyId, showTopNotice, t, timeRange]);
 
   const refreshActiveTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -2024,12 +2062,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   modelFilter={eventsModelFilter}
                   sourceFilter={eventsSourceFilter}
                   resultFilter={eventsResultFilter}
+                  exportingFormat={eventsExportingFormat}
                   visibleColumnIds={eventsVisibleColumnIds}
                   onPageChange={setEventsPage}
                   onPageSizeChange={handleEventsPageSizeChange}
                   onModelFilterChange={handleEventsModelFilterChange}
                   onSourceFilterChange={handleEventsSourceFilterChange}
                   onResultFilterChange={handleEventsResultFilterChange}
+                  onExport={handleEventsExport}
                   onVisibleColumnIdsChange={setEventsVisibleColumnIds}
                 />
               </>

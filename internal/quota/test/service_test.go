@@ -124,10 +124,27 @@ func openQuotaTestDB(t *testing.T) *gorm.DB {
 	return testutil.OpenTestDatabase(t)
 }
 
+func newQuotaServiceWithRegistry(t *testing.T, db *gorm.DB, registry quota.ProviderRegistry) *quota.Service {
+	t.Helper()
+	service := quota.NewServiceWithRegistry(db, registry)
+	t.Cleanup(service.StopRefreshTasks)
+	return service
+}
+
+func newQuotaServiceWithRegistryAndOptions(t *testing.T, db *gorm.DB, registry quota.ProviderRegistry, options quota.ServiceOptions) *quota.Service {
+	t.Helper()
+	service := quota.NewServiceWithRegistryAndOptions(db, registry, options)
+	t.Cleanup(service.StopRefreshTasks)
+	return service
+}
+
 func seedUsageIdentity(t *testing.T, db *gorm.DB, identity entities.UsageIdentity) {
 	t.Helper()
 	identity.CreatedAt = time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC)
 	identity.UpdatedAt = identity.CreatedAt
+	if identity.Name == "" {
+		identity.Name = identity.Identity
+	}
 	if err := db.Create(&identity).Error; err != nil {
 		t.Fatalf("seed usage identity: %v", err)
 	}
