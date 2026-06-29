@@ -522,7 +522,7 @@ func (s *usageService) StreamUsageEvents(ctx context.Context, filter servicedto.
 	})
 }
 
-// Usage 页面里的 Request Event Log tab 的 model 筛选项只按当前时间窗口加载候选值。
+// Request Event Log 的 model 筛选项只应用调用方传入的时间窗口；独立筛选项接口当前传空 filter。
 func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	options, err := repository.ListUsageEventFilterOptionsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,

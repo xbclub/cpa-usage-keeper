@@ -140,12 +140,19 @@ func listUsageEventModelFilterOptions(db *gorm.DB, filter dto.UsageQueryFilter) 
 	// 第一步：model 候选值只来自 usage_events，并且只套用时间窗口。
 	query := applyUsageEventFilterOptionsQuery(queryUsageEvents(db), filter)
 
-	// 第二步：去重并排除空 model，保持下拉选项稳定排序。
+	// 第二步：只按 model 索引去重排序；空白值由内存兜底过滤，避免给索引扫描追加无意义条件。
 	var values []string
-	if err := query.Select("DISTINCT model").Where("model <> ''").Order("model ASC").Pluck("model", &values).Error; err != nil {
+	if err := query.Select("DISTINCT model").Order("model ASC").Pluck("model", &values).Error; err != nil {
 		return nil, fmt.Errorf("load usage event model filter options: %w", err)
 	}
-	return values, nil
+	models := values[:0]
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		models = append(models, value)
+	}
+	return models, nil
 }
 
 // ListOverviewModelNamesWithFilter 从 usage_events 查询时间窗口内的去重模型列表，不带 model 过滤。

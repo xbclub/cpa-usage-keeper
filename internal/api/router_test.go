@@ -135,13 +135,13 @@ func TestStatusReturnsEmptyStateWithoutProvider(t *testing.T) {
 	}
 }
 
-func TestStatusReturnsVersionAndUpdateCheckFlag(t *testing.T) {
+func TestVersionRouteReturnsVersionAndUpdateCheckFlag(t *testing.T) {
 	previousVersion := version.Version
 	t.Cleanup(func() { version.Version = previousVersion })
 	version.Version = "v1.2.3"
 
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
@@ -225,13 +225,13 @@ func TestStatusActiveRecordsBackendActivity(t *testing.T) {
 	}
 }
 
-func TestStatusHidesUpdateCheckForDevVersion(t *testing.T) {
+func TestVersionRouteHidesUpdateCheckForDevVersion(t *testing.T) {
 	previousVersion := version.Version
 	t.Cleanup(func() { version.Version = previousVersion })
 	version.Version = "dev"
 
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
