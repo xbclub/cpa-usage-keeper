@@ -802,6 +802,20 @@ Merged 2 PRs that were skipped during the v1.12.1 merge (commit `6463015` only m
 
 4. **Mobile footer version display** (`App.css` `@media max-width:640px`): hides the `·` separator, wraps version to its own centered line. This is the "改进移动端 footer 版本显示" part of #250 — a CSS-only change that ships with the AppFooter refactor.
 
+### Step 4.17: v1.12.2 merge notes (2026-06-29, commit `a23e546`)
+
+Merged upstream `v1.12.2` (`f16d09a..08e5700`) — 5 commits, 52 files. Features: CPAMC embed mode (#257, `?embed=cpamc`), usage identity aliases (#256, `Alias *string` + PATCH API + CredentialAliasEditor), display name unification (#255). Schema: `Alias *string` nullable column (AutoMigrate handles it, no migration). Lessons:
+
+1. **`UsageIdentityProvider` interface gained `UpdateUsageIdentityAlias` — all stubs need it.** Same recurring pattern (Step 4.12 #1, Step 4.15 #3). `usageIdentitiesStub` in `usage_identities_test.go` needed the method added. **Grep for the new method name across all `*_test.go` files after any interface addition.**
+
+2. **`app.go` + `usage_identities_service.go` + `refresh.go` are coupled.** The `OnDisplayNameChanged` callback in `NewUsageIdentityServiceWithOptions` calls `quotaService.UpdateUsageIdentityDisplayNameSnapshot` (defined in `refresh.go`). All three files must change together: checkout service + refresh, then manually change app.go's call site. **app.go can NEVER be checked out from upstream** (graceful shutdown + #210 + removed backup).
+
+3. **`git apply --3way` applied UsagePage.tsx + App.tsx CLEANLY (zero conflicts).** Despite both files being heavily fork-divergent (multi-select, ApiKeySummary, reset button, effectiveCustomTimeRange, versionInfo), the upstream v1.12.2 hunks (embed detection, alias props) landed in regions the fork didn't touch. **3way is the right tool — it does true 3-way merge preserving both sides.** This is the same pattern from Step 4.11 #3 (v1.11.0 custom date range).
+
+4. **`useUsageStatsStore.ts` multi-select join fix.** The fork's `model?: string[]` (multi-select) didn't match the checked-out `fetchUsageOverview`'s `model?: string` (single value). Fix: `model.join(',')` at the call site. **After any api.ts checkout, verify the store's model parameter type matches fetchUsageOverview's signature.**
+
+5. **i18n python script broke AGAIN (fourth time).** Same `find(anchor)` zh/zh-TW misplacement (Step 4.12 #3, Step 4.13 #5). Caught immediately by post-insert `grep model_filter:` count check. **The script is fundamentally broken — until rewritten to verify locale block context, ALWAYS manually check model_filter values after i18n checkout.**
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
