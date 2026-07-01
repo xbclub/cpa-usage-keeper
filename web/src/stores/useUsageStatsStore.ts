@@ -99,7 +99,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
 
     activeOverviewRequest = (async () => {
       try {
-        const overview = await fetchUsageOverview(range, start, end, controller.signal, apiKeyId, model);
+        const overview = await fetchUsageOverview(range, start, end, controller.signal, apiKeyId, model != null && model.length > 0 ? model.join(',') : undefined);
         if (activeOverviewRequestController !== controller) return;
         set({
           usage: overview,

@@ -296,6 +296,7 @@ export interface UsageCredentialHealth {
 export interface UsageIdentity {
   id: string
   name: string
+  alias?: string | null
   displayName?: string
   auth_type: UsageIdentityAuthType
   auth_type_name: string
