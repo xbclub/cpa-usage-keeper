@@ -816,6 +816,22 @@ Merged upstream `v1.12.2` (`f16d09a..08e5700`) — 5 commits, 52 files. Features
 
 5. **i18n python script broke AGAIN (fourth time).** Same `find(anchor)` zh/zh-TW misplacement (Step 4.12 #3, Step 4.13 #5). Caught immediately by post-insert `grep model_filter:` count check. **The script is fundamentally broken — until rewritten to verify locale block context, ALWAYS manually check model_filter values after i18n checkout.**
 
+### Step 4.18: v1.12.3+v1.12.4 merge notes (2026-07-06, commit `7f4e89b`)
+
+Merged upstream `v1.12.3+v1.12.4` (`08e5700..35850ad`) — 24 commits, 107 files, +10541/-1068. **Largest merge in fork history.** 7 features: model price multipliers, quota scheduled refresh (new AppSetting table), usage events cleanup toggle, CPAMC embed sessions, model alias in events, centralized cost resolution, overview metrics rename. Schema: new `AppSetting` entity + `PriceMultiplier` field (both AutoMigrate-safe). Lessons:
+
+1. **Cost function refactoring required thin wrappers.** Upstream deleted `CalculateUsageTokenCost`/`CalculateUsageEventCost`/`UsageEventRequiresPricing` (replaced by `CalculateUsageTokenCostBreakdown` + `UsageTokenInputRequiresPricing`). Fork's `usage.go` (8 call sites) + `usage_apikey_summary.go` (3 call sites) still used the old names. **Fix: add 3 thin wrapper functions to `usage_cost.go` delegating to the new API** — avoids touching 11 call sites in fork-unique files. This is the fastest path when upstream renames/removes a utility function that fork-unique code depends on.
+
+2. **`service/usage.go` + `service/dto/usage.go` must NEVER be checked out from upstream.** They were accidentally in the pure-upstream checkout list. Upstream's version deleted `ListOverviewModels` + changed `Models []string` back to `Model string` + removed `APIKeySummary`. **Always verify the checkout list against the known fork-modified file list BEFORE running `git checkout upstream/main --`.** Restore from `git checkout HEAD --` if accidentally overwritten.
+
+3. **`quota.go` slog reappears every time it's checked out.** Fifth time (Step 4.12 #1, 4.13 #5, 4.15 #3, 4.16 #4, now). The upstream file still uses `slog.Error`. **After ANY `git checkout upstream/main -- internal/api/quota.go`, grep `slog` and convert to `logrus.WithError`.** This is a permanent recurring cost.
+
+4. **Test file reorganization (move to `test/` subdirectories) causes cascading PG adaptation.** Upstream moved `usage_events_test.go` → `test/usage_events_test.go`, `pricing_service_test.go` → `test/pricing_service_test.go`, etc. Each moved file re-introduces SQLite patterns. **Batch-adapt with `perl` one-liner + verify with `go vet`.** Also watch for `openTestDatabase`/`openQuotaTestDatabase` function redeclaration when both old and new paths coexist.
+
+5. **`git apply --3way` on UsagePage.tsx produced duplicate definitions.** The 3way merge inserted `loadUsagePageVersionInfo` (from upstream) even though fork already had it (from PR #250 merge). **After any 3way apply, grep for duplicate type/function definitions and delete the redundant copy.**
+
+6. **`AuthManagedSessionItem` gained a `source` field** (for embed session tracking). Fork's `types.ts` needed it added manually. **When upstream adds fields to existing interfaces, always check all fork-modified type files for missing fields after checkout.**
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
