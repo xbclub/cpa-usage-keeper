@@ -73,12 +73,13 @@ func NewSyncService(db *gorm.DB, cfg config.Config) *SyncService {
 
 // SyncServiceOptions 提供测试和局部调用需要替换的依赖。
 type SyncServiceOptions struct {
-	BaseURL           string
-	Client            CPAClientFetcher
-	MetadataFetcher   MetadataFetcher
-	Now               func() time.Time
-	RecentUsageEvents RecentUsageEventAppender
-	UsageHeaderQuota  quota.UsageHeaderSnapshotAppender
+	BaseURL                   string
+	Client                    CPAClientFetcher
+	MetadataFetcher           MetadataFetcher
+	Now                       func() time.Time
+	RecentUsageEvents         RecentUsageEventAppender
+	UsageHeaderQuota          quota.UsageHeaderSnapshotAppender
+	CleanupUsageEventsEnabled bool
 }
 
 // NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟和 metadata fetcher。

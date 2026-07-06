@@ -1,4 +1,4 @@
-import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetResponse, type QuotaAutoRefreshSettings, type VersionResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -675,5 +675,46 @@ export async function deletePricing(model: string): Promise<void> {
   })
   if (!response.ok) {
     await parseApiError(response, `Failed to delete pricing: ${response.status}`)
+  }
+}
+
+export async function fetchQuotaAutoRefreshSettings(signal?: AbortSignal): Promise<QuotaAutoRefreshSettings> {
+  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load quota auto refresh settings: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function updateQuotaAutoRefreshSettings(settings: QuotaAutoRefreshSettings): Promise<QuotaAutoRefreshSettings> {
+  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(settings),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update quota auto refresh settings: ${response.status}`)
+  }
+  return response.json()
+}
+
+const EMBED_SESSION_STORAGE_KEY = 'cpa-embed-session'
+function embedSessionStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+export function clearEmbedSessionToken(): void {
+  const storage = embedSessionStorage()
+  if (!storage) return
+  try {
+    storage.removeItem(EMBED_SESSION_STORAGE_KEY)
+  } catch {
+    // ignore
   }
 }

@@ -2,7 +2,6 @@ package repository
 
 import (
 	"cpa-usage-keeper/internal/repository/dto"
-	"cpa-usage-keeper/internal/testutil"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -10,16 +9,9 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
-	"gorm.io/gorm"
 )
 
 const testRedisInboxSource = "redis_pull:usage"
-
-// openTestDatabase 包装 testutil.OpenTestDatabase，保持上游测试写法。
-func openTestDatabase(t *testing.T) *gorm.DB {
-	t.Helper()
-	return testutil.OpenTestDatabase(t)
-}
 
 func TestInsertRedisUsageInboxMessagesPersistsPendingRows(t *testing.T) {
 	db := openTestDatabase(t)

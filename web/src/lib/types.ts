@@ -18,6 +18,7 @@ export interface AuthManagedSessionItem {
   kind: AuthManagedSessionKind
   role: AuthRole
   current?: boolean
+  source?: string
   loginAt?: string
   expiresAt?: string
   apiKeyId?: string
@@ -231,6 +232,7 @@ export interface UsageEvent {
   timestamp: string
   api_key?: string
   model: string
+  model_alias?: string
   reasoning_effort?: string
   service_tier?: string
   executor_type?: string
@@ -612,6 +614,7 @@ export interface ModelPrice {
   completion: number
   cache: number
   cacheCreation: number
+  multiplier: number
 }
 
 export interface PricingSaveFailure {
@@ -632,6 +635,19 @@ export interface PricingEntry {
   completion_price_per_1m: number
   cache_price_per_1m: number
   cache_creation_price_per_1m: number
+  price_multiplier: number
+}
+
+export type QuotaAutoRefreshScheduleUnit = 'minute' | 'hour' | 'day' | 'week'
+
+export interface QuotaAutoRefreshSchedule {
+  unit: QuotaAutoRefreshScheduleUnit
+  value: number
+}
+
+export interface QuotaAutoRefreshSettings {
+  enabled: boolean
+  schedule: QuotaAutoRefreshSchedule | null
 }
 
 export interface UsedModelsResponse {

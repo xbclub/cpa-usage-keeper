@@ -1091,10 +1091,10 @@
 }
 
 .updateCheckToast {
-  position: absolute;
-  top: 12px;
+  position: fixed;
+  top: 20px;
   right: 20px;
-  z-index: 25;
+  z-index: $z-notification;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -1106,6 +1106,12 @@
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
+
+  @include mobile {
+    top: 12px;
+    right: 12px;
+    max-width: calc(100vw - 24px);
+  }
 }
 
 .updateCheckToastInfo {
@@ -2138,6 +2144,14 @@
   line-height: 1;
 }
 
+.sessionSettingsNameRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
 .sessionSettingsName {
   min-width: 0;
   overflow: hidden;
@@ -2146,6 +2160,20 @@
   font-weight: 800;
   line-height: 1.25;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionSettingsSource {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -2366,6 +2394,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.modelPriceDeleteConfirmText {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .syncModalBody {

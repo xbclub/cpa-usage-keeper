@@ -4,27 +4,37 @@
 
 CPA Usage Keeper is a standalone CPA usage persistence and dashboard service.
 
-It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) as the backend CPA data source and adds persistent storage and statistical analysis capabilities on top of CPA. The service consumes events from the CPA Redis usage queue into PostgreSQL, periodically pulls CPA metadata, exposes aggregation APIs, and serves a built-in web dashboard for usage, pricing, request health, and model/API statistics.
+It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) as the backend CPA data source and adds persistent storage and statistical analysis capabilities on top of CPA. The service consumes events from the CPA Redis usage queue into SQLite, periodically pulls CPA metadata, exposes aggregation APIs, and serves a built-in web dashboard for usage, pricing, request health, and model/API statistics.
 
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/govoah.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/fu4lec.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xwjnop.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xwk25d.png" width="49%" />
 </p>
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/fu43px.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/fu4gh3.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xw9jj4.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xybv3z.png" width="49%" />
 </p>
 
 ## Features
 
-- Persist CPA usage data to PostgreSQL
-- Dashboard for request volume, tokens, cost, cache hit rate, success rate, and latency
-- Filter usage details by time range, model, API Key, and source
-- Analysis page for token trends, model/API Key/AI Provider composition, and hourly heatmaps
+- Persist CPA usage data to SQLite
+- Dashboard for request volume, tokens, cost, cache usage, success rate, and request performance
+- Filter usage details by time range, model, API Key, source, and request result
+- Request Events for per-request details, filtering, pagination, export, and customizable display
+- Analysis page for usage trends, cost analysis, model/API Key/AI Provider composition, and hourly heatmaps
 - Standalone API Key usage page for querying usage by CPA API Key
-- Credentials page for Auth File and AI Provider usage, with credential quota lookup and refresh
+- Credentials page for Auth File and AI Provider usage, with quota lookup, refresh, inspection, and sorting
+- Provider quota window usage and quota display across supported providers
 - Maintain model prices for cost estimation and reporting
-- Optional password login protection, Docker/Docker Compose, and Kubernetes deployment
+- Automatically sync CPA Auth Files, API Keys, AI Providers, and other metadata changes
+- Optional password login protection, SQLite backups, Docker/Docker Compose, and systemd deployment
+- Embed the Keeper dashboard into CPAMC through the CPA plugin
+
+## Sponsors and Special Thanks
+
+- Thanks to [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) for providing the upstream CPA foundation and data source this project builds on.
+- Thanks to [@YouShouldBetOnMe](https://github.com/YouShouldBetOnMe) for supporting CPA Usage Keeper.
+- Thanks to the CPA discussion group for their discussions and feedback.
 
 ## Quick Start
 
@@ -34,7 +44,8 @@ Recommended deployment path:
 
 - First-time CPA + Keeper deployment: use [Docker Compose](#docker-compose-recommended).
 - CPA already runs on the host: use [Docker](#docker-cpa-already-runs-on-the-host).
-- No containers: use the [Linux binary](#linux-binary).
+- macOS: use [Homebrew](#macos-homebrew).
+- Linux without containers: use the [Linux binary](#linux-binary).
 
 For public deployments, enable `AUTH_ENABLED=true` and configure `LOGIN_PASSWORD` to protect your data.
 
@@ -62,41 +73,25 @@ services:
     networks:
       - cpa-network
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: cpa-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: cpa
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: cpa_usage_keeper
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - cpa-network
-
   cpa-usage-keeper:
     image: ghcr.io/willxup/cpa-usage-keeper:latest
     container_name: cpa-usage-keeper
     restart: unless-stopped
     depends_on:
       - cli-proxy-api
-      - postgres
     ports:
       - "8080:8080"
     environment:
-      TZ: Asia/Shanghai
+      TZ: Asia/Shanghai # Sets the container timezone; log timestamps use this timezone.
       CPA_BASE_URL: http://cli-proxy-api:8317
       CPA_MANAGEMENT_KEY: replace-with-your-management-key
-      DATABASE_URL: postgres://cpa:changeme@postgres:5432/cpa_usage_keeper?sslmode=disable
       REDIS_QUEUE_ADDR: cli-proxy-api:8317
       AUTH_ENABLED: true
       LOGIN_PASSWORD: replace-with-your-login-password
+    volumes:
+      - ./keeper:/data
     networks:
       - cpa-network
-
-volumes:
-  pgdata:
 
 networks:
   cpa-network:
@@ -118,7 +113,6 @@ Create `.env` on the host in the same directory as `docker-compose.yml`, for exa
 TZ=Asia/Shanghai
 CPA_BASE_URL=http://cli-proxy-api:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
-DATABASE_URL=postgres://cpa:changeme@postgres:5432/cpa_usage_keeper?sslmode=disable
 AUTH_ENABLED=true
 LOGIN_PASSWORD=replace-with-your-login-password
 ```
@@ -153,7 +147,6 @@ When CPA runs on the host, `.env` usually needs these values:
 ```env
 CPA_BASE_URL=http://host.docker.internal:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
-DATABASE_URL=postgres://user:pass@postgres-host:5432/cpa_usage_keeper?sslmode=disable
 AUTH_ENABLED=true
 LOGIN_PASSWORD=replace-with-your-login-password
 ```
@@ -163,8 +156,43 @@ docker run -d \
   --name cpa-usage-keeper \
   --add-host=host.docker.internal:host-gateway \
   -p 8080:8080 \
+  -v "$(pwd)/keeper:/data" \
   --env-file .env \
   ghcr.io/willxup/cpa-usage-keeper:latest
+```
+
+### macOS Homebrew
+
+Homebrew is the recommended binary install path for macOS. It installs the macOS package from the CPA Usage Keeper tap, and future releases can be upgraded with normal Homebrew commands.
+
+Install:
+
+```bash
+brew tap Willxup/cpa-usage-keeper
+brew install cpa-usage-keeper
+```
+
+Edit the generated config file. At minimum, set `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`. For public deployments, also set `AUTH_ENABLED=true` and `LOGIN_PASSWORD`:
+
+```bash
+vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
+```
+
+Start the background service:
+
+```bash
+brew services start cpa-usage-keeper
+```
+
+Homebrew stores Keeper data under `$(brew --prefix)/var/cpa-usage-keeper`, stdout logs at `$(brew --prefix)/var/log/cpa-usage-keeper.log`, and stderr logs at `$(brew --prefix)/var/log/cpa-usage-keeper.err.log`.
+
+Useful commands:
+
+```bash
+brew services list
+brew services restart cpa-usage-keeper
+brew update
+brew upgrade cpa-usage-keeper
 ```
 
 ### Linux Binary
@@ -229,7 +257,6 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | --- | --- | --- | --- |
 | `CPA_BASE_URL` | Yes | - | URL used by the Keeper server to call CPA. In Docker Compose this is usually `http://cli-proxy-api:8317`, and it can be a private address or container service name |
 | `CPA_MANAGEMENT_KEY` | Yes | - | CPA management key used to read CPA management APIs |
-| `DATABASE_URL` | Yes | - | PostgreSQL connection string, such as `postgres://user:pass@host:5432/dbname?sslmode=disable` |
 
 ### Web Access And Reverse Proxy
 
@@ -237,13 +264,15 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | --- | --- | --- | --- |
 | `APP_PORT` | No | `8080` | Keeper HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
-| `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link |
+| `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link and CPAMC frame trust |
 
 `APP_BASE_PATH` must be empty or start with `/`; for example `/cpa`. `/cpa/` is normalized to `/cpa`.
 
 `CPA_PUBLIC_URL` may be a domain, a full URL with scheme, or a relative path, such as `https://cpa.example.com`, `https://cpa.example.com/cpa/`, or `/cpa/`. The frontend appends `management.html` automatically and handles trailing `/` or values that already end in `management.html`. When unset, the "Back to CPA" link points to `/management.html` on the current browser origin. If CPA and Keeper use different public domains, ports, or paths, set `CPA_PUBLIC_URL` explicitly.
 
-`CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. Do not use it as the browser navigation URL.
+For CPAMC frame trust, `CPA_PUBLIC_URL` must be an explicit `http://` or `https://` URL with a host. Relative paths only affect same-origin "Back to CPA" navigation and do not add an external `frame-ancestors` source.
+
+`CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. It is not used for browser navigation or frame trust.
 
 ### Login Protection
 
@@ -263,11 +292,11 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 
 ### Auth Files Quota Refresh
 
+Scheduled Auth Files quota refresh is configured from the gear button in the Auth Files inspection dialog. The setting is stored in the local SQLite database and does not require the page to stay open.
+
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `QUOTA_AUTO_REFRESH_ENABLED` | No | `false` | Enable Auth Files quota auto-refresh; it runs only while a backend page is visible and sending heartbeats |
-| `QUOTA_AUTO_REFRESH_INTERVAL` | No | `5m` | Auth Files quota auto-refresh interval, minimum `60s`, active only while a backend page is active |
-| `QUOTA_REFRESH_WORKER_LIMIT` | No | `10` | Maximum Auth Files quota refresh concurrency, capped at `100` |
+| `QUOTA_REFRESH_WORKER_LIMIT` | No | `10` | Maximum Auth Files quota refresh concurrency for manual and scheduled refresh, capped at `100` |
 
 ### Redis Queue Advanced Settings
 
@@ -278,14 +307,18 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | `REDIS_QUEUE_BATCH_SIZE` | No | `10000` | Maximum queue records per pull |
 | `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
 
-### Storage And Logs
+### Storage, Logs, And Backups
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `WORK_DIR` | No | `./data` | Application work directory; logs default to `logs/` under it |
+| `WORK_DIR` | No | `./data` | Application work directory; database, logs, and backups default to `app.db`, `logs/`, and `backups/` under it |
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
 | `LOG_RETENTION_DAYS` | No | `7` | Log retention days; `0` disables cleanup |
+| `CLEANUP_USAGE_EVENTS_ENABLED` | No | `false` | Delete expired raw `usage_events` during daily maintenance; when enabled, rows before 00:00 on the first day of the previous month are deleted |
+| `BACKUP_ENABLED` | No | `true` | Enable SQLite database backups |
+| `BACKUP_INTERVAL` | No | `24h` | Database backup interval |
+| `BACKUP_RETENTION_DAYS` | No | `7` | Backup retention days |
 
 ### Built-In HTTPS
 
@@ -299,12 +332,13 @@ Usually, HTTPS should be terminated at nginx, Caddy, or another reverse proxy. S
 
 Security and data notes:
 
-Security and data notes:
-
-- PostgreSQL backup should be handled externally (pg_dump, cloud snapshots, etc.).
+- SQLite database backups store original data from the application database, and backup files are not encrypted.
 - Browser-facing APIs redact key-like source/lookup fields or map them to stable public identifiers, but raw database values are unchanged.
 - For public deployments, enable `AUTH_ENABLED=true` and terminate HTTPS at your reverse proxy.
-- Login sessions are stored in process memory and become invalid after restart.
+- Login session hashes are stored in SQLite and remain valid across service restarts until logout or `AUTH_SESSION_TTL` expiry.
+- CPAMC embedded mode uses a separate embed session. Keeper first tries the `HttpOnly` `cpa_usage_keeper_embed_session` cookie, then falls back to an embed-only request header when the browser cannot persist the embedded cookie. The normal dashboard session keeps `SameSite=Lax` and is not reused by the embedded view.
+- Same-origin CPAMC embedding works with the default `frame-ancestors 'self'`. For cross-origin CPAMC embedding, set `CPA_PUBLIC_URL` to the public CPA/CPAMC origin; Keeper uses only `CPA_PUBLIC_URL` for the external `frame-ancestors` source, never `CPA_BASE_URL`.
+- Cross-site embedded login works best over HTTPS with browser support for third-party or partitioned cookies. When that cookie path is unavailable, CPAMC embedded mode falls back to a per-tab header token stored in browser session storage.
 - Redis inbox raw messages are cleaned up automatically: successful rows are kept until the end of the current day, and failed rows are kept for 7 days.
 
 ## Nginx reverse proxy
@@ -334,7 +368,8 @@ CPA_PUBLIC_URL=https://cpa.example.com
 cmd/server/              Application entrypoint
 internal/api/            HTTP routes and handlers
 internal/app/            App wiring and startup
-internal/auth/           In-memory session auth
+internal/auth/           Session auth and persistence
+internal/backup/         SQLite database backup management
 internal/benchmark/      Aggregation benchmark helpers
 internal/config/         Environment config loading
 internal/cpa/            CPA client and types
@@ -343,9 +378,8 @@ internal/helper/         Shared backend helpers and browser-facing redaction
 internal/logging/        Logging setup and retention
 internal/poller/         Background queue consumption and metadata sync
 internal/quota/          Quota cache, refresh, and query services
-internal/repository/     PostgreSQL access and aggregations
+internal/repository/     SQLite access and aggregations
 internal/service/        Usage, pricing, and identity services
-internal/testutil/       Test database helpers (PG schema isolation)
 internal/timeutil/       Project timezone and time helpers
 internal/updatecheck/    GitHub Release update checks
 internal/version/        Build version metadata
@@ -357,15 +391,14 @@ web/                     React + TypeScript frontend
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Node.js 22+
 - npm
-- PostgreSQL 14+
 - A running [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) instance
 
 ### Run locally
 
-1. Create and edit your local config. At minimum, set `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY`, and `DATABASE_URL`. If the CPA Redis/RESP port is not the default `8317`, also set `REDIS_QUEUE_ADDR`:
+1. Create and edit your local config. At minimum, set `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`. If the CPA Redis/RESP port is not the default `8317`, also set `REDIS_QUEUE_ADDR`:
 
 ```bash
 cp .env.example .env
@@ -402,7 +435,7 @@ make verify
 Or run checks individually:
 
 ```bash
-DATABASE_URL=postgres://user:pass@localhost:5432/cpa_usage_keeper_test?sslmode=disable go test ./cmd/... ./internal/...
+go test ./cmd/... ./internal/...
 npm --prefix ./web run test
 npm --prefix ./web run lint
 npm --prefix ./web run typecheck

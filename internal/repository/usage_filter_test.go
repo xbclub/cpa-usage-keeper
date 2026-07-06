@@ -11,7 +11,6 @@ import (
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/repository/dto"
-	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
@@ -39,6 +38,7 @@ func buildUsageOverviewFromEventsForTest(events []entities.UsageEvent, filter dt
 	return overview
 }
 
+
 func loadUsageOverviewOracleEventsForTest(db *gorm.DB, filter dto.UsageQueryFilter) ([]entities.UsageEvent, error) {
 	query := applyUsageOverviewQuery(db.Model(&entities.UsageEvent{}), filter).Select(usageEventProjectionColumns).Order("timestamp asc")
 	var rows []usageEventProjection
@@ -55,7 +55,7 @@ func loadUsageOverviewOracleEventsForTest(db *gorm.DB, filter dto.UsageQueryFilt
 func TestBuildUsageOverviewWithFilterRequiresResolvedTimeRange(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "4h"}); err == nil || !strings.Contains(err.Error(), "requires start_time and end_time") {
 		t.Fatalf("expected missing resolved time range error, got %v", err)
@@ -65,7 +65,7 @@ func TestBuildUsageOverviewWithFilterRequiresResolvedTimeRange(t *testing.T) {
 func TestBuildUsageOverviewWithFilterDoesNotRunAggregationCatchup(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 10, 0, 0, time.UTC), InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
@@ -92,7 +92,7 @@ func TestBuildUsageOverviewWithFilterDoesNotRunAggregationCatchup(t *testing.T) 
 func TestLoadUsageOverviewRawEventWindowsUsesSeparateRangeQueries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 12, 40, 0, 0, time.UTC)
@@ -127,7 +127,7 @@ func TestLoadUsageOverviewRawEventWindowsUsesSeparateRangeQueries(t *testing.T) 
 func TestBuildUsageOverviewWithFilterIncludesHealthBoundaryInsideFullHour(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 	for start.Truncate(usageOverviewHealthPresetSpan).Equal(start) {
@@ -161,7 +161,7 @@ func TestBuildUsageOverviewWithFilterIncludesHealthBoundaryInsideFullHour(t *tes
 func TestBuildUsageOverviewWithFilterIncludesEndBoundaryWhenNoFullHour(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 9, 40, 0, 0, time.UTC)
@@ -183,7 +183,7 @@ func TestBuildUsageOverviewWithFilterIncludesEndBoundaryWhenNoFullHour(t *testin
 func TestBuildUsageOverviewWithFilterReusesBoundaryEventsForHealth(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	start := time.Date(2026, 4, 16, 9, 20, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 12, 40, 0, 0, time.UTC)
@@ -236,7 +236,7 @@ func TestBuildUsageOverviewWithFilterKeepsRawEventQueriesAtBoundaries(t *testing
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := testutil.OpenTestDatabase(t)
+			db := openTestDatabase(t)
 
 			filter := dto.UsageQueryFilter{Range: tc.rangeValue, StartTime: &tc.start, EndTime: &tc.end}
 			var ranges []usageEventQueryRange
@@ -299,7 +299,7 @@ func usageEventQueryTime(value any) (time.Time, bool) {
 func TestBuildUsageOverviewWithFilterUsesStatsForFullHoursAndRawEventsForBoundaries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -367,7 +367,7 @@ func TestBuildUsageOverviewWithFilterUsesStatsForFullHoursAndRawEventsForBoundar
 func TestBuildUsageOverviewWithFilterKeepsHealthWindowExactAtStatsBoundaries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "outside-health-bucket", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 19, 30, 0, time.UTC), Failed: true, TotalTokens: 10},
@@ -407,7 +407,7 @@ func TestBuildUsageOverviewWithFilterKeepsHealthWindowExactAtStatsBoundaries(t *
 func TestBuildUsageOverviewWithFilterKeepsHourlyBucketsWhenShortWindowContainsCompleteDay(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "hour-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 2, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -449,7 +449,7 @@ func TestBuildUsageOverviewWithFilterKeepsHourlyBucketsWhenShortWindowContainsCo
 func TestBuildUsageOverviewWithFilterKeepsHealthTotalsForFullQueryWindow(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "old-success", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -488,7 +488,7 @@ func TestBuildUsageOverviewWithFilterKeepsHealthTotalsForFullQueryWindow(t *test
 func TestBuildUsageOverviewWithFilterUsesDailyStatsForCompleteDays(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -549,7 +549,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyStatsForCompleteDays(t *testing.T)
 func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
@@ -738,7 +738,7 @@ func TestBuildUsageOverviewFromEventsBuildsSnapshotAndOverviewInOnePass(t *testi
 }
 
 func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-success", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 17, 9, 31, 0, 0, time.UTC), Failed: false, TotalTokens: 10},
@@ -791,7 +791,7 @@ func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T
 func TestBuildUsageOverviewWithFilterKeepsCalendarDayHealthWindow(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	location := time.Local
 	queryNow := time.Date(2026, 6, 22, 15, 30, 0, 0, location)
@@ -848,13 +848,11 @@ func TestBuildUsageOverviewWithFilterKeepsCalendarDayHealthWindow(t *testing.T) 
 	}
 }
 
-func TestCalculateUsageEventCostDoesNotDoubleChargeReasoningTokens(t *testing.T) {
-	event := entities.UsageEvent{
-		InputTokens:     1_000_000,
-		OutputTokens:    2_000_000,
-		ReasoningTokens: 3_000_000,
-		CachedTokens:    400_000,
-		TotalTokens:     6_400_000,
+func TestCalculateUsageTokenCostBreakdownDoesNotDoubleChargeReasoningTokens(t *testing.T) {
+	input := helper.UsageTokenCostInput{
+		InputTokens:  1_000_000,
+		OutputTokens: 2_000_000,
+		CachedTokens: 400_000,
 	}
 	pricing := entities.ModelPriceSetting{
 		PromptPricePer1M:     10,
@@ -862,9 +860,9 @@ func TestCalculateUsageEventCostDoesNotDoubleChargeReasoningTokens(t *testing.T)
 		CachePricePer1M:      1,
 	}
 
-	cost := helper.CalculateUsageEventCost(event, pricing)
+	cost := helper.CalculateUsageTokenCostBreakdown(input, pricing).TotalCostUSD
 
-	if cost != 46.4 {
+	if math.Abs(cost-46.4) > 0.000000001 {
 		t.Fatalf("expected reasoning tokens not to be added to completion cost, got %f", cost)
 	}
 }
@@ -908,7 +906,7 @@ func TestBuildUsageOverviewCalculatesClaudeCacheReadAndCreationCost(t *testing.T
 }
 
 func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
@@ -954,7 +952,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 }
 
 func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveNoBillableTokens(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
@@ -999,7 +997,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 }
 
 func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *testing.T) {
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{{
 		EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
@@ -1031,7 +1029,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *tes
 func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
 
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	cases := []struct {
 		name            string
@@ -1174,7 +1172,7 @@ func assertFloat64PtrClose(t *testing.T, actual *float64, expected float64) {
 
 func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *testing.T) {
 	withRepositoryTestLocation(t, "Asia/Shanghai")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 20, 8, 0, 0, 0, time.UTC), TotalTokens: 10},
@@ -1210,7 +1208,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *test
 
 func TestBuildUsageOverviewRealtimeWithFilterBuildsRealtimeBlockFromRecentCache(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "gpt-5", PromptPricePer1M: 1, CompletionPricePer1M: 1, CachePricePer1M: 0.5}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting gpt-5 returned error: %v", err)
@@ -1362,7 +1360,7 @@ func TestBuildUsageOverviewRealtimeWithFilterBuildsRealtimeBlockFromRecentCache(
 
 func TestBuildUsageOverviewRealtimeWithFilterCapsResponseDistributionParticles(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	windowStart := now.Add(-60 * time.Minute)
@@ -1493,7 +1491,7 @@ func assertRealtimeParticleTimestamp(t *testing.T, particle dto.RealtimeResponse
 
 func TestBuildUsageOverviewRealtimeWithFilterUsesWarmupEventsForSlidingBucketsOnly(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	windowStart := now.Add(-15 * time.Minute)
@@ -1529,7 +1527,7 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesWarmupEventsForSlidingBucketsOn
 
 func TestBuildUsageOverviewRealtimeWithFilterUsesRecentCacheFallbackLabels(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	cache := newEmptyUsageRecentEventCache(UsageRecentEventCacheOptions{Now: func() time.Time { return now }})
@@ -1579,7 +1577,7 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesRecentCacheFallbackLabels(t *te
 
 func TestBuildUsageOverviewRealtimeWithFilterFallsBackToDBWhenRecentCacheIsNil(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{{
@@ -1616,7 +1614,7 @@ func TestBuildUsageOverviewRealtimeWithFilterFallsBackToDBWhenRecentCacheIsNil(t
 
 func TestBuildUsageOverviewWithFilterUsesRecentCacheForCoveredBoundaryEvents(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1674,7 +1672,7 @@ func TestBuildUsageOverviewWithFilterUsesRecentCacheForCoveredBoundaryEvents(t *
 
 func TestBuildUsageOverviewWithFilterUsesOpenEndedRecentCacheForCurrentRightBoundary(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 0, 5, 0, time.UTC)
 	start := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
@@ -1709,7 +1707,7 @@ func TestBuildUsageOverviewWithFilterUsesOpenEndedRecentCacheForCurrentRightBoun
 
 func TestBuildUsageOverviewWithFilterUsesBoundedRecentCacheForHistoricalCustomRightBoundary(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1757,7 +1755,7 @@ func TestBuildUsageOverviewWithFilterUsesBoundedRecentCacheForHistoricalCustomRi
 
 func TestBuildUsageOverviewWithFilterClampsFutureCustomEndToQueryNow(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	queryNow := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -1796,7 +1794,7 @@ func TestBuildUsageOverviewWithFilterClampsFutureCustomEndToQueryNow(t *testing.
 
 func TestBuildUsageOverviewWithFilterDoesNotFallbackToDBForEmptyCoveredRightBoundaryCache(t *testing.T) {
 	withRepositoryTestLocation(t, "UTC")
-	db := testutil.OpenTestDatabase(t)
+	db := openTestDatabase(t)
 
 	now := time.Date(2026, 6, 10, 12, 20, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)

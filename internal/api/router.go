@@ -38,6 +38,8 @@ type QuotaProvider interface {
 	GetRefreshTaskByAuthIndex(context.Context, string) (quota.RefreshTaskResponse, error)
 	GetInspectionStatus(context.Context) (quota.InspectionStatus, error)
 	StartInspection(context.Context) (quota.InspectionStatus, error)
+	GetAutoRefreshSettings(context.Context) (quota.AutoRefreshSettings, error)
+	UpdateAutoRefreshSettings(context.Context, quota.AutoRefreshSettings) (quota.AutoRefreshSettings, error)
 	Reset(context.Context, quota.ResetRequest) (quota.ResetResponse, error)
 }
 

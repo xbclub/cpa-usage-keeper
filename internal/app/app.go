@@ -139,7 +139,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	// cpaClient / quotaService 提前创建：syncService 需要把 quotaService 作为 UsageHeaderQuota 注入，
 	// 用于 Redis usage response_headers 提交后异步 patch quota cache（不参与 usage_events 入库事务）。
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
-	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit, AutoRefreshInterval: cfg.QuotaAutoRefreshInterval})
+	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit})
 
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{

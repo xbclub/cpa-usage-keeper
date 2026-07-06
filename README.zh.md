@@ -7,24 +7,34 @@
 它依赖 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 作为后端 CPA 数据来源，目标是在 CPA 之上补充持久化存储与统计分析能力。服务会从 CPA Redis usage 队列消费事件并写入 SQLite，定时拉取 CPA metadata，暴露聚合 API，并提供内置 Web Dashboard 用于查看 usage、pricing、request health 和 model/API 维度的统计信息。
 
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/govoah.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/fu4lec.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xwjnop.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xwk25d.png" width="49%" />
 </p>
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/fu43px.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/fu4gh3.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xw9jj4.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/06/xybv3z.png" width="49%" />
 </p>
 
 ## 功能特性
 
 - 持久保存 CPA usage 数据到 SQLite
-- Dashboard 查看请求量、Token、成本、缓存命中率、成功率和延迟
-- 支持按时间范围、模型、API Key 和来源筛选用量明细
-- 分析页面提供 Token 趋势、模型/API Key/AI Provider 构成和时段热力图
+- Dashboard 查看请求量、Token、成本、缓存、成功率和请求性能
+- 支持按时间范围、模型、API Key、来源和请求结果筛选用量明细
+- Request Events 提供请求级明细查看、筛选、分页、导出和自定义显示
+- 分析页面提供用量趋势、成本分析、模型/API Key/AI Provider 构成和时段热力图
 - API Key 独立查询页，可按 CPA API Key 查看专属用量
-- 凭证页面展示 Auth File 与 AI Provider 使用情况，支持凭证限额查询与刷新
+- 凭证页面展示 Auth File 与 AI Provider 使用情况，支持限额查询、刷新、巡检和排序
+- 支持多 Provider quota 窗口用量与限额展示
 - 可维护模型价格，用于成本估算和统计展示
+- 自动同步 CPA Auth Files、API Keys、AI Providers 等 metadata 变化
 - 可选密码登录保护、SQLite 备份、Docker/Docker Compose 和 systemd 部署
+- 可通过 CPA 插件将 Keeper Dashboard 内嵌到 CPAMC 中使用
+
+## 赞助与特别感谢
+
+- 感谢 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 提供本项目所依赖的上游 CPA 基础与数据来源。
+- 感谢 [@YouShouldBetOnMe](https://github.com/YouShouldBetOnMe) 对 CPA Usage Keeper 的支持。
+- 感谢 CPA 讨论组（QQ群组）的讨论与反馈。
 
 ## 快速开始
 
@@ -34,7 +44,8 @@
 
 - 第一次部署 CPA + Keeper：优先使用 [Docker Compose](#docker-compose推荐)。
 - CPA 已在宿主机运行：使用 [Docker](#dockercpa-已在宿主机运行)。
-- 不使用容器：使用 [Linux 二进制](#linux-二进制)。
+- macOS：使用 [Homebrew](#macos-homebrew)。
+- Linux 不使用容器：使用 [Linux 二进制](#linux-二进制)。
 
 公网部署建议启用 `AUTH_ENABLED=true`，并配置 `LOGIN_PASSWORD` 保护数据。
 
@@ -150,6 +161,40 @@ docker run -d \
   ghcr.io/willxup/cpa-usage-keeper:latest
 ```
 
+### macOS Homebrew
+
+Homebrew 是 macOS 推荐的二进制安装方式。它会从 CPA Usage Keeper 的 tap 安装 macOS 包，后续新版本也可以用标准 Homebrew 命令升级。
+
+安装：
+
+```bash
+brew tap Willxup/cpa-usage-keeper
+brew install cpa-usage-keeper
+```
+
+编辑自动生成的配置文件，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。公网部署建议同时设置 `AUTH_ENABLED=true` 和 `LOGIN_PASSWORD`：
+
+```bash
+vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
+```
+
+启动后台服务：
+
+```bash
+brew services start cpa-usage-keeper
+```
+
+Homebrew 会把 Keeper 数据放在 `$(brew --prefix)/var/cpa-usage-keeper`，stdout 日志放在 `$(brew --prefix)/var/log/cpa-usage-keeper.log`，stderr 日志放在 `$(brew --prefix)/var/log/cpa-usage-keeper.err.log`。
+
+常用命令：
+
+```bash
+brew services list
+brew services restart cpa-usage-keeper
+brew update
+brew upgrade cpa-usage-keeper
+```
+
 ### Linux 二进制
 
 #### 下载
@@ -219,13 +264,15 @@ cp .env.example .env
 | --- | --- | --- | --- |
 | `APP_PORT` | 否 | `8080` | Keeper HTTP 监听端口 |
 | `APP_BASE_PATH` | 否 | 根路径 | Keeper 子路径部署前缀，例如 `/keeper`；留空表示部署在 `/` |
-| `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转 |
+| `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转和 CPAMC frame 信任来源 |
 
 `APP_BASE_PATH` 必须为空或以 `/` 开头；例如 `/cpa`，`/cpa/` 会规范为 `/cpa`。
 
 `CPA_PUBLIC_URL` 可填写域名、带协议的完整地址或相对路径，例如 `https://cpa.example.com`、`https://cpa.example.com/cpa/` 或 `/cpa/`。前端会自动追加 `management.html`，并兼容末尾已有 `/` 或已经填写到 `management.html` 的情况。未配置时，“返回 CPA”默认跳转到当前浏览器同源根路径下的 `/management.html`；如果 CPA 和 Keeper 的外部域名、端口或路径不一致，请显式设置 `CPA_PUBLIC_URL`。
 
-`CPA_BASE_URL` 只用于服务端访问 CPA，可以是 Docker 内部服务名或内网地址；不要把它当作浏览器跳转地址使用。
+用于 CPAMC frame 信任时，`CPA_PUBLIC_URL` 必须是带 host 的显式 `http://` 或 `https://` URL。相对路径只影响同源“返回 CPA”跳转，不会增加外部 `frame-ancestors` 来源。
+
+`CPA_BASE_URL` 只用于服务端访问 CPA，可以是 Docker 内部服务名或内网地址；不会用于浏览器跳转或 frame 信任判断。
 
 ### 登录保护
 
@@ -245,11 +292,11 @@ cp .env.example .env
 
 ### Auth Files 限额刷新
 
+Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。设置保存在本地 SQLite，不依赖页面保持打开。
+
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `QUOTA_AUTO_REFRESH_ENABLED` | 否 | `false` | 是否启用 Auth Files 限额自动刷新；仅在后台页面可见并持续心跳时执行 |
-| `QUOTA_AUTO_REFRESH_INTERVAL` | 否 | `5m` | Auth Files 限额自动刷新间隔，最低 `60s`，仅在后台页面活跃时生效 |
-| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | Auth Files 限额刷新队列最大并发数，最大 `100` |
+| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | 手动刷新和定时刷新共用的 Auth Files 限额刷新队列最大并发数，最大 `100` |
 
 ### Redis 队列高级配置
 
@@ -268,6 +315,7 @@ cp .env.example .env
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
 | `LOG_RETENTION_DAYS` | 否 | `7` | 日志保留天数；`0` 表示不自动清理 |
+| `CLEANUP_USAGE_EVENTS_ENABLED` | 否 | `false` | 是否在每日维护中删除过期 `usage_events` 原始事件；启用后会删除上个月 1 日 00:00 之前的数据 |
 | `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
 | `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
 | `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
@@ -287,7 +335,10 @@ cp .env.example .env
 - SQLite 数据库备份会保存应用数据库中的原始数据，备份文件不做加密。
 - 面向浏览器的 API 会对 key-like source/lookup 字段做脱敏或稳定公开标识映射，但不会修改数据库原始值。
 - 公开部署建议开启 `AUTH_ENABLED=true`，并在反向代理层配置 HTTPS。
-- 登录 session 存在服务进程内存中，服务重启后已登录 session 会失效。
+- 登录 session hash 存在 SQLite 中，服务重启后仍会保持有效，直到用户退出登录或超过 `AUTH_SESSION_TTL`。
+- CPAMC 嵌入模式使用独立的 embed session。Keeper 会先尝试 `HttpOnly` 的 `cpa_usage_keeper_embed_session` cookie；如果浏览器无法保存嵌入 cookie，则回退到仅 embed 模式使用的请求头。普通 Dashboard session 仍保持 `SameSite=Lax`，不会被嵌入视图复用。
+- 同源 CPAMC 嵌入使用默认的 `frame-ancestors 'self'` 即可。跨源 CPAMC 嵌入时，请将 `CPA_PUBLIC_URL` 设置为公开的 CPA/CPAMC origin；Keeper 只使用 `CPA_PUBLIC_URL` 作为外部 `frame-ancestors` 来源，不使用 `CPA_BASE_URL`。
+- 跨站点嵌入登录在 HTTPS 且浏览器支持第三方 cookie 或分区 cookie 时体验最好。如果 cookie 路径不可用，CPAMC 嵌入模式会回退到按标签页保存在浏览器 session storage 中的 header token。
 - Redis inbox 原始消息会自动清理：成功数据保留到当天结束后清理，失败数据保留 7 天。
 
 ## Nginx反代
@@ -317,7 +368,7 @@ CPA_PUBLIC_URL=https://cpa.example.com
 cmd/server/              应用入口
 internal/api/            HTTP 路由与处理器
 internal/app/            应用装配与启动
-internal/auth/           内存 session 鉴权
+internal/auth/           session 鉴权与持久化
 internal/backup/         SQLite 数据库备份管理
 internal/benchmark/      聚合性能基准测试辅助
 internal/config/         环境配置加载
@@ -340,7 +391,7 @@ web/                     React + TypeScript 前端
 
 ### 前置依赖
 
-- Go 1.22+
+- Go 1.26+
 - Node.js 22+
 - npm
 - 已运行的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI)

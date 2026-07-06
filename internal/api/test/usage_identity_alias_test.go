@@ -25,6 +25,7 @@ func TestUsageIdentityAliasPatchUpdatesAndClearsAlias(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/usage/identities/1", bytes.NewBufferString(`{"alias":"  Friendly Auth  "}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -45,6 +46,7 @@ func TestUsageIdentityAliasPatchUpdatesAndClearsAlias(t *testing.T) {
 
 	resp = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/usage/identities/1", bytes.NewBufferString(`{"alias":""}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -64,6 +66,7 @@ func TestUsageIdentityAliasPatchUpdatesAndClearsAlias(t *testing.T) {
 
 	resp = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/usage/identities/1", bytes.NewBufferString(`{"alias":"Team 🚀"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -83,6 +86,7 @@ func TestUsageIdentityAliasPatchUpdatesAndClearsAlias(t *testing.T) {
 
 	resp = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/usage/identities/1", bytes.NewBufferString(`{"alias":null}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -112,6 +116,7 @@ func TestUsageIdentityAliasPatchRejectsInvalidInputAndDeletedRows(t *testing.T) 
 	} {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPatch, tc.path, bytes.NewBufferString(tc.body))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(resp, req)
 		if resp.Code != tc.want {
@@ -124,6 +129,7 @@ func TestUsageIdentityAliasPatchRejectsInvalidInputAndDeletedRows(t *testing.T) 
 	}
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/usage/identities/1", bytes.NewBufferString(`{"alias":"ok"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 	if resp.Code != http.StatusNotFound {
@@ -146,5 +152,11 @@ func seedUsageIdentityAliasAPIIdentity(t *testing.T, db *gorm.DB) {
 func openUsageIdentityAliasAPIDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testutil.OpenTestDatabase(t)
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return db
 }

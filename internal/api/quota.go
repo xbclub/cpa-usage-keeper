@@ -2,12 +2,12 @@ package api
 
 import (
 	"errors"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"strings"
 
 	"cpa-usage-keeper/internal/quota"
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
 
 type quotaRequest struct {
@@ -17,6 +17,52 @@ type quotaRequest struct {
 const quotaResetErrorFailed = "quota_reset_failed"
 
 func registerQuotaRoutes(router gin.IRoutes, provider QuotaProvider) {
+	router.GET("/quota/auto-refresh/settings", func(c *gin.Context) {
+		if provider == nil {
+			writeInternalError(c, "quota provider is not configured", nil)
+			return
+		}
+
+		response, err := provider.GetAutoRefreshSettings(c.Request.Context())
+		if err != nil {
+			switch {
+			case errors.Is(err, quota.ErrValidation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "quota auto refresh settings are invalid"})
+			default:
+				writeInternalError(c, "quota auto refresh settings lookup failed", err)
+			}
+			return
+		}
+
+		c.JSON(http.StatusOK, response)
+	})
+
+	router.PUT("/quota/auto-refresh/settings", func(c *gin.Context) {
+		if provider == nil {
+			writeInternalError(c, "quota provider is not configured", nil)
+			return
+		}
+
+		var request quota.AutoRefreshSettings
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "quota auto refresh settings are required"})
+			return
+		}
+
+		response, err := provider.UpdateAutoRefreshSettings(c.Request.Context(), request)
+		if err != nil {
+			switch {
+			case errors.Is(err, quota.ErrValidation):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "quota auto refresh settings are invalid"})
+			default:
+				writeInternalError(c, "quota auto refresh settings update failed", err)
+			}
+			return
+		}
+
+		c.JSON(http.StatusOK, response)
+	})
+
 	router.POST("/quota/cache", func(c *gin.Context) {
 		if provider == nil {
 			writeInternalError(c, "quota provider is not configured", nil)
