@@ -53,7 +53,7 @@ func NewUsageCostResolver(ctx context.Context, db *gorm.DB) (*UsageCostResolver,
 }
 
 func (r *UsageCostResolver) Calculate(subject UsageCostSubject) UsageCostResult {
-	pricing, matchedModel, matchedBy, ok := r.matchPricing(subject.ModelAlias, subject.Model)
+	pricing, matchedModel, matchedBy, ok := r.matchPricing(subject.Model, subject.ModelAlias)
 	if !ok {
 		return UsageCostResult{Available: !helper.UsageTokenInputRequiresPricing(subject.Tokens)}
 	}
@@ -86,18 +86,18 @@ func (r *UsageCostResolver) CalculateEvent(event entities.UsageEvent) UsageCostR
 	})
 }
 
-func (r *UsageCostResolver) matchPricing(modelAlias string, model string) (entities.ModelPriceSetting, string, string, bool) {
+func (r *UsageCostResolver) matchPricing(model string, modelAlias string) (entities.ModelPriceSetting, string, string, bool) {
 	if r == nil {
 		return entities.ModelPriceSetting{}, "", "", false
-	}
-	if alias := strings.TrimSpace(modelAlias); alias != "" {
-		if pricing, ok := r.pricesByModel[alias]; ok {
-			return pricing, alias, "model_alias", true
-		}
 	}
 	if modelName := strings.TrimSpace(model); modelName != "" {
 		if pricing, ok := r.pricesByModel[modelName]; ok {
 			return pricing, modelName, "model", true
+		}
+	}
+	if alias := strings.TrimSpace(modelAlias); alias != "" {
+		if pricing, ok := r.pricesByModel[alias]; ok {
+			return pricing, alias, "model_alias", true
 		}
 	}
 	return entities.ModelPriceSetting{}, "", "", false
@@ -112,4 +112,21 @@ func gormDBContext(db *gorm.DB) context.Context {
 		return db.Statement.Context
 	}
 	return context.Background()
+}
+
+// matchPricingByMap 在没有 resolver 实例的场景下（例如 fork 的 usage.go 直接持有 pricingByModel map），
+// 提供与 UsageCostResolver.matchPricing 相同的 model 优先 + alias 回退语义。
+// model 缺价时按 alias 再次查表，避免 OpenAI-compat 等场景下 alias 有价但 model 无价导致 cost 不可用。
+func matchPricingByMap(pricingByModel map[string]entities.ModelPriceSetting, model string, modelAlias string) (entities.ModelPriceSetting, bool) {
+	if modelName := strings.TrimSpace(model); modelName != "" {
+		if pricing, ok := pricingByModel[modelName]; ok {
+			return pricing, true
+		}
+	}
+	if alias := strings.TrimSpace(modelAlias); alias != "" {
+		if pricing, ok := pricingByModel[alias]; ok {
+			return pricing, true
+		}
+	}
+	return entities.ModelPriceSetting{}, false
 }

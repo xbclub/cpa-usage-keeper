@@ -403,7 +403,7 @@ func normalizeRedisUsageEvents(ctx context.Context, db *gorm.DB, events []entiti
 				"auth_index": event.AuthIndex,
 				"event_key":  event.EventKey,
 			}).Warn("usage identity type not found for redis usage event")
-			usageType = "openai"
+			usageType = "default"
 		}
 		normalized[i] = NormalizeUsageEventTokens(event, usageType)
 	}
@@ -538,7 +538,7 @@ func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeRes
 		key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAIProvider, identity: strings.TrimSpace(event.AuthIndex)}
 		return strings.TrimSpace(resolver.byIdentity[key])
 	default:
-		return "openai"
+		return "default"
 	}
 }
 

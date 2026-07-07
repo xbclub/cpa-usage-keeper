@@ -2,6 +2,7 @@ package repository
 
 import (
 	"cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"strings"
 	"testing"
 	"time"
@@ -132,7 +133,7 @@ func TestDeleteModelPriceSettingDeletesOnlyTheTargetModel(t *testing.T) {
 
 func openTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	return openTestDatabase(t)
+	return testutil.OpenTestDatabase(t)
 }
 
 func closeTestDatabase(t *testing.T, db *gorm.DB) {
