@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FocusEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@/lib/chartjs';
-import type { Chart, ChartData, ChartOptions, Plugin, ScriptableContext, TooltipModel } from 'chart.js';
+import { Interaction, Tooltip } from 'chart.js';
+import type { Chart, ChartData, ChartOptions, InteractionItem, InteractionModeFunction, Plugin, ScriptableContext, TooltipModel, TooltipPositionerFunction } from 'chart.js';
 import { Bar, Doughnut, Scatter } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisCostBreakdown, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
 import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatUsd } from '@/utils/usage';
@@ -68,6 +69,15 @@ type FloatingTooltipState = {
   y: number;
   placement: 'above' | 'below';
 };
+type ViewportPoint = {
+  x: number;
+  y: number;
+};
+type ChartTooltipPointer = {
+  chartX: number;
+  chartY: number;
+  viewport?: ViewportPoint;
+};
 type CostBreakdownSegmentKey = 'input' | 'output' | 'cached';
 type CostBreakdownSegment = {
   key: CostBreakdownSegmentKey;
@@ -116,6 +126,16 @@ type LatencyReferenceHover = {
 };
 type LatencyPluginEventArgs = Parameters<NonNullable<Plugin<'scatter'>['afterEvent']>>[1];
 
+declare module 'chart.js' {
+  interface TooltipPositionerMap {
+    analysisCompositionCursor: TooltipPositionerFunction<'doughnut'>;
+  }
+
+  interface InteractionModeMap {
+    analysisCompositionArc: InteractionModeFunction;
+  }
+}
+
 const CHART_COLORS: GradientColor[] = [
   { base: '#1d4ed8', light: '#60a5fa' },
   { base: '#ca8a04', light: '#facc15' },
@@ -159,6 +179,14 @@ const MODEL_EFFICIENCY_COLORS: ModelEfficiencyColor[] = [
 const COST_TOOLTIP_MAX_WIDTH = 280;
 const COST_TOOLTIP_VIEWPORT_PADDING = 8;
 const COST_TOOLTIP_CURSOR_OFFSET = 14;
+const COMPOSITION_DONUT_BORDER_RADIUS = 10;
+const COMPOSITION_DONUT_SPACING = 4;
+const COMPOSITION_DONUT_HOVER_OFFSET = 10;
+const COMPOSITION_DONUT_LAYOUT_PADDING = 28;
+const COMPOSITION_TOOLTIP_CARET_PADDING = 18;
+const COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH = 28;
+const COMPOSITION_TOOLTIP_TITLE_MAX_LINES = 3;
+const FULL_CIRCLE = Math.PI * 2;
 const HEATMAP_TOOLTIP_MAX_WIDTH = 280;
 const HEATMAP_TOOLTIP_VIEWPORT_PADDING = 8;
 const HEATMAP_TOOLTIP_CURSOR_OFFSET = 14;
@@ -174,7 +202,28 @@ const MODEL_EFFICIENCY_OUTLIER_RATIO = 8;
 const MODEL_EFFICIENCY_AXIS_PADDING_FACTOR = 2.5;
 const LATENCY_REFERENCE_HIT_RADIUS_PX = 8;
 const EMPTY_COMPOSITION_ITEMS: AnalysisCompositionItem[] = [];
+const modelEfficiencyTooltipPointers = new WeakMap<Chart, ChartTooltipPointer>();
 const latencyReferenceHoverStates = new WeakMap<Chart<'scatter'>, LatencyReferenceHover>();
+
+const analysisCompositionCursorPositioner: TooltipPositionerFunction<'doughnut'> = function (_items, eventPosition) {
+  if (!eventPosition) return false;
+  const x = toFiniteNumber(eventPosition.x);
+  const y = toFiniteNumber(eventPosition.y);
+  if (x === undefined || y === undefined) return false;
+  const chartArea = this.chart.chartArea;
+  const chartHeight = this.chart.height;
+  const verticalMidpoint = chartArea
+    ? (chartArea.top + chartArea.bottom) / 2
+    : chartHeight / 2;
+  return {
+    x,
+    y,
+    xAlign: 'center',
+    yAlign: y <= verticalMidpoint ? 'bottom' : 'top',
+  };
+};
+
+Tooltip.positioners.analysisCompositionCursor = analysisCompositionCursorPositioner;
 type TokenLabels = {
   input: string;
   output: string;
@@ -225,6 +274,169 @@ const drawTokenAverageLinePlugin: Plugin<'bar'> = {
     ctx.lineTo(chartArea.right, y);
     ctx.stroke();
     ctx.restore();
+  },
+};
+
+const toFiniteNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+type DoughnutArcProps = {
+  x: number;
+  y: number;
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  endAngle: number;
+  circumference: number;
+};
+
+type DoughnutArcElement = {
+  options?: {
+    spacing?: unknown;
+    borderWidth?: unknown;
+  };
+  getProps: (props: Array<keyof DoughnutArcProps>, useFinalPosition?: boolean) => Partial<DoughnutArcProps>;
+};
+
+const normalizeRadians = (angle: number): number => ((angle % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE;
+
+const getRadiansDistance = (first: number, second: number): number => {
+  const distance = Math.abs(normalizeRadians(first) - normalizeRadians(second));
+  return Math.min(distance, FULL_CIRCLE - distance);
+};
+
+const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number, circumference: number): boolean => {
+  if (Math.abs(circumference) >= FULL_CIRCLE - 0.0001) return true;
+  const normalizedAngle = normalizeRadians(angle);
+  const normalizedStart = normalizeRadians(startAngle);
+  const normalizedEnd = normalizeRadians(endAngle);
+  return normalizedStart <= normalizedEnd
+    ? normalizedAngle >= normalizedStart && normalizedAngle <= normalizedEnd
+    : normalizedAngle >= normalizedStart || normalizedAngle <= normalizedEnd;
+};
+
+const getDoughnutArcProps = (element: unknown, useFinalPosition?: boolean): { element: DoughnutArcElement; props: DoughnutArcProps } | undefined => {
+  if (!element || typeof element !== 'object') return undefined;
+  const candidate = element as Partial<DoughnutArcElement>;
+  if (typeof candidate.getProps !== 'function') return undefined;
+  const props = candidate.getProps(['x', 'y', 'innerRadius', 'outerRadius', 'startAngle', 'endAngle', 'circumference'], useFinalPosition);
+  const x = toFiniteNumber(props.x);
+  const y = toFiniteNumber(props.y);
+  const innerRadius = toFiniteNumber(props.innerRadius);
+  const outerRadius = toFiniteNumber(props.outerRadius);
+  const startAngle = toFiniteNumber(props.startAngle);
+  const endAngle = toFiniteNumber(props.endAngle);
+  const circumference = toFiniteNumber(props.circumference);
+  if (
+    x === undefined
+    || y === undefined
+    || innerRadius === undefined
+    || outerRadius === undefined
+    || startAngle === undefined
+    || endAngle === undefined
+    || circumference === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    element: candidate as DoughnutArcElement,
+    props: { x, y, innerRadius, outerRadius, startAngle, endAngle, circumference },
+  };
+};
+
+const isPointerInsidePaintedArc = (item: InteractionItem, event: unknown, useFinalPosition?: boolean): boolean => {
+  const pointerX = toFiniteNumber((event as { x?: unknown } | undefined)?.x);
+  const pointerY = toFiniteNumber((event as { y?: unknown } | undefined)?.y);
+  if (pointerX === undefined || pointerY === undefined) return false;
+  const arc = getDoughnutArcProps(item.element, useFinalPosition);
+  if (!arc) return false;
+  const { element, props } = arc;
+  const deltaX = pointerX - props.x;
+  const deltaY = pointerY - props.y;
+  const radius = Math.hypot(deltaX, deltaY);
+  if (radius < props.innerRadius || radius > props.outerRadius) return false;
+  const angle = Math.atan2(deltaY, deltaX);
+  if (!isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference)) return false;
+  if (Math.abs(props.circumference) >= FULL_CIRCLE - 0.0001) return true;
+
+  const midRadius = (props.innerRadius + props.outerRadius) / 2;
+  if (midRadius <= 0) return true;
+  const spacing = toFiniteNumber(element.options?.spacing) ?? COMPOSITION_DONUT_SPACING;
+  const borderWidth = toFiniteNumber(element.options?.borderWidth) ?? 0;
+  const boundaryPadding = Math.min(
+    Math.abs(props.circumference) / 3,
+    ((spacing + borderWidth) / midRadius) * 1.2,
+  );
+  if (boundaryPadding <= 0) return true;
+
+  // Chart.js 的 nearest 负责小扇区候选；这里只剔除视觉切缝附近未绘制的像素。
+  return getRadiansDistance(angle, props.startAngle) > boundaryPadding
+    && getRadiansDistance(angle, props.endAngle) > boundaryPadding;
+};
+
+const analysisCompositionArcMode: InteractionModeFunction = (chart, event, options, useFinalPosition) => {
+  const candidateItems = Interaction.modes.nearest(chart, event, { ...options, axis: 'r', intersect: false }, useFinalPosition);
+  return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+};
+
+Interaction.modes.analysisCompositionArc = analysisCompositionArcMode;
+
+const getNativeViewportPoint = (event: unknown): ViewportPoint | undefined => {
+  if (!event || typeof event !== 'object') return undefined;
+  const native = (event as { native?: unknown }).native;
+  if (!native || typeof native !== 'object') return undefined;
+  const touchLists = native as {
+    touches?: ArrayLike<{ clientX?: unknown; clientY?: unknown }>;
+    changedTouches?: ArrayLike<{ clientX?: unknown; clientY?: unknown }>;
+  };
+  const touch = touchLists.touches?.[0] ?? touchLists.changedTouches?.[0];
+  const target = touch ?? native;
+  const x = toFiniteNumber((target as { clientX?: unknown }).clientX);
+  const y = toFiniteNumber((target as { clientY?: unknown }).clientY);
+  return x === undefined || y === undefined ? undefined : { x, y };
+};
+
+const getChartTooltipPointer = (event: unknown): ChartTooltipPointer | undefined => {
+  if (!event || typeof event !== 'object') return undefined;
+  const chartX = toFiniteNumber((event as { x?: unknown }).x);
+  const chartY = toFiniteNumber((event as { y?: unknown }).y);
+  if (chartX === undefined || chartY === undefined) return undefined;
+  return {
+    chartX,
+    chartY,
+    viewport: getNativeViewportPoint(event),
+  };
+};
+
+const getTooltipViewportAnchor = (
+  chart: Chart,
+  tooltip: Pick<TooltipModel<'scatter'>, 'caretX' | 'caretY'>,
+  pointer: ChartTooltipPointer | undefined,
+): ViewportPoint | undefined => {
+  if (pointer?.viewport) return pointer.viewport;
+  const canvasRect = chart.canvas?.getBoundingClientRect();
+  if (!canvasRect) return undefined;
+  const anchorX = pointer?.chartX ?? tooltip.caretX ?? canvasRect.width / 2;
+  const anchorY = pointer?.chartY ?? tooltip.caretY ?? canvasRect.height / 2;
+  return {
+    x: canvasRect.left + anchorX,
+    y: canvasRect.top + anchorY,
+  };
+};
+
+const modelEfficiencyTooltipPointerPlugin: Plugin<'scatter'> = {
+  id: 'analysis-model-efficiency-tooltip-pointer',
+  beforeEvent: (chart, args) => {
+    const { event } = args;
+    if (event.type === 'mouseout') {
+      modelEfficiencyTooltipPointers.delete(chart);
+      return;
+    }
+    const pointer = getChartTooltipPointer(event);
+    if (!pointer) return;
+    modelEfficiencyTooltipPointers.set(chart, pointer);
   },
 };
 
@@ -460,6 +672,7 @@ const toGradientFill = (context: { chart: { ctx: CanvasRenderingContext2D; chart
 };
 
 const formatPercent = (value: number) => `${value.toFixed(2)}%`;
+const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 
 const interpolateColor = (from: [number, number, number], to: [number, number, number], ratio: number) => {
   const clampedRatio = Math.max(0, Math.min(1, ratio));
@@ -471,18 +684,15 @@ const getHeatmapCellColor = (intensity: number, isDark: boolean) => {
   const stops: Array<{ at: number; color: [number, number, number] }> = [
     ...(isDark
       ? [
-        { at: 0, color: [26, 17, 24] },
-        { at: 0.24, color: [74, 31, 35] },
-        { at: 0.48, color: [154, 52, 18] },
-        { at: 0.74, color: [249, 115, 22] },
-        { at: 1, color: [253, 230, 138] },
+        { at: 0, color: [58, 36, 48] },
+        { at: 0.46, color: [122, 47, 59] },
+        { at: 1, color: [239, 68, 68] },
       ] satisfies Array<{ at: number; color: [number, number, number] }>
       : [
         { at: 0, color: [255, 247, 237] },
-        { at: 0.22, color: [254, 215, 170] },
-        { at: 0.48, color: [251, 146, 60] },
-        { at: 0.72, color: [239, 68, 68] },
-        { at: 1, color: [124, 45, 18] },
+        { at: 0.34, color: [254, 215, 170] },
+        { at: 0.67, color: [251, 146, 60] },
+        { at: 1, color: [239, 68, 68] },
       ] satisfies Array<{ at: number; color: [number, number, number] }>),
   ];
   const upperIndex = stops.findIndex((stop) => clampedIntensity <= stop.at);
@@ -760,18 +970,63 @@ function buildCompositionChartData(items: AnalysisCompositionItem[]): ChartData<
       backgroundColor: (context) => toGradientFill(context, CHART_COLORS[context.dataIndex % CHART_COLORS.length]),
       borderColor: 'transparent',
       borderWidth: 0,
+      borderRadius: COMPOSITION_DONUT_BORDER_RADIUS,
+      hoverOffset: COMPOSITION_DONUT_HOVER_OFFSET,
     }],
   };
 }
 
-function buildCompositionChartOptions(chartTheme: ChartTheme): ChartOptions<'doughnut'> {
+type CompositionTooltipLabels = {
+  totalTokens: string;
+};
+
+const toTruncatedTooltipTitleLine = (line: string): string => {
+  const suffixLength = 3;
+  const maxContentLength = COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH - suffixLength;
+  return `${line.slice(0, maxContentLength)}...`;
+};
+
+const wrapCompositionTooltipTitle = (label: unknown): string[] => {
+  const normalized = String(label ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const lines: string[] = [];
+  let remaining = normalized;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH) {
+      lines.push(remaining);
+      break;
+    }
+    const naturalBreak = remaining.lastIndexOf(' ', COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH);
+    const breakIndex = naturalBreak > 0 ? naturalBreak : COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH;
+    lines.push(remaining.slice(0, breakIndex).trim());
+    remaining = remaining.slice(breakIndex).trimStart();
+  }
+
+  if (lines.length <= COMPOSITION_TOOLTIP_TITLE_MAX_LINES) return lines;
+  const visibleLines = lines.slice(0, COMPOSITION_TOOLTIP_TITLE_MAX_LINES);
+  visibleLines[COMPOSITION_TOOLTIP_TITLE_MAX_LINES - 1] = toTruncatedTooltipTitleLine(visibleLines[COMPOSITION_TOOLTIP_TITLE_MAX_LINES - 1]);
+  return visibleLines;
+};
+
+function buildCompositionChartOptions(chartTheme: ChartTheme, labels: CompositionTooltipLabels): ChartOptions<'doughnut'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    interaction: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+    hover: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+    layout: { padding: COMPOSITION_DONUT_LAYOUT_PADDING },
     cutout: '58%',
+    spacing: COMPOSITION_DONUT_SPACING,
     plugins: {
       legend: { display: false },
       tooltip: {
+        enabled: true,
+        mode: 'analysisCompositionArc',
+        intersect: false,
+        axis: 'r',
+        position: 'analysisCompositionCursor',
+        caretPadding: COMPOSITION_TOOLTIP_CARET_PADDING,
         backgroundColor: chartTheme.tooltipBg,
         titleColor: chartTheme.textPrimary,
         bodyColor: chartTheme.tooltipBody,
@@ -781,7 +1036,8 @@ function buildCompositionChartOptions(chartTheme: ChartTheme): ChartOptions<'dou
         displayColors: true,
         usePointStyle: true,
         callbacks: {
-          label: (context) => formatCompactNumber(Number(context.parsed ?? 0)),
+          title: (context) => wrapCompositionTooltipTitle(context[0]?.label),
+          label: (context) => `${labels.totalTokens}: ${formatCompactNumber(Number(context.parsed ?? 0))}`,
         },
       },
     },
@@ -1047,6 +1303,15 @@ type CompositionTab = {
   items: AnalysisCompositionItem[];
 };
 
+function CompositionMetaPill({ label, value }: { label: string; value: string }) {
+  return (
+    <span className={styles.compositionUsageMetaPill}>
+      <span className={styles.compositionUsageMetaLabel}>{label}</span>
+      <span className={styles.compositionUsageMetaValue}>{value}</span>
+    </span>
+  );
+}
+
 function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; loading: boolean; isDark: boolean }) {
   const { t } = useTranslation();
   const [activeTabId, setActiveTabId] = useState<CompositionTab['id']>('api_key');
@@ -1054,8 +1319,11 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
   const items = activeTab?.items ?? EMPTY_COMPOSITION_ITEMS;
   const activeContentKey = `${activeTab?.id ?? 'empty'}:${items.map((item) => item.key).join('|')}`;
   const chartTheme = useMemo(() => getChartTheme(isDark), [isDark]);
+  const tooltipLabels = useMemo(() => ({
+    totalTokens: t('usage_stats.total_tokens'),
+  }), [t]);
   const chartData = useMemo(() => buildCompositionChartData(items), [items]);
-  const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme), [chartTheme]);
+  const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme, tooltipLabels), [chartTheme, tooltipLabels]);
   const hasUnavailableCost = items.some((item) => item.cost_available === false);
   return (
     <section className={`${styles.analysisCard} ${styles.compositionCard}`}>
@@ -1087,34 +1355,37 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
         <div key={activeContentKey} className={styles.analysisChartSurface}>
           <div className={styles.compositionLayout}>
             <div className={styles.donutChartFrame}>
-              <Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} />
+              <div className={styles.donutCanvasBox}>
+                <Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} />
+              </div>
             </div>
-            <div className={styles.compositionTableWrap}>
-              <table key={`table-${activeContentKey}`} className={styles.compositionTable}>
-                <thead>
-                  <tr>
-                    <th>{t('usage_stats.analysis_composition_name')}</th>
-                    <th>{t('usage_stats.total_tokens')}</th>
-                    <th>{t('usage_stats.analysis_composition_token_percent')}</th>
-                    <th>{t('usage_stats.total_cost')}</th>
-                    <th>{t('usage_stats.requests_count')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, index) => (
-                    <tr key={`${activeTab.id}-${item.key}`}>
-                      <td>
-                        <span className={styles.legendDot} style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length].base }} />
-                        <span className={styles.compositionName}>{item.label}</span>
-                      </td>
-                      <td>{formatCompactNumber(toNumber(item.total_tokens))}</td>
-                      <td>{formatPercent(toNumber(item.percent))}</td>
-                      <td>{formatUsd(toNumber(item.cost_usd))}</td>
-                      <td>{formatCompactNumber(toNumber(item.requests))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div key={`list-${activeContentKey}`} className={styles.compositionUsageList}>
+              {items.map((item, index) => {
+                const rawPercent = toNumber(item.percent);
+                const visualPercent = clampPercent(rawPercent);
+                const barStyle = {
+                  width: `${visualPercent}%`,
+                  '--composition-bar-color': CHART_COLORS[index % CHART_COLORS.length].base,
+                } as CSSProperties;
+                return (
+                  <div key={`${activeTab.id}-${item.key}`} className={styles.compositionUsageItem}>
+                    <div className={styles.compositionUsageTopline}>
+                      <span className={styles.compositionUsageLabel} title={item.label}>{item.label}</span>
+                      <span className={styles.compositionUsageShare} aria-label={t('usage_stats.analysis_composition_token_percent')}>{formatPercent(rawPercent)}</span>
+                    </div>
+                    <div className={styles.compositionUsageTrack}>
+                      {visualPercent > 0 && (
+                        <span className={styles.compositionUsageBar} style={barStyle} />
+                      )}
+                    </div>
+                    <div className={styles.compositionUsageMeta}>
+                      <CompositionMetaPill label={t('usage_stats.total_tokens')} value={formatCompactNumber(toNumber(item.total_tokens))} />
+                      <CompositionMetaPill label={t('usage_stats.requests_count')} value={formatCompactNumber(toNumber(item.requests))} />
+                      <CompositionMetaPill label={t('usage_stats.total_cost')} value={formatUsd(toNumber(item.cost_usd))} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1460,16 +1731,24 @@ function createModelEfficiencyTooltipHandler({
     }
 
     const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
     const maxWidth = Math.min(MODEL_EFFICIENCY_TOOLTIP_MAX_WIDTH, viewportWidth - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING * 2);
     tooltipEl.style.opacity = '1';
     tooltipEl.style.maxWidth = `${maxWidth}px`;
-    const canvasRect = chart.canvas.getBoundingClientRect();
+    const anchor = getTooltipViewportAnchor(chart, tooltip, modelEfficiencyTooltipPointers.get(chart));
+    if (!anchor) {
+      tooltipEl.style.opacity = '0';
+      return;
+    }
     const tooltipWidth = tooltipEl.offsetWidth || MODEL_EFFICIENCY_TOOLTIP_MAX_WIDTH;
     const tooltipHeight = tooltipEl.offsetHeight || 160;
-    const rawLeft = canvasRect.left + tooltip.caretX + MODEL_EFFICIENCY_TOOLTIP_CURSOR_OFFSET;
+    const rawLeft = anchor.x + MODEL_EFFICIENCY_TOOLTIP_CURSOR_OFFSET;
     const left = Math.max(MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING, Math.min(rawLeft, viewportWidth - tooltipWidth - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING));
-    const rawTop = canvasRect.top + tooltip.caretY - tooltipHeight / 2;
-    const top = Math.max(MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING, rawTop);
+    const rawTop = anchor.y - tooltipHeight / 2;
+    const top = Math.max(
+      MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING,
+      Math.min(rawTop, viewportHeight - tooltipHeight - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING),
+    );
     tooltipEl.style.left = `${left}px`;
     tooltipEl.style.top = `${top}px`;
   };
@@ -1577,7 +1856,7 @@ function ModelEfficiencyCard({ rows, loading, isDark, isMobile }: { rows: Analys
         <div className={styles.modelEfficiencyBody}>
           {hasPricedData ? (
             <div className={styles.efficiencyChartFrame}>
-              <Scatter data={chartData} options={chartOptions} />
+              <Scatter data={chartData} options={chartOptions} plugins={[modelEfficiencyTooltipPointerPlugin]} />
             </div>
           ) : (
             <div className={styles.emptyState}>{t('usage_stats.no_data')}</div>
