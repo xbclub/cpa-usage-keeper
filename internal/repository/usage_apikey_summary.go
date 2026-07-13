@@ -26,7 +26,7 @@ func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOvervi
 	if key == "" {
 		return
 	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
+	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -36,7 +36,8 @@ func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOvervi
 	item.TotalTokens += row.TotalTokens
 	item.InputTokens += row.InputTokens
 	item.OutputTokens += row.OutputTokens
-	item.CachedTokens += row.CachedTokens
+	item.CacheReadTokens += row.CacheReadTokens
+	item.CacheCreationTokens += row.CacheCreationTokens
 	item.CostUSD += cost
 	if !costAvailable {
 		item.CostAvailable = false
@@ -49,7 +50,7 @@ func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOvervie
 	if key == "" {
 		return
 	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
+	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -59,7 +60,8 @@ func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOvervie
 	item.TotalTokens += row.TotalTokens
 	item.InputTokens += row.InputTokens
 	item.OutputTokens += row.OutputTokens
-	item.CachedTokens += row.CachedTokens
+	item.CacheReadTokens += row.CacheReadTokens
+	item.CacheCreationTokens += row.CacheCreationTokens
 	item.CostUSD += cost
 	if !costAvailable {
 		item.CostAvailable = false
@@ -89,7 +91,8 @@ func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, pr
 	item.TotalTokens += event.TotalTokens
 	item.InputTokens += event.InputTokens
 	item.OutputTokens += event.OutputTokens
-	item.CachedTokens += event.CachedTokens
+	item.CacheReadTokens += event.CacheReadTokens
+	item.CacheCreationTokens += event.CacheCreationTokens
 	item.CostUSD += cost
 	if !costAvailable {
 		item.CostAvailable = false
@@ -112,11 +115,10 @@ func (a *apiKeySummaryAccumulator) toSlice() []dto.UsageOverviewAPIKeySummary {
 }
 
 // apiKeySummaryRowCost 按 model（缺价时回退 alias）计算单行 stat 的 cost。
-func apiKeySummaryRowCost(model string, modelAlias string, inputTokens, outputTokens, cachedTokens, cacheReadTokens, cacheCreationTokens int64, pricingByModel map[string]entities.ModelPriceSetting) (float64, bool) {
+func apiKeySummaryRowCost(model string, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, pricingByModel map[string]entities.ModelPriceSetting) (float64, bool) {
 	costInput := helper.UsageTokenCostInput{
 		InputTokens:         inputTokens,
 		OutputTokens:        outputTokens,
-		CachedTokens:        cachedTokens,
 		CacheReadTokens:     cacheReadTokens,
 		CacheCreationTokens: cacheCreationTokens,
 	}

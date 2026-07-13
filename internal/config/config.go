@@ -55,6 +55,8 @@ type Config struct {
 	AppBasePath string
 	// CPAPublicURL 是浏览器访问 CPA 的公开地址；为空时前端按同源根路径跳转。
 	CPAPublicURL string
+	// CPARequestLogAccessEnabled 控制是否允许通过 Keeper 访问 CPA request log。
+	CPARequestLogAccessEnabled bool
 	// TLSEnabled 控制是否以 HTTPS 模式启动 HTTP 服务。
 	TLSEnabled bool
 	// TLSCertFile 是 HTTPS 证书文件路径。
@@ -310,6 +312,10 @@ func Load(options LoadOptions) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cpaRequestLogAccessEnabled, err := getBool("CPA_REQUEST_LOG_ACCESS_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
 
 	appBasePath, err := normalizeBasePath(strings.TrimSpace(os.Getenv("APP_BASE_PATH")))
 	if err != nil {
@@ -322,6 +328,7 @@ func Load(options LoadOptions) (*Config, error) {
 		AppPort:                  getString("APP_PORT", "8080"),
 		AppBasePath:              appBasePath,
 		CPAPublicURL:             strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		CPARequestLogAccessEnabled: cpaRequestLogAccessEnabled,
 		TLSEnabled:               tlsEnabled,
 		TLSCertFile:              strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
 		TLSKeyFile:               strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),

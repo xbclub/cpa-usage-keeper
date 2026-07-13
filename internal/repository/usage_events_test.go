@@ -160,8 +160,8 @@ func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
 		PricingStyle:            entities.ModelPricingStyleClaude,
 		PromptPricePer1M:        10,
 		CompletionPricePer1M:    20,
-		CachePricePer1M:         1,
-		CacheCreationPricePer1M: 12.5,
+		CacheReadPricePer1M:         1,
+		CacheWritePricePer1M: 12.5,
 	}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
@@ -172,7 +172,6 @@ func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
 		Timestamp:           time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
 		InputTokens:         1_300_000,
 		OutputTokens:        500_000,
-		CachedTokens:        200_000,
 		CacheReadTokens:     200_000,
 		CacheCreationTokens: 100_000,
 		TotalTokens:         1_800_000,

@@ -30,14 +30,15 @@ type usageOverviewResponse struct {
 // usageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行 json 投影。api_key 字段在后端用
 // helper.RedactSensitiveValue 脱敏，前端 ApiKeySummaryTable 直接展示（不再额外遮罩）。
 type usageOverviewAPIKeySummary struct {
-	APIKey        string  `json:"api_key"`
-	RequestCount  int64   `json:"request_count"`
-	TotalTokens   int64   `json:"total_tokens"`
-	InputTokens   int64   `json:"input_tokens"`
-	OutputTokens  int64   `json:"output_tokens"`
-	CachedTokens  int64   `json:"cached_tokens"`
-	CostUSD       float64 `json:"cost_usd"`
-	CostAvailable bool    `json:"cost_available"`
+	APIKey             string  `json:"api_key"`
+	RequestCount       int64   `json:"request_count"`
+	TotalTokens        int64   `json:"total_tokens"`
+	InputTokens        int64   `json:"input_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64  `json:"cache_creation_tokens"`
+	CostUSD            float64 `json:"cost_usd"`
+	CostAvailable      bool    `json:"cost_available"`
 }
 
 type usageOverviewPayload struct {
@@ -56,7 +57,8 @@ type usageOverviewSummary struct {
 	TotalCost             float64  `json:"total_cost"`
 	CostAvailable         bool     `json:"cost_available"`
 	InputTokens           int64    `json:"input_tokens"`
-	CachedTokens          int64    `json:"cached_tokens"`
+	CacheReadTokens       int64    `json:"cache_read_tokens"`
+	CacheCreationTokens   int64    `json:"cache_creation_tokens"`
 	ReasoningTokens       int64    `json:"reasoning_tokens"`
 	DailyAverageRequests  *float64 `json:"daily_average_requests,omitempty"`
 	DailyAverageTokens    *float64 `json:"daily_average_tokens,omitempty"`
@@ -65,12 +67,12 @@ type usageOverviewSummary struct {
 }
 
 type usageOverviewSeries struct {
-	Requests  map[string]int64    `json:"requests"`
-	Tokens    map[string]int64    `json:"tokens"`
-	RPM       map[string]float64  `json:"rpm"`
-	TPM       map[string]float64  `json:"tpm"`
-	Cost      map[string]float64  `json:"cost"`
-	CacheRate map[string]*float64 `json:"cache_rate"`
+	Requests      map[string]int64    `json:"requests"`
+	Tokens        map[string]int64    `json:"tokens"`
+	RPM           map[string]float64  `json:"rpm"`
+	TPM           map[string]float64  `json:"tpm"`
+	Cost          map[string]float64  `json:"cost"`
+	CacheReadRate map[string]*float64 `json:"cache_read_rate"`
 }
 
 type usageOverviewServiceHealth struct {
@@ -201,10 +203,11 @@ type usageOverviewRequestLevelPoint struct {
 }
 
 type usageOverviewCacheLevelPoint struct {
-	Bucket       string   `json:"bucket"`
-	CacheRate    *float64 `json:"cache_rate,omitempty"`
-	CachedTokens int64    `json:"cached_tokens"`
-	InputTokens  int64    `json:"input_tokens"`
+	Bucket              string   `json:"bucket"`
+	CacheReadRate       *float64 `json:"cache_read_rate,omitempty"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	CacheCreationTokens int64    `json:"cache_creation_tokens"`
+	InputTokens         int64    `json:"input_tokens"`
 }
 
 var allowedKeyOverviewRanges = map[string]struct{}{
@@ -381,14 +384,15 @@ func buildUsageOverviewAPIKeySummary(overview *servicedto.UsageOverviewSnapshot)
 	rows := make([]usageOverviewAPIKeySummary, 0, len(overview.APIKeySummary))
 	for _, item := range overview.APIKeySummary {
 		rows = append(rows, usageOverviewAPIKeySummary{
-			APIKey:        helper.RedactSensitiveValue(item.APIGroupKey),
-			RequestCount:  item.RequestCount,
-			TotalTokens:   item.TotalTokens,
-			InputTokens:   item.InputTokens,
-			OutputTokens:  item.OutputTokens,
-			CachedTokens:  item.CachedTokens,
-			CostUSD:       item.CostUSD,
-			CostAvailable: item.CostAvailable,
+			APIKey:             helper.RedactSensitiveValue(item.APIGroupKey),
+			RequestCount:       item.RequestCount,
+			TotalTokens:        item.TotalTokens,
+			InputTokens:        item.InputTokens,
+			OutputTokens:       item.OutputTokens,
+			CacheReadTokens:    item.CacheReadTokens,
+			CacheCreationTokens: item.CacheCreationTokens,
+			CostUSD:            item.CostUSD,
+			CostAvailable:      item.CostAvailable,
 		})
 	}
 	return rows
@@ -464,7 +468,8 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 		TotalCost:             overview.Summary.TotalCost,
 		CostAvailable:         overview.Summary.CostAvailable,
 		InputTokens:           overview.Summary.InputTokens,
-		CachedTokens:          overview.Summary.CachedTokens,
+		CacheReadTokens:       overview.Summary.CacheReadTokens,
+		CacheCreationTokens:   overview.Summary.CacheCreationTokens,
 		ReasoningTokens:       overview.Summary.ReasoningTokens,
 		DailyAverageRequests:  overview.Summary.DailyAverageRequests,
 		DailyAverageTokens:    overview.Summary.DailyAverageTokens,
@@ -475,23 +480,23 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 
 func emptyUsageOverviewSeries() usageOverviewSeries {
 	return usageOverviewSeries{
-		Requests:  map[string]int64{},
-		Tokens:    map[string]int64{},
-		RPM:       map[string]float64{},
-		TPM:       map[string]float64{},
-		Cost:      map[string]float64{},
-		CacheRate: map[string]*float64{},
+		Requests:      map[string]int64{},
+		Tokens:        map[string]int64{},
+		RPM:           map[string]float64{},
+		TPM:           map[string]float64{},
+		Cost:          map[string]float64{},
+		CacheReadRate: map[string]*float64{},
 	}
 }
 
 func mapUsageOverviewSeries(series servicedto.UsageOverviewSeries) usageOverviewSeries {
 	return usageOverviewSeries{
-		Requests:  cloneInt64Map(series.Requests),
-		Tokens:    cloneInt64Map(series.Tokens),
-		RPM:       cloneFloat64Map(series.RPM),
-		TPM:       cloneFloat64Map(series.TPM),
-		Cost:      cloneFloat64Map(series.Cost),
-		CacheRate: cloneFloat64PtrMap(series.CacheRate),
+		Requests:      cloneInt64Map(series.Requests),
+		Tokens:        cloneInt64Map(series.Tokens),
+		RPM:           cloneFloat64Map(series.RPM),
+		TPM:           cloneFloat64Map(series.TPM),
+		Cost:          cloneFloat64Map(series.Cost),
+		CacheReadRate: cloneFloat64PtrMap(series.CacheReadRate),
 	}
 }
 
@@ -669,10 +674,11 @@ func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, wind
 	}
 	for _, point := range realtime.CacheLevel {
 		result.CacheLevel = append(result.CacheLevel, usageOverviewCacheLevelPoint{
-			Bucket:       point.Bucket,
-			CacheRate:    point.CacheRate,
-			CachedTokens: point.CachedTokens,
-			InputTokens:  point.InputTokens,
+			Bucket:              point.Bucket,
+			CacheReadRate:       point.CacheReadRate,
+			CacheReadTokens:     point.CacheReadTokens,
+			CacheCreationTokens: point.CacheCreationTokens,
+			InputTokens:         point.InputTokens,
 		})
 	}
 	return result
@@ -729,10 +735,11 @@ func buildKeyUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, w
 	}
 	for _, point := range realtime.CacheLevel {
 		result.CacheLevel = append(result.CacheLevel, usageOverviewCacheLevelPoint{
-			Bucket:       point.Bucket,
-			CacheRate:    point.CacheRate,
-			CachedTokens: point.CachedTokens,
-			InputTokens:  point.InputTokens,
+			Bucket:              point.Bucket,
+			CacheReadRate:       point.CacheReadRate,
+			CacheReadTokens:     point.CacheReadTokens,
+			CacheCreationTokens: point.CacheCreationTokens,
+			InputTokens:         point.InputTokens,
 		})
 	}
 	return result

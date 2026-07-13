@@ -12,7 +12,8 @@ type UsageOverviewSummaryRecord struct {
 	TotalCost             float64
 	CostAvailable         bool
 	InputTokens           int64
-	CachedTokens          int64
+	CacheReadTokens       int64
+	CacheCreationTokens   int64
 	ReasoningTokens       int64
 	DailyAverageRequests  *float64
 	DailyAverageTokens    *float64
@@ -22,14 +23,14 @@ type UsageOverviewSummaryRecord struct {
 
 // UsageOverviewSeriesRecord 是 overview 的 series 聚合结果。
 type UsageOverviewSeriesRecord struct {
-	Requests              map[string]int64
-	Tokens                map[string]int64
-	RPM                   map[string]float64
-	TPM                   map[string]float64
-	Cost                  map[string]float64
-	CacheRate             map[string]*float64
-	CacheRateInputTokens  map[string]int64
-	CacheRateCachedTokens map[string]int64
+	Requests                 map[string]int64
+	Tokens                   map[string]int64
+	RPM                      map[string]float64
+	TPM                      map[string]float64
+	Cost                     map[string]float64
+	CacheReadRate            map[string]*float64
+	CacheReadRateInputTokens map[string]int64
+	CacheReadRateReadTokens  map[string]int64
 }
 
 // UsageOverviewHealthBlockRecord 是 overview health 的单个时间块。
@@ -141,22 +142,24 @@ type RealtimeRequestLevelPointRecord struct {
 
 // RealtimeCacheLevelPointRecord 是 Overview 缓存水平图的单个短窗口桶。
 type RealtimeCacheLevelPointRecord struct {
-	Bucket       string
-	CacheRate    *float64
-	CachedTokens int64
-	InputTokens  int64
+	Bucket              string
+	CacheReadRate       *float64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	InputTokens         int64
 }
 
-// UsageOverviewAPIKeySummary 是单个 API Key 在时间窗口内的汇总数据。
+// UsageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总条目（上游没有此功能）。
 type UsageOverviewAPIKeySummary struct {
-	APIGroupKey   string
-	RequestCount  int64
-	TotalTokens   int64
-	InputTokens   int64
-	OutputTokens  int64
-	CachedTokens  int64
-	CostUSD       float64
-	CostAvailable bool
+	APIGroupKey        string
+	RequestCount       int64
+	TotalTokens        int64
+	InputTokens        int64
+	OutputTokens       int64
+	CacheReadTokens    int64
+	CacheCreationTokens int64
+	CostUSD            float64
+	CostAvailable      bool
 }
 
 // UsageOverviewRecord 是仓储层的完整 usage overview 结果。

@@ -76,8 +76,8 @@ func TestPricingRoutesReturnConfiguredData(t *testing.T) {
 			PricingStyle:            "claude",
 			PromptPricePer1M:        3,
 			CompletionPricePer1M:    15,
-			CachePricePer1M:         0.3,
-			CacheCreationPricePer1M: 3.75,
+			CacheReadPricePer1M:         0.3,
+			CacheWritePricePer1M: 3.75,
 		}},
 	}, AuthConfig{}, nil, "")
 
@@ -108,7 +108,7 @@ func TestPricingSyncPreviewRoute(t *testing.T) {
 				PricingStyle:         "openai",
 				PromptPricePer1M:     2.5,
 				CompletionPricePer1M: 10,
-				CachePricePer1M:      1.25,
+				CacheReadPricePer1M:      1.25,
 			}},
 		},
 	}, AuthConfig{}, nil, "")
@@ -129,8 +129,8 @@ func TestUpdatePricingRoute(t *testing.T) {
 			PricingStyle:            "claude",
 			PromptPricePer1M:        3,
 			CompletionPricePer1M:    15,
-			CachePricePer1M:         0.3,
-			CacheCreationPricePer1M: 3.75,
+			CacheReadPricePer1M:         0.3,
+			CacheWritePricePer1M: 3.75,
 		},
 	}
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
@@ -143,7 +143,7 @@ func TestUpdatePricingRoute(t *testing.T) {
 	if resp.Code != http.StatusOK || !contains(resp.Body.String(), `"model":"claude-sonnet"`) || !contains(resp.Body.String(), `"pricing_style":"claude"`) {
 		t.Fatalf("unexpected update response: %d %s", resp.Code, resp.Body.String())
 	}
-	if provider.lastUpdate == nil || provider.lastUpdate.PricingStyle != "claude" || provider.lastUpdate.CacheCreationPricePer1M != 3.75 {
+	if provider.lastUpdate == nil || provider.lastUpdate.PricingStyle != "claude" || provider.lastUpdate.CacheWritePricePer1M != 3.75 {
 		t.Fatalf("expected Claude pricing fields to pass through, got %+v", provider.lastUpdate)
 	}
 }
@@ -154,7 +154,7 @@ func TestUpdatePricingRouteAcceptsModelInBody(t *testing.T) {
 			Model:                "openai/gpt-4.1",
 			PromptPricePer1M:     3,
 			CompletionPricePer1M: 15,
-			CachePricePer1M:      0.3,
+			CacheReadPricePer1M:      0.3,
 		},
 	}
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")

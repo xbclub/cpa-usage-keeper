@@ -30,6 +30,7 @@ type UsageIdentity struct {
 	Note         *string
 	AccountID    *string
 	ProjectID    *string
+	XAIUserID    *string
 
 	ActiveStart *time.Time `gorm:"serializer:storageTime"`
 	ActiveUntil *time.Time `gorm:"serializer:storageTime"`
@@ -42,6 +43,7 @@ type UsageIdentity struct {
 	OutputTokens    int64
 	ReasoningTokens int64
 	CachedTokens    int64
+	CacheReadTokens int64 `gorm:"not null;default:0"`
 	TotalTokens     int64
 
 	LastAggregatedUsageEventID int64

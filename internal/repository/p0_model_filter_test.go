@@ -188,10 +188,10 @@ func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias str
 	pricingByModel := map[string]entities.ModelPriceSetting{}
 	if pricedModel != "" {
 		setting, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
-			Model:                pricedModel,
-			PromptPricePer1M:     3,
+			Model:             pricedModel,
+			PromptPricePer1M:  3,
 			CompletionPricePer1M: 0,
-			CachePricePer1M:      0,
+			CacheReadPricePer1M: 0,
 		})
 		if err != nil {
 			t.Fatalf("UpsertModelPriceSetting %s: %v", pricedModel, err)

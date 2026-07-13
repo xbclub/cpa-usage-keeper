@@ -201,6 +201,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
 	pricingService := service.NewPricingService(db, cpaClient)
+	// requestLogService 通过 CPA 获取请求日志的预览/下载，供 Request Events 页面使用。
+	requestLogService := service.NewRequestLogService(db, cpaClient)
 	// 复用的 AuthConfig：同时传给 NewAuthHandler 和 NewRouter，避免 handler/router 使用不同配置。
 	authCfg := api.AuthConfig{
 		Enabled:              cfg.AuthEnabled,
@@ -242,7 +244,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 				Quota:         quotaService,
 				CPAAPIKeys:    cpaAPIKeyService,
 				AuthFiles:     authFilesManagementService,
-				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL, ActiveRecorder: quotaActiveRecorder(cfg, quotaService), QuotaAutoRefreshEnabled: cfg.QuotaAutoRefreshEnabled},
+				RequestLogs:   requestLogService,
+				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL, CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled, ActiveRecorder: quotaActiveRecorder(cfg, quotaService), QuotaAutoRefreshEnabled: cfg.QuotaAutoRefreshEnabled},
 			},
 		),
 	}, nil
