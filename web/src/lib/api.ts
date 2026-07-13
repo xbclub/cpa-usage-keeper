@@ -115,21 +115,95 @@ async function parseApiError(response: Response, fallback: string): Promise<neve
 }
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers = new Headers(init?.headers)
+  // CPAMC embed 模式下所有请求都带 embed header，让后端识别嵌入来源。
+  if (isCPAMCEmbed()) {
+    headers.set('X-CPA-Usage-Keeper-Embed', 'cpamc')
+  }
+  // 写请求（POST/PUT/PATCH/DELETE）必须带 request-intent header，与后端 requestIntentMiddleware 配合防 CSRF。
+  if (method !== 'GET' && method !== 'HEAD') {
+    headers.set('X-CPA-Usage-Keeper-Request', 'fetch')
+  }
+  // embed session fallback：cookie 无法认证时才用 header 传 token，避免 token 进入 URL。
+  const embedSessionToken = readEmbedSessionToken()
+  if (embedSessionToken) {
+    headers.set('X-CPA-Usage-Keeper-Embed-Session', embedSessionToken)
+  }
   return fetch(input, {
     credentials: 'include',
     ...init,
+    headers,
   })
+}
+
+// isCPAMCEmbed 判断当前页面是否运行在 CPAMC embed 模式（?embed=cpamc 或 ?mode=cpamc）。
+function isCPAMCEmbed(): boolean {
+  if (typeof window === 'undefined' || !window.location) return false
+  const search = window.location.search ?? ''
+  return /[?&](embed|mode)=cpamc(&|$)/.test(search)
+}
+
+const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
+
+function embedSessionStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+// readEmbedSessionToken 读取 embed session fallback token，任何异常都安全降级为无 token。
+function readEmbedSessionToken(): string | null {
+  const storage = embedSessionStorage()
+  if (!storage) return null
+  try {
+    return storage.getItem(EMBED_SESSION_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeEmbedSessionToken(token: string): void {
+  const storage = embedSessionStorage()
+  if (!storage) return
+  try {
+    storage.setItem(EMBED_SESSION_STORAGE_KEY, token)
+  } catch {
+    // ignore storage failures — degrade gracefully without fallback token
+  }
+}
+
+export function clearEmbedSessionToken(): void {
+  const storage = embedSessionStorage()
+  if (!storage) return
+  try {
+    storage.removeItem(EMBED_SESSION_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 export async function getSession(signal?: AbortSignal): Promise<AuthSessionResponse> {
   const response = await apiFetch(apiPath('/auth/session'), { signal })
   if (!response.ok) {
+    // 401 表示 session 失效，清理 embed fallback token。
+    clearEmbedSessionToken()
     await parseApiError(response, `Failed to load auth session: ${response.status}`)
   }
-  return response.json()
+  const session = await response.json() as AuthSessionResponse
+  // getSession 返回 unauthenticated 时也清理 fallback token，避免持续用过期 token。
+  if (!session.authenticated) {
+    clearEmbedSessionToken()
+  }
+  return session
 }
 
 export async function login(password: string): Promise<void> {
+  // 登录前清除旧 fallback token，避免旧会话影响新登录。
+  clearEmbedSessionToken()
   const response = await apiFetch(apiPath('/auth/login'), {
     method: 'POST',
     headers: {
@@ -140,9 +214,12 @@ export async function login(password: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login: ${response.status}`)
   }
+  await persistEmbedSessionTokenIfCookieFails(response)
 }
 
 export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
+  // 登录前清除旧 fallback token，避免旧会话影响新登录。
+  clearEmbedSessionToken()
   const response = await apiFetch(apiPath('/auth/api-key-login'), {
     method: 'POST',
     headers: {
@@ -153,6 +230,32 @@ export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login with CPA API key: ${response.status}`)
   }
+  await persistEmbedSessionTokenIfCookieFails(response)
+}
+
+// persistEmbedSessionTokenIfCookieFails 在 embed 模式下，先尝试用 cookie session 认证；
+// cookie 能认证时不保存 fallback token；cookie 无法认证时才保存登录响应中的 session token。
+async function persistEmbedSessionTokenIfCookieFails(loginResponse: Response): Promise<void> {
+  if (!isCPAMCEmbed()) return
+  let token: string | undefined
+  try {
+    const body = await loginResponse.json() as { session_token?: string }
+    token = body.session_token
+  } catch {
+    return
+  }
+  if (!token) return
+  // 验证 cookie 是否能认证。
+  const sessionResponse = await apiFetch(apiPath('/auth/session'))
+  if (sessionResponse.ok) {
+    try {
+      const session = await sessionResponse.json() as AuthSessionResponse
+      if (session.authenticated) return
+    } catch {
+      // cookie 认证失败，继续存 fallback token
+    }
+  }
+  writeEmbedSessionToken(token)
 }
 
 export async function logout(): Promise<void> {
@@ -162,6 +265,8 @@ export async function logout(): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to logout: ${response.status}`)
   }
+  // logout 成功后清理 embed fallback token。
+  clearEmbedSessionToken()
 }
 
 export async function fetchAuthSessions(signal?: AbortSignal): Promise<AuthManagedSessionsResponse> {
@@ -700,21 +805,3 @@ export async function updateQuotaAutoRefreshSettings(settings: QuotaAutoRefreshS
   return response.json()
 }
 
-const EMBED_SESSION_STORAGE_KEY = 'cpa-embed-session'
-function embedSessionStorage(): Storage | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.sessionStorage
-  } catch {
-    return null
-  }
-}
-export function clearEmbedSessionToken(): void {
-  const storage = embedSessionStorage()
-  if (!storage) return
-  try {
-    storage.removeItem(EMBED_SESSION_STORAGE_KEY)
-  } catch {
-    // ignore
-  }
-}

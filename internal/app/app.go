@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -199,17 +201,20 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
 	pricingService := service.NewPricingService(db, cpaClient)
+	// 复用的 AuthConfig：同时传给 NewAuthHandler 和 NewRouter，避免 handler/router 使用不同配置。
+	authCfg := api.AuthConfig{
+		Enabled:              cfg.AuthEnabled,
+		LoginPassword:        cfg.LoginPassword,
+		SessionTTL:           cfg.AuthSessionTTL,
+		BasePath:             cfg.AppBasePath,
+		FrameAncestorOrigins: frameAncestorOrigins(cfg),
+	}
 	// 启用登录保护时把 session 持久化到 PostgreSQL，重启后已登录浏览器仍保留有效会话。
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
 	if cfg.AuthEnabled {
 		sessionManager = auth.NewPersistentSessionManager(cfg.AuthSessionTTL, auth.NewGormSessionStore(db))
 	}
-	authHandler := api.NewAuthHandler(api.AuthConfig{
-		Enabled:       cfg.AuthEnabled,
-		LoginPassword: cfg.LoginPassword,
-		SessionTTL:    cfg.AuthSessionTTL,
-		BasePath:      cfg.AppBasePath,
-	}, sessionManager)
+	authHandler := api.NewAuthHandler(authCfg, sessionManager)
 
 	return &App{
 		Config: &cfg,
@@ -229,12 +234,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 			backgroundPoller,
 			usageService,
 			pricingService,
-			api.AuthConfig{
-				Enabled:       cfg.AuthEnabled,
-				LoginPassword: cfg.LoginPassword,
-				SessionTTL:    cfg.AuthSessionTTL,
-				BasePath:      cfg.AppBasePath,
-			},
+			authCfg,
 			authHandler,
 			cfg.AppBasePath,
 			api.OptionalProviders{
@@ -451,4 +451,33 @@ func (a *App) cancelBackground() {
 // waitBackground 阻塞等待所有后台 runner 退出。
 func (a *App) waitBackground() {
 	a.backgroundWG.Wait()
+}
+
+// frameAncestorOrigins 从合法的绝对 HTTP/HTTPS CPA_PUBLIC_URL 提取 origin 列表，供 frame-ancestors CSP 使用。
+// 拒绝空值、相对 URL、无效 URL 和非 HTTP/HTTPS scheme；绝不能回退使用 CPA_BASE_URL。
+func frameAncestorOrigins(cfg config.Config) []string {
+	origin := publicOrigin(cfg.CPAPublicURL)
+	if origin == "" {
+		return nil
+	}
+	return []string{origin}
+}
+
+// publicOrigin 从 rawURL 提取合法的 HTTP/HTTPS origin（scheme://host[:port]）。
+// 空、相对 URL、无效 URL、非 HTTP/HTTPS scheme 都返回空字符串。
+func publicOrigin(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }

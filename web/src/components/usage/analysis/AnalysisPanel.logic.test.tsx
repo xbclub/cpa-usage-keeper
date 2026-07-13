@@ -277,6 +277,8 @@ describe('AnalysisPanel token chart data', () => {
   it('renders a clean circular usage distribution donut with token-share style rows', () => {
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,
+      range_start: '2026-05-28T00:00:00Z',
+      range_end: '2026-05-28T02:00:00Z',
       api_key_composition: [{
         key: '1',
         label: 'Primary Key',
@@ -339,6 +341,10 @@ describe('AnalysisPanel token chart data', () => {
     expect(markup).toContain('compositionUsageBar');
     expect(markup).toContain('compositionUsageMetaPill');
     expect(markup).toContain('style="width:100%;--composition-bar-color:#1d4ed8"');
+    expect(markup).toContain('usage_stats.rpm');
+    expect(markup).toContain('0.03');
+    expect(markup).toContain('usage_stats.tpm');
+    expect(markup).toContain('8.33');
     expect(markup).not.toContain('<table');
     expect(markup).not.toContain('gpt-4o');
     expect(markup).not.toContain('usage_stats.analysis_model_composition_title');
@@ -461,7 +467,7 @@ describe('AnalysisPanel token chart data', () => {
     expect(chartCapture.doughnutPlugins).toBeUndefined();
   });
 
-  it('limits usage distribution hover to the painted doughnut arc', () => {
+  it('limits usage distribution hover to the doughnut ring while allowing arc edges', () => {
     renderToStaticMarkup(<AnalysisPanel analysis={{
       ...emptyAnalysis,
       api_key_composition: [{
@@ -503,7 +509,65 @@ describe('AnalysisPanel token chart data', () => {
       expect(mode?.({} as never, { x: 225, y: 225 }, {}, false)).toEqual([activeItem]);
       expect(mode?.({} as never, { x: 150, y: 150 }, {}, false)).toEqual([]);
       expect(mode?.({} as never, { x: 300, y: 150 }, {}, false)).toEqual([]);
-      expect(mode?.({} as never, { x: 255, y: 150 }, {}, false)).toEqual([]);
+      expect(mode?.({} as never, { x: 255, y: 150 }, {}, false)).toEqual([activeItem]);
+    } finally {
+      Interaction.modes.nearest = originalNearest;
+    }
+  });
+
+  it('falls back to painted full-circle doughnut arcs when Chart.js radial nearest returns no candidates', () => {
+    renderToStaticMarkup(<AnalysisPanel analysis={{
+      ...emptyAnalysis,
+      api_key_composition: [{
+        key: '1',
+        label: 'Primary Key',
+        total_tokens: 1000,
+        requests: 4,
+        percent: 100,
+        input_tokens: 700,
+        output_tokens: 200,
+        cached_tokens: 50,
+        reasoning_tokens: 50,
+        cost_usd: 0.42,
+        cost_available: true,
+      }],
+    }} loading={false} isDark={false} isMobile={false} />);
+
+    const mode = (Interaction.modes as typeof Interaction.modes & {
+      analysisCompositionArc?: (chart: unknown, event: { x: number; y: number }, options: unknown, useFinalPosition?: boolean) => unknown[];
+    }).analysisCompositionArc;
+    expect(typeof mode).toBe('function');
+    const originalNearest = Interaction.modes.nearest;
+    const fullCircleArcElement = {
+      options: { spacing: 4, borderWidth: 0 },
+      getProps: () => ({
+        x: 150,
+        y: 150,
+        innerRadius: 70,
+        outerRadius: 140,
+        startAngle: -Math.PI / 2,
+        endAngle: (Math.PI * 3) / 2,
+        circumference: Math.PI * 2,
+      }),
+    };
+    const fakeChart = {
+      getSortedVisibleDatasetMetas: () => [{
+        type: 'doughnut',
+        index: 0,
+        data: [fullCircleArcElement],
+      }],
+    };
+
+    Interaction.modes.nearest = vi.fn(() => []) as typeof Interaction.modes.nearest;
+
+    try {
+      expect(mode?.(fakeChart as never, { x: 255, y: 150 }, {}, false)).toEqual([{
+        element: fullCircleArcElement,
+        datasetIndex: 0,
+        index: 0,
+      }]);
+      expect(mode?.(fakeChart as never, { x: 150, y: 150 }, {}, false)).toEqual([]);
+      expect(mode?.(fakeChart as never, { x: 300, y: 150 }, {}, false)).toEqual([]);
     } finally {
       Interaction.modes.nearest = originalNearest;
     }

@@ -17,12 +17,12 @@ const cssBlock = (selector: string) => {
 
 describe('Credential section styles', () => {
   it('keeps Auth Files and AI Provider row sizing separate', () => {
-    expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?grid-template-columns:\s*200px minmax\(0, 448px\) minmax\(250px, 1fr\);/)
-    expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?\.credentialIdentityBlock\s*\{[\s\S]*?max-width:\s*200px;/)
+    expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?grid-template-columns:\s*236px minmax\(0, 448px\) minmax\(250px, 1fr\);/)
+    expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?\.credentialIdentityBlock\s*\{[\s\S]*?max-width:\s*236px;/)
     expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?@include tablet\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
     expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
-    expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?grid-template-columns:\s*200px minmax\(0, 448px\) minmax\(250px, 1fr\);/)
-    expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?\.credentialIdentityBlock\s*\{[\s\S]*?max-width:\s*200px;/)
+    expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?grid-template-columns:\s*236px minmax\(0, 448px\) minmax\(250px, 1fr\);/)
+    expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?\.credentialIdentityBlock\s*\{[\s\S]*?max-width:\s*236px;/)
     expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?@include tablet\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
     expect(credentialStyles).toMatch(/\.aiProviderCredentialRow\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
     expect(credentialShellSource).toContain('rowClassName?: string')
@@ -295,6 +295,11 @@ describe('Credential section styles', () => {
     expect(credentialStyles).toMatch(/\.credentialSectionCard\s*\{[\s\S]*?overflow:\s*hidden;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaResetAction\s*\{[\s\S]*?position:\s*relative;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaResetPopover\s*\{[\s\S]*?position:\s*fixed;/)
+    expect(credentialStyles).toMatch(/\.credentialQuotaResetPopover\s*\{[\s\S]*?max-height:\s*calc\(100vh - 24px\);/)
+    expect(credentialStyles).toMatch(/\.credentialQuotaResetPopover\s*\{[\s\S]*?overflow-y:\s*auto;/)
+    expect(credentialStyles).toMatch(/\.credentialQuotaResetExpiryList\s*\{[\s\S]*?max-height:\s*min\(40vh, 220px\);/)
+    expect(credentialStyles).toMatch(/\.credentialQuotaResetExpiryList\s*\{[\s\S]*?overflow-y:\s*auto;/)
+    expect(credentialStyles).toMatch(/\.credentialQuotaResetActions\s*\{[\s\S]*?flex-shrink:\s*0;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaResetTooltip\s*\{[\s\S]*?position:\s*absolute;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaResetTooltip\s*\{[\s\S]*?right:\s*calc\(100% \+ 8px\);/)
     expect(credentialStyles).toMatch(/\.credentialQuotaResetAction:hover \.credentialQuotaResetTooltip[\s\S]*?opacity:\s*1;/)

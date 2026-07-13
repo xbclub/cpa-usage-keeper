@@ -75,6 +75,8 @@ func NewRouter(
 	registerHealthRoutes(appGroup)
 
 	apiV1 := appGroup.Group("/api/v1")
+	// 写请求（POST/PUT/PATCH/DELETE）必须携带 request-intent header，防止跨站表单/链接伪造。
+	apiV1.Use(requestIntentMiddleware())
 	if debugAPIRoutesEnabled() {
 		registerPingRoutes(apiV1)
 	}
@@ -133,6 +135,7 @@ func NewRouter(
 					return
 				}
 				setHTMLCacheHeaders(c)
+				setFrameAncestorsCSP(c, authConfig.FrameAncestorOrigins)
 				c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 			}
 			serveAsset := func(c *gin.Context) {
@@ -181,6 +184,27 @@ func setHTMLCacheHeaders(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
+}
+
+// setNoStoreHeaders 只设置 no-store 缓存头，不附加 frame-ancestors CSP。
+// 用于 version JSON 等非 HTML 响应——它们不是嵌入目标，不需要 CSP 防护。
+func setNoStoreHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
+// setFrameAncestorsCSP 为 HTML 响应设置 frame-ancestors CSP。
+// 'self' 始终包含；额外的 origin 由 AuthConfig.FrameAncestorOrigins 提供。
+func setFrameAncestorsCSP(c *gin.Context, origins []string) {
+	parts := []string{"'self'"}
+	for _, o := range origins {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			parts = append(parts, o)
+		}
+	}
+	c.Header("Content-Security-Policy", "frame-ancestors "+strings.Join(parts, " "))
 }
 
 func setStaticAssetCacheHeaders(c *gin.Context) {
@@ -265,7 +289,7 @@ type versionResponse struct {
 
 func registerVersionRoutes(router gin.IRoutes) {
 	router.GET("/version", func(c *gin.Context) {
-		setHTMLCacheHeaders(c)
+		setNoStoreHeaders(c)
 		c.JSON(http.StatusOK, buildVersionResponse())
 	})
 }

@@ -5,7 +5,7 @@ import { Interaction, Tooltip } from 'chart.js';
 import type { Chart, ChartData, ChartOptions, InteractionItem, InteractionModeFunction, Plugin, ScriptableContext, TooltipModel, TooltipPositionerFunction } from 'chart.js';
 import { Bar, Doughnut, Scatter } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisCostBreakdown, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
-import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatUsd } from '@/utils/usage';
+import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatPerMinuteValue, formatUsd } from '@/utils/usage';
 import styles from './AnalysisPanel.module.scss';
 
 interface AnalysisPanelProps {
@@ -293,19 +293,10 @@ type DoughnutArcProps = {
 };
 
 type DoughnutArcElement = {
-  options?: {
-    spacing?: unknown;
-    borderWidth?: unknown;
-  };
   getProps: (props: Array<keyof DoughnutArcProps>, useFinalPosition?: boolean) => Partial<DoughnutArcProps>;
 };
 
 const normalizeRadians = (angle: number): number => ((angle % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE;
-
-const getRadiansDistance = (first: number, second: number): number => {
-  const distance = Math.abs(normalizeRadians(first) - normalizeRadians(second));
-  return Math.min(distance, FULL_CIRCLE - distance);
-};
 
 const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number, circumference: number): boolean => {
   if (Math.abs(circumference) >= FULL_CIRCLE - 0.0001) return true;
@@ -352,33 +343,39 @@ const isPointerInsidePaintedArc = (item: InteractionItem, event: unknown, useFin
   if (pointerX === undefined || pointerY === undefined) return false;
   const arc = getDoughnutArcProps(item.element, useFinalPosition);
   if (!arc) return false;
-  const { element, props } = arc;
+  const { props } = arc;
   const deltaX = pointerX - props.x;
   const deltaY = pointerY - props.y;
   const radius = Math.hypot(deltaX, deltaY);
   if (radius < props.innerRadius || radius > props.outerRadius) return false;
   const angle = Math.atan2(deltaY, deltaX);
-  if (!isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference)) return false;
-  if (Math.abs(props.circumference) >= FULL_CIRCLE - 0.0001) return true;
+  return isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference);
+};
 
-  const midRadius = (props.innerRadius + props.outerRadius) / 2;
-  if (midRadius <= 0) return true;
-  const spacing = toFiniteNumber(element.options?.spacing) ?? COMPOSITION_DONUT_SPACING;
-  const borderWidth = toFiniteNumber(element.options?.borderWidth) ?? 0;
-  const boundaryPadding = Math.min(
-    Math.abs(props.circumference) / 3,
-    ((spacing + borderWidth) / midRadius) * 1.2,
-  );
-  if (boundaryPadding <= 0) return true;
-
-  // Chart.js 的 nearest 负责小扇区候选；这里只剔除视觉切缝附近未绘制的像素。
-  return getRadiansDistance(angle, props.startAngle) > boundaryPadding
-    && getRadiansDistance(angle, props.endAngle) > boundaryPadding;
+const getFullCircleCompositionItems = (chart: Chart, event: unknown, useFinalPosition?: boolean): InteractionItem[] => {
+  const items: InteractionItem[] = [];
+  chart.getSortedVisibleDatasetMetas().forEach((meta) => {
+    if (meta.type !== 'doughnut') return;
+    meta.data.forEach((element, index) => {
+      const item = { element, datasetIndex: meta.index, index } as InteractionItem;
+      const arc = getDoughnutArcProps(element, useFinalPosition);
+      if (!arc || Math.abs(arc.props.circumference) < FULL_CIRCLE - 0.0001) return;
+      if (isPointerInsidePaintedArc(item, event, useFinalPosition)) {
+        items.push(item);
+      }
+    });
+  });
+  return items;
 };
 
 const analysisCompositionArcMode: InteractionModeFunction = (chart, event, options, useFinalPosition) => {
   const candidateItems = Interaction.modes.nearest(chart, event, { ...options, axis: 'r', intersect: false }, useFinalPosition);
-  return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+  if (candidateItems.length > 0) {
+    return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+  }
+
+  // Chart.js 径向 nearest 不把 start/end 归一后相等的 360° 扇区视作 full circle，这里只兜底单扇区候选丢失。
+  return getFullCircleCompositionItems(chart, event, useFinalPosition);
 };
 
 Interaction.modes.analysisCompositionArc = analysisCompositionArcMode;
@@ -783,6 +780,13 @@ function buildTokenUsageRows(buckets: AnalysisTokenUsageBucket[], granularity: A
 function calculateAverageTotalTokens(rows: ChartRow[]): number {
   if (rows.length === 0) return 0;
   return rows.reduce((sum, row) => sum + row.total, 0) / rows.length;
+}
+
+function calculateAnalysisWindowMinutes(analysis: AnalysisResponse | null): number | null {
+  const start = Date.parse(analysis?.range_start ?? '');
+  const end = Date.parse(analysis?.range_end ?? '');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return (end - start) / 60_000;
 }
 
 function takeMajorComposition(items: AnalysisCompositionItem[], othersLabel: string, limit = 5): AnalysisCompositionItem[] {
@@ -1312,7 +1316,12 @@ function CompositionMetaPill({ label, value }: { label: string; value: string })
   );
 }
 
-function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; loading: boolean; isDark: boolean }) {
+const formatCompositionRate = (value: number, windowMinutes: number | null): string => {
+  if (!windowMinutes || windowMinutes <= 0) return '--';
+  return formatPerMinuteValue(value / windowMinutes);
+};
+
+function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: CompositionTab[]; loading: boolean; isDark: boolean; windowMinutes: number | null }) {
   const { t } = useTranslation();
   const [activeTabId, setActiveTabId] = useState<CompositionTab['id']>('api_key');
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
@@ -1382,6 +1391,8 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
                       <CompositionMetaPill label={t('usage_stats.total_tokens')} value={formatCompactNumber(toNumber(item.total_tokens))} />
                       <CompositionMetaPill label={t('usage_stats.requests_count')} value={formatCompactNumber(toNumber(item.requests))} />
                       <CompositionMetaPill label={t('usage_stats.total_cost')} value={formatUsd(toNumber(item.cost_usd))} />
+                      <CompositionMetaPill label={t('usage_stats.rpm')} value={formatCompositionRate(toNumber(item.requests), windowMinutes)} />
+                      <CompositionMetaPill label={t('usage_stats.tpm')} value={formatCompositionRate(toNumber(item.total_tokens), windowMinutes)} />
                     </div>
                   </div>
                 );
@@ -1967,7 +1978,6 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
                             style={{
                               background: getHeatmapCellColor(intensity, isDark),
                               color: getHeatmapCellTextColor(intensity, isDark),
-                              '--heatmap-flame-alpha': intensity.toFixed(3),
                             } as CSSProperties}
                             tabIndex={0}
                             aria-label={tooltipLines.join(', ')}
@@ -2023,6 +2033,7 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
   const modelComposition = useMemo(() => takeMajorComposition(analysis?.model_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const authFilesComposition = useMemo(() => takeMajorComposition(analysis?.auth_files_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const aiProviderComposition = useMemo(() => takeMajorComposition(analysis?.ai_provider_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
+  const analysisWindowMinutes = useMemo(() => calculateAnalysisWindowMinutes(analysis), [analysis]);
   const compositionTabs = useMemo<CompositionTab[]>(() => [
     { id: 'api_key', label: t('usage_stats.analysis_composition_api_key_tab'), items: apiComposition },
     { id: 'model', label: t('usage_stats.analysis_composition_model_tab'), items: modelComposition },
@@ -2038,7 +2049,7 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
         <ModelEfficiencyCard rows={analysis?.model_efficiency ?? []} loading={loading} isDark={isDark} isMobile={isMobile} />
       </div>
       <LatencyDiagnosticsCard diagnostics={analysis?.latency_diagnostics} loading={loading} isDark={isDark} isMobile={isMobile} />
-      <CompositionPanel tabs={compositionTabs} loading={loading} isDark={isDark} />
+      <CompositionPanel tabs={compositionTabs} loading={loading} isDark={isDark} windowMinutes={analysisWindowMinutes} />
       <Heatmap cells={analysis?.heatmap?.cells ?? []} apiKeys={analysis?.heatmap?.api_keys ?? []} apiKeyLabels={analysis?.heatmap?.api_key_labels ?? {}} models={analysis?.heatmap?.models ?? []} loading={loading} isDark={isDark} />
     </div>
   );

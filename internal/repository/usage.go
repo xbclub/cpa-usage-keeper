@@ -1360,7 +1360,13 @@ func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQue
 			if ok {
 				for _, cachedEvent := range cachedEvents {
 					// 下游聚合函数使用 entities.UsageEvent，这里把缓存投影转回最小实体。
-					events = append(events, recentUsageEventToEntity(cachedEvent))
+					entity := recentUsageEventToEntity(cachedEvent)
+					// recent-cache 路径不按 model 过滤（DB 路径在 SQL 里过滤），这里统一补齐 model 筛选，
+					// 确保命中缓存时其他模型的数据不会进入 usage、series 和 APIKeySummary。
+					if !eventMatchesUsageModels(entity, filter.Models) {
+						continue
+					}
+					events = append(events, entity)
 				}
 				// 当前窗口已由缓存承接，不再访问 DB。
 				continue
@@ -1375,6 +1381,20 @@ func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQue
 		events = append(events, windowEvents...)
 	}
 	return events, nil
+}
+
+// eventMatchesUsageModels 判断事件的 model 是否在 filter.Models 集合内。
+// 空 Models 表示不过滤（返回 true）；非空时按 model 成员精确匹配，语义与 SQL `model IN ?` 一致。
+func eventMatchesUsageModels(event entities.UsageEvent, models []string) bool {
+	if len(models) == 0 {
+		return true
+	}
+	for _, m := range models {
+		if event.Model == m {
+			return true
+		}
+	}
+	return false
 }
 
 // usageOverviewRecentCacheCoversWindow 判断某个边界窗口能否由最近事件缓存完整承接。
@@ -1449,6 +1469,10 @@ func loadUsageOverviewHealthTotalsWithFilter(db *gorm.DB, filter dto.UsageQueryF
 		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(fullStart), timeutil.FormatStorageTime(fullEnd))
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		totalsQuery = totalsQuery.Where("api_group_key = ?", apiGroupKey)
+	}
+	// UsageOverviewHourlyStat 有 model 列，按 filter.Models 过滤；UsageOverviewHealthStat 没有 model 列，严禁在此处过滤。
+	if len(filter.Models) > 0 {
+		totalsQuery = totalsQuery.Where("model IN ?", filter.Models)
 	}
 	var totals struct {
 		SuccessCount int64
