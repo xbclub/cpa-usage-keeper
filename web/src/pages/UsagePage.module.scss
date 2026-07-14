@@ -247,7 +247,10 @@
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 
   &:global(.btn) {
+    min-height: 32px;
     border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 12px;
   }
 
   > span:not(:global(.loading-spinner)) {
@@ -278,6 +281,12 @@
   &:hover:not(:disabled) {
     transform: translateY(-1px);
   }
+}
+
+.usagePillAction:global(.btn.btn-sm) {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 12px;
 }
 
 .settingsCompactAction {
@@ -447,6 +456,55 @@
     align-items: stretch;
     justify-content: flex-start;
   }
+}
+
+.toolbarActionsRightAnimated {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.usageFilterTransition {
+  width: max-content;
+  max-width: 0;
+  min-width: 0;
+  justify-self: end;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(8px);
+  transition:
+    max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 260ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-bottom 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.usageFilterTransitionOpen {
+  max-width: 960px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.usageFilterTransitionInner {
+  width: max-content;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+// CPAMC 保留既有即时挂载布局；动画与 Grid 隔离只应用于普通 Keeper 页面。
+.usageFilterTransitionImmediate {
+  display: contents;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition: none;
+}
+
+.usageFilterTransitionImmediate .usageFilterTransitionInner {
+  display: contents;
 }
 
 .lastRefreshed {
@@ -854,6 +912,32 @@
     width: 100%;
   }
 
+  .toolbarActionsRightAnimated {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+  }
+
+  .usageFilterTransition,
+  .usageFilterTransitionInner {
+    width: 100%;
+  }
+
+  .toolbarActionsRightAnimated .usageFilterTransition {
+    max-height: 0;
+    transition:
+      max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+      max-height 340ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 260ms ease,
+      transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
+      margin-bottom 340ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .toolbarActionsRightAnimated .usageFilterTransitionOpen {
+    max-width: 100%;
+    max-height: 280px;
+    margin-bottom: 10px;
+  }
+
   .usageFilterBar {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -966,11 +1050,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .usageFilterTransition,
   .usageFilterBar,
   .timeRangeGroup,
   .customRangeInline,
   .dailyAveragePanel {
     transition: none;
+  }
+
+  .usageFilterTransition {
+    transform: none;
   }
 
   .dailyAveragePanelEntering,
@@ -1843,6 +1932,10 @@
   --settings-list-scroll-height: 480px;
 }
 
+.settingsSections > :global(.card) {
+  box-shadow: var(--shadow-lg);
+}
+
 // Pricing Section (80%比例)
 .pricingFixedCard {
   height: auto;
@@ -1884,21 +1977,18 @@
   border-radius: 22px;
   border: 1px solid var(--border-color);
   flex: 0 0 auto;
+  container-name: model-pricing-form;
+  container-type: inline-size;
 }
 
 .formRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 0.85fr) repeat(5, minmax(120px, 1fr)) auto;
   gap: 10px;
   align-items: flex-end;
-  flex-wrap: wrap;
 
   :global(.btn) {
     min-height: 40px;
-  }
-
-  @include mobile {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 
@@ -1936,6 +2026,34 @@
   > button,
   :global(.btn) {
     min-height: 40px;
+  }
+}
+
+.priceFormAction {
+  align-self: end;
+  justify-self: stretch;
+}
+
+@container model-pricing-form (max-width: 1120px) {
+  .formRow {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container model-pricing-form (max-width: 720px) {
+  .formRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .priceFormModelField,
+  .priceFormAction {
+    grid-column: 1 / -1;
+  }
+}
+
+@container model-pricing-form (max-width: 480px) {
+  .formRow {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -2643,6 +2761,7 @@
 .requestEventsCard:global(.card) {
   padding: 0;
   overflow: hidden;
+  box-shadow: var(--shadow-lg);
 
   :global(.card-header) {
     align-items: stretch;
@@ -2709,13 +2828,23 @@
 .requestEventsExportButton:global(.btn) {
   border: 0;
   border-radius: 999px;
-  padding: 8px 12px;
+  min-height: 32px;
+  padding: 7px 12px;
   background: var(--bg-primary);
+  background-color: var(--bg-primary);
   color: var(--text-primary);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
   font-size: 12px;
   font-weight: 600;
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+
+  &:global(.btn-secondary),
+  &:global(.btn-secondary):hover:not(:disabled),
+  &:global(.btn-secondary)[aria-expanded='true'] {
+    background: var(--bg-primary);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
 
   &:hover:not(:disabled) {
     color: var(--text-primary);
@@ -2735,6 +2864,12 @@
     display: inline-flex;
     align-items: center;
   }
+}
+
+.requestEventsExportButton:global(.btn.btn-sm) {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 12px;
 }
 
 .requestEventsExportButtonInner {
@@ -2835,6 +2970,23 @@
 
 .requestEventsResultSelect {
   min-width: 118px;
+}
+
+.requestEventsFilterActionSlot {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  min-height: 40px;
+}
+
+.requestEventsClearFiltersButton:global(.btn) {
+  min-height: 32px;
+}
+
+.requestEventsClearFiltersButton:global(.btn.btn-sm) {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 12px;
 }
 
 .requestEventsPaginationFooter {
@@ -3126,11 +3278,273 @@
 .requestEventsResultFailed {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 60px;
   padding: 2px 8px;
   border-radius: $radius-full;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+
+  &[data-result-locale='zh'] {
+    width: 50px;
+  }
+}
+
+.requestEventsResultLogButton {
+  position: relative;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+
+  &:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 18%, transparent);
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.76;
+  }
+}
+
+.requestEventsResultLogIcon {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid currentColor;
+  border-radius: $radius-full;
+  background: var(--bg-primary);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.requestEventsLogViewer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.requestEventsLargeLogModal {
+  :global(.modal-header) {
+    padding: 18px 54px 12px 20px;
+  }
+
+  :global(.modal-title) {
+    font-size: 16px;
+  }
+
+  :global(.modal-body) {
+    padding: 14px 22px 6px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  :global(.modal-footer) {
+    justify-content: center;
+    gap: 10px;
+    padding: 12px 20px 18px;
+    border-top: 0;
+  }
+
+  .requestEventsLogViewer {
+    gap: 0;
+    min-height: 0;
+  }
+}
+
+.requestEventsLargeLogPrompt {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.requestEventsLogSections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.requestEventsLogSection {
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  overflow: hidden;
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+  }
+}
+
+.requestEventsLogSectionOpen {
+  border-color: color-mix(in srgb, var(--primary-color) 26%, var(--border-color));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
+}
+
+.requestEventsLogSectionHeader {
+  display: flex;
+  align-items: stretch;
+}
+
+.requestEventsLogSectionTrigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  border: 0;
+  padding: 9px 10px 9px 12px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.18s ease, color 0.18s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+    outline-offset: -2px;
+  }
+}
+
+.requestEventsLogSectionCopyButton {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 5px 7px 5px 0;
+  border: 0;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+
+  &:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+    outline-offset: -2px;
+  }
+}
+
+.requestEventsLogSectionCopyButtonCopied {
+  color: var(--success-color);
+}
+
+.requestEventsLogSectionCopyButtonFailed {
+  color: var(--danger-color);
+}
+
+.requestEventsLogSectionTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.requestEventsLogSectionChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: $radius-full;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease, background-color 0.18s ease, color 0.18s ease;
+
+  svg {
+    display: block;
+  }
+
+  .requestEventsLogSectionTrigger:hover &,
+  .requestEventsLogSectionTrigger:focus-visible & {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .requestEventsLogSectionOpen & {
+    color: var(--primary-color);
+    transform: rotate(180deg);
+  }
+}
+
+.requestEventsLogSectionPanel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.22s ease, opacity 0.16s ease;
+}
+
+.requestEventsLogSectionOpen .requestEventsLogSectionPanel {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.requestEventsLogSectionPanelInner {
+  min-height: 0;
+  max-height: min(58vh, 520px);
+  overflow: auto;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  scrollbar-gutter: stable;
+}
+
+.requestEventsLogVirtualSpacer {
+  position: relative;
+  min-height: 100%;
+}
+
+.requestEventsLogVirtualLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  min-height: 18px;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--text-primary);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  will-change: transform;
 }
 
 // Overview Realtime
