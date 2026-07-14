@@ -29,6 +29,7 @@ func TestRecentCacheFiltersByModelOnBoundedEvents(t *testing.T) {
 	events, err := loadUsageOverviewRawEventWindowsWithFilter(db, dto.UsageQueryFilter{
 		APIGroupKey: "provider-a",
 		Models:      []string{"model-a"},
+		QueryNow:    &now,
 	}, windows, cache)
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
@@ -56,6 +57,7 @@ func TestRecentCacheFiltersByModelOnEventsSince(t *testing.T) {
 	events, err := loadUsageOverviewRawEventWindowsWithFilter(db, dto.UsageQueryFilter{
 		APIGroupKey: "provider-a",
 		Models:      []string{"model-a"},
+		QueryNow:    &now,
 	}, windows, cache)
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
@@ -82,6 +84,7 @@ func TestRecentCacheEmptyModelsDoesNotFilter(t *testing.T) {
 	windows := []usageOverviewRawEventWindow{{start: windowStart, end: windowEnd, includeEnd: true}}
 	events, err := loadUsageOverviewRawEventWindowsWithFilter(db, dto.UsageQueryFilter{
 		APIGroupKey: "provider-a",
+		QueryNow:    &now,
 	}, windows, cache)
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
