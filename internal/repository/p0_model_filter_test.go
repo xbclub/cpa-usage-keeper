@@ -201,6 +201,7 @@ func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias str
 		}
 		pricingByModel[pricedModel] = *setting
 	}
+	costResolver := &UsageCostResolver{pricesByModel: pricingByModel}
 
 	acc := newAPIKeySummaryAccumulator()
 	alias := eventAlias
@@ -211,7 +212,7 @@ func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias str
 		InputTokens:  100000,
 		OutputTokens: 0,
 		TotalTokens:  100000,
-	}, pricingByModel)
+	}, costResolver)
 
 	slice := acc.toSlice()
 	if len(slice) != 1 {

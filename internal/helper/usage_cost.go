@@ -75,29 +75,3 @@ func maxInt64(value, floor int64) int64 {
 	}
 	return value
 }
-
-// CalculateUsageTokenCost 返回总费用（breakdown 的快捷封装，供 repository 的聚合路径调用）。
-// fork 保留这个薄包装以避免改动 usage.go 等大量聚合路径的调用点。
-func CalculateUsageTokenCost(input UsageTokenCostInput, pricing entities.ModelPriceSetting) float64 {
-	return CalculateUsageTokenCostBreakdown(input, pricing).TotalCostUSD
-}
-
-// UsageEventRequiresPricing 判断事件是否需要价格表才能算出有意义的费用。
-func UsageEventRequiresPricing(event entities.UsageEvent) bool {
-	return UsageTokenInputRequiresPricing(UsageTokenCostInput{
-		InputTokens:         event.InputTokens,
-		OutputTokens:        event.OutputTokens,
-		CacheReadTokens:     event.CacheReadTokens,
-		CacheCreationTokens: event.CacheCreationTokens,
-	})
-}
-
-// CalculateUsageEventCost 按当前价格表算出单事件总费用（breakdown 的快捷封装）。
-func CalculateUsageEventCost(event entities.UsageEvent, pricing entities.ModelPriceSetting) float64 {
-	return CalculateUsageTokenCost(UsageTokenCostInput{
-		InputTokens:         event.InputTokens,
-		OutputTokens:        event.OutputTokens,
-		CacheReadTokens:     event.CacheReadTokens,
-		CacheCreationTokens: event.CacheCreationTokens,
-	}, pricing)
-}

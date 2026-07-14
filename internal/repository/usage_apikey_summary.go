@@ -21,12 +21,12 @@ func newAPIKeySummaryAccumulator() apiKeySummaryAccumulator {
 }
 
 // accumulateHourlyStat 将小时 stat 行按 api_group_key 累积，并按 model 精确计算 cost。
-func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOverviewHourlyStat, pricingByModel map[string]entities.ModelPriceSetting) {
+func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOverviewHourlyStat, costResolver *UsageCostResolver) {
 	key := strings.TrimSpace(row.APIGroupKey)
 	if key == "" {
 		return
 	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
+	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -45,12 +45,12 @@ func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOvervi
 }
 
 // accumulateDailyStat 将天 stat 行按 api_group_key 累积，并按 model 精确计算 cost。
-func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOverviewDailyStat, pricingByModel map[string]entities.ModelPriceSetting) {
+func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOverviewDailyStat, costResolver *UsageCostResolver) {
 	key := strings.TrimSpace(row.APIGroupKey)
 	if key == "" {
 		return
 	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, pricingByModel)
+	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -69,18 +69,14 @@ func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOvervie
 }
 
 // accumulateEvent 将边界原始事件按 api_group_key 累积。计价按真实 model 优先、缺价时回退 ModelAlias。
-func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, pricingByModel map[string]entities.ModelPriceSetting) {
+func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, costResolver *UsageCostResolver) {
 	key := strings.TrimSpace(event.APIGroupKey)
 	if key == "" {
 		return
 	}
-	eventAlias := ""
-	if event.ModelAlias != nil {
-		eventAlias = *event.ModelAlias
-	}
-	pricing, ok := matchPricingByMap(pricingByModel, event.Model, eventAlias)
-	cost := helper.CalculateUsageEventCost(event, pricing)
-	costAvailable := ok || !helper.UsageEventRequiresPricing(event)
+	costResult := costResolver.CalculateEvent(event)
+	cost := costResult.Cost.TotalCostUSD
+	costAvailable := costResult.Available
 
 	item := a.items[key]
 	if item == nil {
@@ -115,22 +111,22 @@ func (a *apiKeySummaryAccumulator) toSlice() []dto.UsageOverviewAPIKeySummary {
 }
 
 // apiKeySummaryRowCost 按 model（缺价时回退 alias）计算单行 stat 的 cost。
-func apiKeySummaryRowCost(model string, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, pricingByModel map[string]entities.ModelPriceSetting) (float64, bool) {
-	costInput := helper.UsageTokenCostInput{
-		InputTokens:         inputTokens,
-		OutputTokens:        outputTokens,
-		CacheReadTokens:     cacheReadTokens,
-		CacheCreationTokens: cacheCreationTokens,
-	}
-	pricing, ok := matchPricingByMap(pricingByModel, model, modelAlias)
-	if !ok {
-		return 0, !helper.UsageTokenInputRequiresPricing(costInput)
-	}
-	return helper.CalculateUsageTokenCost(costInput, pricing), true
+func apiKeySummaryRowCost(model string, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costResolver *UsageCostResolver) (float64, bool) {
+	result := costResolver.Calculate(UsageCostSubject{
+		Model:      model,
+		ModelAlias: modelAlias,
+		Tokens: helper.UsageTokenCostInput{
+			InputTokens:         inputTokens,
+			OutputTokens:        outputTokens,
+			CacheReadTokens:     cacheReadTokens,
+			CacheCreationTokens: cacheCreationTokens,
+		},
+	})
+	return result.Cost.TotalCostUSD, result.Available
 }
 
 // accumulateAPIKeySummaryFromOverview 独立执行 API Key 汇总累积，复用主 Overview 的 filter 和时间窗口逻辑。
-func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOverviewRecord, filter dto.UsageQueryFilter, pricingByModel map[string]entities.ModelPriceSetting, recentCache *UsageRecentEventCache, acc *apiKeySummaryAccumulator) error {
+func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOverviewRecord, filter dto.UsageQueryFilter, costResolver *UsageCostResolver, recentCache *UsageRecentEventCache, acc *apiKeySummaryAccumulator) error {
 	queryNow := usageOverviewQueryNow(filter)
 	effectiveFilter := usageOverviewEffectiveFilter(filter, queryNow)
 
@@ -147,7 +143,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOvervie
 		if usageOverviewEventInsideWindow(event, fullStart, fullEnd) {
 			continue
 		}
-		acc.accumulateEvent(event, pricingByModel)
+		acc.accumulateEvent(event, costResolver)
 	}
 
 	// 小时 / 天 stats
@@ -161,7 +157,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOvervie
 				return err
 			}
 			for _, row := range hourlyRows {
-				acc.accumulateHourlyStat(row, pricingByModel)
+				acc.accumulateHourlyStat(row, costResolver)
 			}
 		} else {
 			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, effectiveFilter, fullDayStart, fullDayEnd)
@@ -169,7 +165,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOvervie
 				return err
 			}
 			for _, row := range dailyRows {
-				acc.accumulateDailyStat(row, pricingByModel)
+				acc.accumulateDailyStat(row, costResolver)
 			}
 			for _, window := range []struct{ start, end time.Time }{{fullStart, fullDayStart}, {fullDayEnd, fullEnd}} {
 				if !window.end.After(window.start) {
@@ -180,7 +176,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOvervie
 					return err
 				}
 				for _, row := range hourlyRows {
-					acc.accumulateHourlyStat(row, pricingByModel)
+					acc.accumulateHourlyStat(row, costResolver)
 				}
 			}
 		}

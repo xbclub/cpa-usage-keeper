@@ -30,9 +30,10 @@ func buildUsageOverviewFromEventsForTest(events []entities.UsageEvent, filter dt
 	windowMinutes := computeWindowMinutes(filter)
 	bucketByDay := shouldBucketUsageOverviewByDay(filter, windowMinutes)
 	overview := newUsageOverviewRecord(filter, windowMinutes)
+	costResolver := &UsageCostResolver{pricesByModel: pricingByModel}
 	for _, event := range events {
 		applyUsageEventToOverviewSnapshot(overview.Usage, event)
-		applyUsageEventToOverview(overview, event, bucketByDay, pricingByModel)
+		applyUsageEventToOverview(overview, event, bucketByDay, costResolver)
 	}
 	finalizeUsageOverview(overview)
 	return overview

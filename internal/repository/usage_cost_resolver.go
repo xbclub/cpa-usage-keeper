@@ -112,20 +112,3 @@ func gormDBContext(db *gorm.DB) context.Context {
 	}
 	return context.Background()
 }
-
-// matchPricingByMap 在没有 resolver 实例的场景下（例如 fork 的 usage.go 直接持有 pricingByModel map），
-// 提供与 UsageCostResolver.matchPricing 相同的 model 优先 + alias 回退语义。
-// model 缺价时按 alias 再次查表，避免 OpenAI-compat 等场景下 alias 有价但 model 无价导致 cost 不可用。
-func matchPricingByMap(pricingByModel map[string]entities.ModelPriceSetting, model string, modelAlias string) (entities.ModelPriceSetting, bool) {
-	if modelName := strings.TrimSpace(model); modelName != "" {
-		if pricing, ok := pricingByModel[modelName]; ok {
-			return pricing, true
-		}
-	}
-	if alias := strings.TrimSpace(modelAlias); alias != "" {
-		if pricing, ok := pricingByModel[alias]; ok {
-			return pricing, true
-		}
-	}
-	return entities.ModelPriceSetting{}, false
-}
