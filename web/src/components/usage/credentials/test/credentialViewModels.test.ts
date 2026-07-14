@@ -7,7 +7,7 @@ import {
   paginateCredentials,
   selectQuotaEligibleAuthIndexes,
   splitCredentialIdentities,
-} from './credentialViewModels'
+} from '../credentialViewModels'
 
 
 function quotaResponse(authIndex: string, quota: UsageQuotaRow[], rateLimitResetCreditsAvailableCount?: number | null): UsageQuotaCheckResponse {
@@ -35,7 +35,7 @@ function identity(overrides: Partial<UsageIdentity>): UsageIdentity {
     input_tokens: overrides.input_tokens ?? 0,
     output_tokens: overrides.output_tokens ?? 0,
     reasoning_tokens: overrides.reasoning_tokens ?? 0,
-    cached_tokens: overrides.cached_tokens ?? 0,
+    cache_read_tokens: overrides.cache_read_tokens ?? 0,
     total_tokens: overrides.total_tokens ?? 0,
     last_aggregated_usage_event_id: overrides.last_aggregated_usage_event_id ?? '0',
     first_used_at: overrides.first_used_at,
@@ -157,7 +157,7 @@ describe('credentialViewModels', () => {
       ])],
     ])
 
-    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1', displayName: 'Claude Auth', total_requests: 10, success_count: 9, input_tokens: 1000, cached_tokens: 250, total_tokens: 1500 })], quotas)
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1', displayName: 'Claude Auth', total_requests: 10, success_count: 9, input_tokens: 1000, cache_read_tokens: 250, total_tokens: 1500 })], quotas)
 
     expect(rows[0].displayName).toBe('Claude Auth')
     expect(rows[0].typeLabel).toBe('claude')
@@ -165,7 +165,7 @@ describe('credentialViewModels', () => {
     expect(rows[0].successCount).toBe(9)
     expect(rows[0].failureCount).toBe(0)
     expect(rows[0].totalTokens).toBe(1500)
-    expect(rows[0].cacheRate).toBe(25)
+    expect(rows[0].cacheReadRate).toBe(25)
     expect(rows[0].displayQuotas.map((quota) => quota.label)).toEqual(['5h', 'Weekly', 'GPT-5.3-Codex-Spark 5h'])
     expect(rows[0].displayQuotas[0]).toMatchObject({
       percent: 72,
@@ -185,6 +185,46 @@ describe('credentialViewModels', () => {
       barPercent: 17,
       status: 'danger',
     })
+  })
+
+  it('preserves Antigravity quota group metadata for provider-specific rendering', () => {
+    const groupedQuota = {
+      key: 'bucket.gemini-5h',
+      label: '5h',
+      scope: 'quota_group',
+      metric: '5h',
+      groupKey: 'antigravity-group-1',
+      groupLabel: 'Gemini Models',
+      groupDescription: 'Models within this group: Gemini Flash, Gemini Pro',
+      remainingFraction: 0.72,
+      window: { seconds: 18_000 },
+      resetAt: '2026-05-09T12:00:00Z',
+    } as UsageQuotaRow & { groupKey: string; groupLabel: string; groupDescription: string }
+    const quotas = new Map<string, UsageQuotaCheckResponse>([
+      ['antigravity-auth', quotaResponse('antigravity-auth', [groupedQuota])],
+    ])
+
+    const rows = buildAuthFileCredentialRows([
+      identity({ identity: 'antigravity-auth', type: 'antigravity', provider: 'antigravity' }),
+    ], quotas)
+
+    expect(rows[0].displayQuotas[0]).toMatchObject({
+      label: '5h',
+      scope: 'quota_group',
+      groupKey: 'antigravity-group-1',
+      groupLabel: 'Gemini Models',
+      groupDescription: 'Models within this group: Gemini Flash, Gemini Pro',
+    })
+  })
+
+  it('uses backend displayName instead of raw usage identity name for credential titles', () => {
+    const rows = buildAuthFileCredentialRows([
+      identity({ identity: 'auth-1', name: 'Raw Upstream Name', displayName: 'Helper Display Name' }),
+      identity({ identity: 'auth-2', name: 'Raw Only Name' }),
+    ])
+
+    expect(rows[0].displayName).toBe('Helper Display Name')
+    expect(rows[1].displayName).toBe('auth-2')
   })
 
   it('formats zero quota window cost with two decimals', () => {
@@ -237,6 +277,32 @@ describe('credentialViewModels', () => {
       windowUsage: undefined,
       windowUsageEstimate: undefined,
     })
+  })
+
+  it('keeps xai weekly, monthly, pay-as-you-go, and product rows in provider order', () => {
+    const quotas = new Map<string, UsageQuotaCheckResponse>([
+      ['xai-auth', quotaResponse('xai-auth', [
+        { key: 'billing.weekly', label: 'Weekly', scope: 'billing', metric: 'weekly', usedPercent: 25, window: { seconds: 604800 }, resetAt: '2026-07-13T00:00:00Z' },
+        { key: 'billing.monthly', label: 'Monthly Spend', scope: 'billing', metric: 'usd_cents', used: 500, limit: 1000, remaining: 500, usedPercent: 50, window: { seconds: 2592000 }, resetAt: '2026-08-01T00:00:00Z' },
+        { key: 'billing.on_demand', label: 'Pay-as-you-go', scope: 'billing', metric: 'usd_cents', used: 100, limit: 500, remaining: 400, usedPercent: 20, window: { seconds: 2592000 }, resetAt: '2026-08-01T00:00:00Z' },
+        { key: 'billing.weekly.product.grok+4', label: 'Grok 4 Usage', scope: 'product', metric: 'Grok 4', usedPercent: 80, window: { seconds: 604800 }, resetAt: '2026-07-13T00:00:00Z' },
+      ])],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'xai-auth', type: 'xai', provider: 'xAI' })], quotas)
+
+    expect(rows[0].displayQuotas.map((quota) => quota.label)).toEqual([
+      'Weekly',
+      'Monthly Spend',
+      'Pay-as-you-go',
+      'Grok 4 Usage',
+    ])
+    expect(rows[0].displayQuotas.map((quota) => quota.billingUsage)).toEqual([
+      undefined,
+      { used: '$5.00', limit: '$10.00', remaining: '$5.00' },
+      { used: '$1.00', limit: '$5.00', remaining: '$4.00' },
+      undefined,
+    ])
   })
 
   it('estimates quota window usage only from positive current usage and a partial used percent', () => {
@@ -305,10 +371,10 @@ describe('credentialViewModels', () => {
 
   it('uses normalized input token semantics for auth file cache rate', () => {
     const rows = buildAuthFileCredentialRows([
-      identity({ identity: 'auth-claude', type: 'claude', input_tokens: 1000, cached_tokens: 600 }),
+      identity({ identity: 'auth-claude', type: 'claude', input_tokens: 1000, cache_read_tokens: 600 }),
     ])
 
-    expect(rows[0].cacheRate).toBe(60)
+    expect(rows[0].cacheReadRate).toBe(60)
   })
 
   it('classifies quota bar colors at 50 and 20 percent remaining thresholds', () => {
@@ -448,7 +514,7 @@ describe('credentialViewModels', () => {
     expect(rows[0].failureCount).toBe(1)
     expect(rows[0].successRate).toBe(75)
     expect(rows[0].totalTokens).toBe(0)
-    expect(rows[0].cacheRate).toBeNull()
+    expect(rows[0].cacheReadRate).toBeNull()
     expect('displayQuotas' in rows[0]).toBe(false)
   })
 })
