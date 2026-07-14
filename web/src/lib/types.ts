@@ -117,7 +117,8 @@ export interface UsageOverviewAPIKeySummary {
   total_tokens: number
   input_tokens: number
   output_tokens: number
-  cached_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
   cost_usd: number
   cost_available: boolean
   display_name?: string

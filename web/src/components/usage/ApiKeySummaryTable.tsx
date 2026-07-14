@@ -33,7 +33,7 @@ export function ApiKeySummaryTable({ usage, loading }: ApiKeySummaryTableProps) 
               <th>{t('usage_stats.total_tokens')}</th>
               <th>{t('usage_stats.input_tokens')}</th>
               <th>{t('usage_stats.output_tokens')}</th>
-              <th>{t('usage_stats.cached_tokens')}</th>
+              <th>{t('usage_stats.cache_read_tokens')}</th>
               <th>{t('usage_stats.total_cost')}</th>
             </tr>
           </thead>
@@ -47,7 +47,7 @@ export function ApiKeySummaryTable({ usage, loading }: ApiKeySummaryTableProps) 
                 <td>{formatCompactNumber(row.total_tokens)}</td>
                 <td>{formatCompactNumber(row.input_tokens)}</td>
                 <td>{formatCompactNumber(row.output_tokens)}</td>
-                <td>{formatCompactNumber(row.cached_tokens)}</td>
+                <td>{formatCompactNumber(row.cache_read_tokens)}</td>
                 <td>{row.cost_available ? formatUsd(row.cost_usd) : '-'}</td>
               </tr>
             ))}
