@@ -813,3 +813,11 @@ export async function fetchOverviewModels(request: UsageRangeRequest, signal?: A
   }
   return response.json()
 }
+
+// markStatusActive 是 fork-unique 的 active-status heartbeat，让后端知道前端页面仍然活跃。
+export async function markStatusActive(signal?: AbortSignal): Promise<void> {
+  const response = await apiFetch(apiPath('/status/active'), { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to mark backend page activity: ${response.status}`)
+  }
+}
