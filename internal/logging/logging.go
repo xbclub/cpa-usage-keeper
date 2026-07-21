@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,7 @@ type restoreCloser struct {
 	previousLogrusLevel        logrus.Level
 	previousLogrusFormatter    logrus.Formatter
 	previousStdlogOutput       io.Writer
+	previousSlog               *slog.Logger
 	previousGinDefaultWriter   io.Writer
 	previousGinErrorWriter     io.Writer
 	previousGinDebugPrint      func(string, ...interface{})
@@ -38,6 +40,7 @@ func (c *restoreCloser) Close() error {
 	logrus.SetLevel(c.previousLogrusLevel)
 	logrus.SetFormatter(c.previousLogrusFormatter)
 	stdlog.SetOutput(c.previousStdlogOutput)
+	slog.SetDefault(c.previousSlog)
 	gin.DefaultWriter = c.previousGinDefaultWriter
 	gin.DefaultErrorWriter = c.previousGinErrorWriter
 	gin.DebugPrintFunc = c.previousGinDebugPrint
@@ -62,6 +65,7 @@ func Configure(cfg config.Config) (io.Closer, error) {
 	previousLogrusLevel := logrus.GetLevel()
 	previousLogrusFormatter := logrus.StandardLogger().Formatter
 	previousStdlogOutput := stdlog.Writer()
+	previousSlog := slog.Default()
 	previousGinDefaultWriter := gin.DefaultWriter
 	previousGinErrorWriter := gin.DefaultErrorWriter
 	previousGinDebugPrint := gin.DebugPrintFunc
@@ -91,6 +95,7 @@ func Configure(cfg config.Config) (io.Closer, error) {
 	})
 	logrus.SetOutput(writer)
 	stdlog.SetOutput(writer)
+	slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
 	configureGinLogging()
 	return &restoreCloser{
 		closer:                     closer,
@@ -98,6 +103,7 @@ func Configure(cfg config.Config) (io.Closer, error) {
 		previousLogrusLevel:        previousLogrusLevel,
 		previousLogrusFormatter:    previousLogrusFormatter,
 		previousStdlogOutput:       previousStdlogOutput,
+		previousSlog:               previousSlog,
 		previousGinDefaultWriter:   previousGinDefaultWriter,
 		previousGinErrorWriter:     previousGinErrorWriter,
 		previousGinDebugPrint:      previousGinDebugPrint,
@@ -121,10 +127,10 @@ func configureGinLogging() {
 	gin.DefaultWriter = logrusWriter{level: logrus.InfoLevel}
 	gin.DefaultErrorWriter = logrusWriter{level: logrus.ErrorLevel}
 	gin.DebugPrintFunc = func(format string, values ...interface{}) {
-		logrus.Infof("[GIN-debug] "+strings.TrimRight(format, "\r\n"), values...)
+		logrus.Debugf("[GIN-debug] "+strings.TrimRight(format, "\r\n"), values...)
 	}
 	gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
-		logrus.Infof("[GIN-debug] %-6s %s --> %s (%d handlers)", httpMethod, absolutePath, handlerName, nuHandlers)
+		logrus.Debugf("[GIN-debug] %-6s %s --> %s (%d handlers)", httpMethod, absolutePath, handlerName, nuHandlers)
 	}
 }
 

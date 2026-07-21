@@ -125,18 +125,31 @@ func migrateRedisInboxQueueKeyToSource(db *gorm.DB) error {
 }
 
 // CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox 和过期 usage_events，再清 Overview health 细粒度统计。
-func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
+// CleanupStorageOptions 控制每日维护任务的清理范围。
+type CleanupStorageOptions struct {
+	CleanupUsageEvents bool
+}
+
+func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions) (dto.StorageCleanupResult, error) {
+	opts := CleanupStorageOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	usageEventsDeleted, err := CleanupUsageEvents(db, now)
-	if err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+	var usageEventsDeleted int64
+	if opts.CleanupUsageEvents {
+		usageEventsDeleted, err = CleanupUsageEvents(db, now)
+		if err != nil {
+			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+		}
 	}
 	if err := CleanupUsageOverviewHealthStats(db, now); err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
 	}
+	// PostgreSQL 不需要 VACUUM（由 autovacuum 自动维护）。
 	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
 }
 
