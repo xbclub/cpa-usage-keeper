@@ -12,6 +12,7 @@ interface LoadUsageStatsOptions {
   start?: string;
   end?: string;
   apiKeyId?: string;
+  model?: string[];
 }
 
 interface LoadUsageStatsRealtimeOptions {
@@ -45,8 +46,8 @@ let activeRealtimeRequest: Promise<void> | null = null;
 let activeRealtimeRequestKey: string | null = null;
 let activeRealtimeRequestController: AbortController | null = null;
 
-export const buildUsageStatsQueryKey = (request: UsageRangeRequest, apiKeyId?: string): string =>
-  `${request.range}:${request.unit ?? ''}:${request.start ?? ''}:${request.end ?? ''}:${apiKeyId ?? ''}`;
+export const buildUsageStatsQueryKey = (request: UsageRangeRequest, apiKeyId?: string, model?: string[]): string =>
+  `${request.range}:${request.unit ?? ''}:${request.start ?? ''}:${request.end ?? ''}:${apiKeyId ?? ''}:${model != null && model.length > 0 ? [...model].sort().join(',') : ''}`;
 
 const buildRealtimeQueryKey = (apiKeyId?: string, realtimeWindow?: OverviewRealtimeWindow): string =>
   `${apiKeyId ?? ''}:${realtimeWindow ?? ''}`;
@@ -72,11 +73,12 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
       start,
       end,
       apiKeyId,
+      model,
     } = options;
     const { lastRefreshedAt, loading, usage, lastQueryKey } = get();
     const now = Date.now();
     const request: UsageRangeRequest = { range, unit, start, end };
-    const queryKey = buildUsageStatsQueryKey(request, apiKeyId);
+    const queryKey = buildUsageStatsQueryKey(request, apiKeyId, model);
     const overviewFresh = Boolean(!force && usage && lastRefreshedAt && lastQueryKey === queryKey && now - lastRefreshedAt < staleTimeMs);
 
     if (overviewFresh) {
@@ -100,7 +102,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
 
     activeOverviewRequest = (async () => {
       try {
-        const overview = await fetchUsageOverview(request, controller.signal, apiKeyId);
+        const overview = await fetchUsageOverview(request, controller.signal, apiKeyId, model);
         if (activeOverviewRequestController !== controller) return;
         set({
           usage: overview,

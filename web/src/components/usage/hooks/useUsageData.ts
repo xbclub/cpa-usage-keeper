@@ -28,12 +28,13 @@ export interface UseUsageDataOptions {
   customEnd?: string;
   enabled?: boolean;
   apiKeyId?: string;
+  model?: string[];
 }
 
 export const normalizeUsageOverviewRange = normalizeUsageRange;
 
 export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataReturn {
-  const { onAuthRequired, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId } = options;
+  const { onAuthRequired, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId, model } = options;
   const usageSnapshot = useUsageStatsStore((state) => state.usage);
   const loading = useUsageStatsStore((state) => state.loading);
   const storeError = useUsageStatsStore((state) => state.error);
@@ -57,6 +58,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         start: rangeQuery.start,
         end: rangeQuery.end,
         apiKeyId,
+        model,
       });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -64,7 +66,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
       }
       throw error;
     }
-  }, [apiKeyId, loadUsageStats, onAuthRequired, rangeQuery]);
+  }, [apiKeyId, loadUsageStats, model, onAuthRequired, rangeQuery]);
 
   useEffect(() => {
     if (!enabled || !rangeQuery.valid) {
@@ -77,12 +79,13 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
       start: rangeQuery.start,
       end: rangeQuery.end,
       apiKeyId,
+      model,
     }).catch((error) => {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
       }
     });
-  }, [apiKeyId, enabled, loadUsageStats, onAuthRequired, rangeQuery]);
+  }, [apiKeyId, enabled, loadUsageStats, model, onAuthRequired, rangeQuery]);
 
   const currentQueryKey = rangeQuery.valid ? buildUsageStatsQueryKey(rangeQuery, apiKeyId) : null;
   const usage = usageSnapshot as UsageOverviewPayload | null;
