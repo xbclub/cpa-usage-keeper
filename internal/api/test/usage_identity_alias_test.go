@@ -12,9 +12,9 @@ import (
 
 	. "cpa-usage-keeper/internal/api"
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
