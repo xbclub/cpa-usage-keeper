@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { ApiError, fetchUsageOverview, fetchUsageOverviewRealtime } from '@/lib/api';
-import type { OverviewRealtimeBlock, OverviewRealtimeWindow, UsageOverviewResponse, UsageTimeRange } from '@/lib/types';
+import type { OverviewRealtimeBlock, OverviewRealtimeWindow, UsageCustomRangeUnit, UsageOverviewResponse, UsageRangeRequest, UsageTimeRange } from '@/lib/types';
 
 export const USAGE_STATS_STALE_TIME_MS = 60_000;
 
@@ -8,10 +8,10 @@ interface LoadUsageStatsOptions {
   force?: boolean;
   staleTimeMs?: number;
   range?: UsageTimeRange;
+  unit?: UsageCustomRangeUnit;
   start?: string;
   end?: string;
   apiKeyId?: string;
-  model?: string[];
 }
 
 interface LoadUsageStatsRealtimeOptions {
@@ -45,8 +45,8 @@ let activeRealtimeRequest: Promise<void> | null = null;
 let activeRealtimeRequestKey: string | null = null;
 let activeRealtimeRequestController: AbortController | null = null;
 
-export const buildUsageStatsQueryKey = (range: UsageTimeRange, start?: string, end?: string, apiKeyId?: string, model?: string[]): string =>
-  `${range}:${start ?? ''}:${end ?? ''}:${apiKeyId ?? ''}:${model != null && model.length > 0 ? [...model].sort().join(',') : ''}`;
+export const buildUsageStatsQueryKey = (request: UsageRangeRequest, apiKeyId?: string): string =>
+  `${request.range}:${request.unit ?? ''}:${request.start ?? ''}:${request.end ?? ''}:${apiKeyId ?? ''}`;
 
 const buildRealtimeQueryKey = (apiKeyId?: string, realtimeWindow?: OverviewRealtimeWindow): string =>
   `${apiKeyId ?? ''}:${realtimeWindow ?? ''}`;
@@ -68,14 +68,15 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
       force = false,
       staleTimeMs = USAGE_STATS_STALE_TIME_MS,
       range = '8h',
+      unit,
       start,
       end,
       apiKeyId,
-      model,
     } = options;
     const { lastRefreshedAt, loading, usage, lastQueryKey } = get();
     const now = Date.now();
-    const queryKey = buildUsageStatsQueryKey(range, start, end, apiKeyId, model);
+    const request: UsageRangeRequest = { range, unit, start, end };
+    const queryKey = buildUsageStatsQueryKey(request, apiKeyId);
     const overviewFresh = Boolean(!force && usage && lastRefreshedAt && lastQueryKey === queryKey && now - lastRefreshedAt < staleTimeMs);
 
     if (overviewFresh) {
@@ -99,7 +100,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
 
     activeOverviewRequest = (async () => {
       try {
-        const overview = await fetchUsageOverview(range, start, end, controller.signal, apiKeyId, model != null && model.length > 0 ? model.join(',') : undefined);
+        const overview = await fetchUsageOverview(request, controller.signal, apiKeyId);
         if (activeOverviewRequestController !== controller) return;
         set({
           usage: overview,

@@ -1,5 +1,6 @@
-import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
+import { resolveUsageRequestRange } from '@/utils/usage/rangeQuery'
 
 export class ApiError extends Error {
   status: number
@@ -12,6 +13,8 @@ export class ApiError extends Error {
 }
 
 const APP_BASE_PATH_PLACEHOLDER = '__APP_BASE_PATH__'
+const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
+const EMBED_SESSION_HEADER = 'X-CPA-Usage-Keeper-Embed-Session'
 
 declare global {
   interface Window {
@@ -92,6 +95,10 @@ export interface FetchUsageOverviewRealtimeOptions extends FetchKeyOverviewRealt
   apiKeyId?: string
 }
 
+interface EmbedLoginResponse {
+  session_token?: string
+}
+
 export function appPath(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   return `${normalizeBasePath(window.__APP_BASE_PATH__)}${normalizedPath}`
@@ -115,58 +122,40 @@ async function parseApiError(response: Response, fallback: string): Promise<neve
   throw new ApiError(message, response.status)
 }
 
-async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const method = (init?.method ?? 'GET').toUpperCase()
-  const headers = new Headers(init?.headers)
-  // CPAMC embed 模式下所有请求都带 embed header，让后端识别嵌入来源。
-  if (isCPAMCEmbed()) {
-    headers.set('X-CPA-Usage-Keeper-Embed', 'cpamc')
-  }
-  // 写请求（POST/PUT/PATCH/DELETE）必须带 request-intent header，与后端 requestIntentMiddleware 配合防 CSRF。
-  if (method !== 'GET' && method !== 'HEAD') {
-    headers.set('X-CPA-Usage-Keeper-Request', 'fetch')
-  }
-  // embed session fallback：cookie 无法认证时才用 header 传 token，避免 token 进入 URL。
-  const embedSessionToken = readEmbedSessionToken()
-  if (embedSessionToken) {
-    headers.set('X-CPA-Usage-Keeper-Embed-Session', embedSessionToken)
-  }
-  return fetch(input, {
-    credentials: 'include',
-    ...init,
-    headers,
-  })
+function isMutatingMethod(method: string | undefined): boolean {
+  const normalized = (method ?? 'GET').toUpperCase()
+  return normalized !== 'GET' && normalized !== 'HEAD'
 }
-
-const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
 
 function embedSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null
   try {
-    return window.sessionStorage
+    return window.sessionStorage ?? null
   } catch {
     return null
   }
 }
 
-// readEmbedSessionToken 读取 embed session fallback token，任何异常都安全降级为无 token。
-function readEmbedSessionToken(): string | null {
+function readEmbedSessionToken(): string {
+  if (!isCPAMCEmbed()) return ''
   const storage = embedSessionStorage()
-  if (!storage) return null
+  if (!storage) return ''
   try {
-    return storage.getItem(EMBED_SESSION_STORAGE_KEY)
+    return storage.getItem(EMBED_SESSION_STORAGE_KEY)?.trim() ?? ''
   } catch {
-    return null
+    return ''
   }
 }
 
-function writeEmbedSessionToken(token: string): void {
+function storeEmbedSessionToken(token: string): void {
+  const trimmed = token.trim()
+  if (!trimmed) return
   const storage = embedSessionStorage()
   if (!storage) return
   try {
-    storage.setItem(EMBED_SESSION_STORAGE_KEY, token)
+    storage.setItem(EMBED_SESSION_STORAGE_KEY, trimmed)
   } catch {
-    // ignore storage failures — degrade gracefully without fallback token
+    // 浏览器可能在隐私/嵌入场景禁用 sessionStorage；此时保持 cookie-first 行为即可。
   }
 }
 
@@ -176,28 +165,67 @@ export function clearEmbedSessionToken(): void {
   try {
     storage.removeItem(EMBED_SESSION_STORAGE_KEY)
   } catch {
-    // ignore
+    // 清理 fallback token 是 best-effort，不能阻断登录/登出流程。
   }
+}
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  if (isMutatingMethod(init?.method)) {
+    headers.set('X-CPA-Usage-Keeper-Request', 'fetch')
+  }
+  if (isCPAMCEmbed()) {
+    headers.set('X-CPA-Usage-Keeper-Embed', 'cpamc')
+    const embedSessionToken = readEmbedSessionToken()
+    if (embedSessionToken) {
+      headers.set(EMBED_SESSION_HEADER, embedSessionToken)
+    }
+  }
+  const response = await fetch(input, {
+    ...init,
+    credentials: 'include',
+    headers,
+  })
+  if (response.status === 401) {
+    clearEmbedSessionToken()
+  }
+  return response
 }
 
 export async function getSession(signal?: AbortSignal): Promise<AuthSessionResponse> {
   const response = await apiFetch(apiPath('/auth/session'), { signal })
   if (!response.ok) {
-    // 401 表示 session 失效，清理 embed fallback token。
-    clearEmbedSessionToken()
     await parseApiError(response, `Failed to load auth session: ${response.status}`)
   }
-  const session = await response.json() as AuthSessionResponse
-  // getSession 返回 unauthenticated 时也清理 fallback token，避免持续用过期 token。
-  if (!session.authenticated) {
+  const session = await response.json()
+  if (isCPAMCEmbed() && !session.authenticated) {
     clearEmbedSessionToken()
   }
   return session
 }
 
+async function readEmbedLoginResponse(response: Response): Promise<EmbedLoginResponse> {
+  if (!isCPAMCEmbed()) return {}
+  try {
+    return await response.json() as EmbedLoginResponse
+  } catch {
+    return {}
+  }
+}
+
+async function activateEmbedSessionFallback(response: Response): Promise<void> {
+  const payload = await readEmbedLoginResponse(response)
+  if (!payload.session_token) return
+  const session = await getSession()
+  if (!session.authenticated) {
+    storeEmbedSessionToken(payload.session_token)
+  }
+}
+
 export async function login(password: string): Promise<void> {
-  // 登录前清除旧 fallback token，避免旧会话影响新登录。
-  clearEmbedSessionToken()
+  if (isCPAMCEmbed()) {
+    clearEmbedSessionToken()
+  }
   const response = await apiFetch(apiPath('/auth/login'), {
     method: 'POST',
     headers: {
@@ -208,12 +236,13 @@ export async function login(password: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login: ${response.status}`)
   }
-  await persistEmbedSessionTokenIfCookieFails(response)
+  await activateEmbedSessionFallback(response)
 }
 
 export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
-  // 登录前清除旧 fallback token，避免旧会话影响新登录。
-  clearEmbedSessionToken()
+  if (isCPAMCEmbed()) {
+    clearEmbedSessionToken()
+  }
   const response = await apiFetch(apiPath('/auth/api-key-login'), {
     method: 'POST',
     headers: {
@@ -224,43 +253,20 @@ export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login with CPA API key: ${response.status}`)
   }
-  await persistEmbedSessionTokenIfCookieFails(response)
-}
-
-// persistEmbedSessionTokenIfCookieFails 在 embed 模式下，先尝试用 cookie session 认证；
-// cookie 能认证时不保存 fallback token；cookie 无法认证时才保存登录响应中的 session token。
-async function persistEmbedSessionTokenIfCookieFails(loginResponse: Response): Promise<void> {
-  if (!isCPAMCEmbed()) return
-  let token: string | undefined
-  try {
-    const body = await loginResponse.json() as { session_token?: string }
-    token = body.session_token
-  } catch {
-    return
-  }
-  if (!token) return
-  // 验证 cookie 是否能认证。
-  const sessionResponse = await apiFetch(apiPath('/auth/session'))
-  if (sessionResponse.ok) {
-    try {
-      const session = await sessionResponse.json() as AuthSessionResponse
-      if (session.authenticated) return
-    } catch {
-      // cookie 认证失败，继续存 fallback token
-    }
-  }
-  writeEmbedSessionToken(token)
+  await activateEmbedSessionFallback(response)
 }
 
 export async function logout(): Promise<void> {
-  const response = await apiFetch(apiPath('/auth/logout'), {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to logout: ${response.status}`)
+  try {
+    const response = await apiFetch(apiPath('/auth/logout'), {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      await parseApiError(response, `Failed to logout: ${response.status}`)
+    }
+  } finally {
+    clearEmbedSessionToken()
   }
-  // logout 成功后清理 embed fallback token。
-  clearEmbedSessionToken()
 }
 
 export async function fetchAuthSessions(signal?: AbortSignal): Promise<AuthManagedSessionsResponse> {
@@ -280,9 +286,23 @@ export async function revokeAuthSession(id: string): Promise<void> {
   }
 }
 
-export async function fetchKeyOverview(range: KeyOverviewTimeRange, signal?: AbortSignal): Promise<UsageOverviewResponse> {
+const buildUsageRangeParams = (request: UsageRangeRequest): URLSearchParams => {
   const params = new URLSearchParams()
-  params.set('range', range)
+  params.set('range', resolveUsageRequestRange(request.range))
+  if (request.unit) {
+    params.set('unit', request.unit)
+  }
+  if (request.start) {
+    params.set('start', request.start)
+  }
+  if (request.end) {
+    params.set('end', request.end)
+  }
+  return params
+}
+
+export async function fetchKeyOverview(request: UsageRangeRequest, signal?: AbortSignal): Promise<UsageOverviewResponse> {
+  const params = buildUsageRangeParams(request)
   const response = await apiFetch(`${apiPath('/key-overview')}?${params.toString()}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load key overview: ${response.status}`)
@@ -307,48 +327,16 @@ export async function fetchKeyOverviewRealtime(options: FetchKeyOverviewRealtime
   return normalizeOverviewRealtimeBlock(payload, window)
 }
 
-export async function fetchUsageOverview(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string, model?: string): Promise<UsageOverviewResponse> {
-  const params = new URLSearchParams()
-  params.set('range', range)
-  if (start) {
-    params.set('start', start)
-  }
-  if (end) {
-    params.set('end', end)
-  }
+export async function fetchUsageOverview(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<UsageOverviewResponse> {
+  const params = buildUsageRangeParams(request)
   const selectedAPIKeyId = apiKeyId?.trim()
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
-  }
-  const selectedModel = model?.trim()
-  if (selectedModel) {
-    params.set('model', selectedModel)
   }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage overview: ${response.status}`)
-  }
-  return response.json()
-}
-
-export async function fetchOverviewModels(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string): Promise<{ models: string[] }> {
-  const params = new URLSearchParams()
-  params.set('range', range)
-  if (start) {
-    params.set('start', start)
-  }
-  if (end) {
-    params.set('end', end)
-  }
-  const selectedAPIKeyId = apiKeyId?.trim()
-  if (selectedAPIKeyId) {
-    params.set('api_key_id', selectedAPIKeyId)
-  }
-  const query = params.toString()
-  const response = await apiFetch(`${apiPath('/usage/models')}${query ? `?${query}` : ''}`, { signal })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to load overview models: ${response.status}`)
   }
   return response.json()
 }
@@ -395,15 +383,8 @@ interface UsageEventRequestLogDownloadURLResponse {
   download_url?: string
 }
 
-function buildUsageEventsParams(range: string, start?: string, end?: string, options?: FetchUsageEventsOptions, includePagination = true): URLSearchParams {
-  const params = new URLSearchParams()
-  params.set('range', range)
-  if (start) {
-    params.set('start', start)
-  }
-  if (end) {
-    params.set('end', end)
-  }
+function buildUsageEventsParams(request: UsageRangeRequest, options?: FetchUsageEventsOptions, includePagination = true): URLSearchParams {
+  const params = buildUsageRangeParams(request)
   if (includePagination && typeof options?.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
     params.set('page', String(Math.floor(options.page)))
   }
@@ -451,8 +432,8 @@ export async function fetchUsageEventSourceFilterOptions(signal?: AbortSignal): 
   return response.json()
 }
 
-export async function fetchUsageEvents(range: string, start?: string, end?: string, signal?: AbortSignal, options?: FetchUsageEventsOptions): Promise<UsageEventsResponse> {
-  const params = buildUsageEventsParams(range, start, end, options)
+export async function fetchUsageEvents(request: UsageRangeRequest, signal?: AbortSignal, options?: FetchUsageEventsOptions): Promise<UsageEventsResponse> {
+  const params = buildUsageEventsParams(request, options)
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/events')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
@@ -482,8 +463,8 @@ export async function createUsageEventRequestLogDownloadURL(eventId: string): Pr
   return downloadURL
 }
 
-export async function exportUsageEvents(range: string, start: string | undefined, end: string | undefined, format: UsageEventsExportFormat, options?: FetchUsageEventsOptions): Promise<UsageEventsExportFile> {
-  const params = buildUsageEventsParams(range, start, end, options, false)
+export async function exportUsageEvents(request: UsageRangeRequest, format: UsageEventsExportFormat, options?: FetchUsageEventsOptions): Promise<UsageEventsExportFile> {
+  const params = buildUsageEventsParams(request, options, false)
   params.set('format', format)
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/events/export')}${query ? `?${query}` : ''}`)
@@ -671,15 +652,8 @@ export async function deleteAuthFiles(names: string[]): Promise<AuthFilesManagem
   return response.json()
 }
 
-export async function fetchAnalysis(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string): Promise<AnalysisResponse> {
-  const params = new URLSearchParams()
-  params.set('range', range)
-  if (start) {
-    params.set('start', start)
-  }
-  if (end) {
-    params.set('end', end)
-  }
+export async function fetchAnalysis(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<AnalysisResponse> {
+  const params = buildUsageRangeParams(request)
   const selectedAPIKeyId = apiKeyId?.trim()
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
@@ -755,11 +729,26 @@ export async function fetchVersion(signal?: AbortSignal): Promise<VersionRespons
   return response.json()
 }
 
-export async function markStatusActive(signal?: AbortSignal): Promise<void> {
-  const response = await apiFetch(apiPath('/status/active'), { signal })
+export async function fetchQuotaAutoRefreshSettings(signal?: AbortSignal): Promise<QuotaAutoRefreshSettings> {
+  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), { signal, cache: 'no-store' })
   if (!response.ok) {
-    await parseApiError(response, `Failed to mark backend page activity: ${response.status}`)
+    await parseApiError(response, `Failed to load quota auto refresh settings: ${response.status}`)
   }
+  return response.json()
+}
+
+export async function updateQuotaAutoRefreshSettings(settings: QuotaAutoRefreshSettings): Promise<QuotaAutoRefreshSettings> {
+  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(settings),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update quota auto refresh settings: ${response.status}`)
+  }
+  return response.json()
 }
 
 export async function fetchUpdateCheck(signal?: AbortSignal): Promise<UpdateCheckResponse> {
@@ -810,25 +799,17 @@ export async function deletePricing(model: string): Promise<void> {
   }
 }
 
-export async function fetchQuotaAutoRefreshSettings(signal?: AbortSignal): Promise<QuotaAutoRefreshSettings> {
-  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), { signal, cache: 'no-store' })
+// fetchOverviewModels 是 fork-unique 的独立 /usage/models endpoint，
+// 返回 DISTINCT model 列表不受 model filter 影响。
+export async function fetchOverviewModels(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<{ models: string[] }> {
+  const params = buildUsageRangeParams(request)
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
+  const response = await apiFetch(apiPath('/usage/models'), { signal })
   if (!response.ok) {
-    await parseApiError(response, `Failed to load quota auto refresh settings: ${response.status}`)
+    await parseApiError(response, `Failed to load overview models: ${response.status}`)
   }
   return response.json()
 }
-
-export async function updateQuotaAutoRefreshSettings(settings: QuotaAutoRefreshSettings): Promise<QuotaAutoRefreshSettings> {
-  const response = await apiFetch(apiPath('/quota/auto-refresh/settings'), {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(settings),
-  })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to update quota auto refresh settings: ${response.status}`)
-  }
-  return response.json()
-}
-
