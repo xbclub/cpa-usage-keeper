@@ -17,28 +17,10 @@ import (
 )
 
 type usageOverviewResponse struct {
-	Usage         usageOverviewPayload         `json:"usage"`
-	Summary       usageOverviewSummary         `json:"summary"`
-	Series        usageOverviewSeries          `json:"series"`
-	ServiceHealth usageOverviewServiceHealth   `json:"service_health"`
-	APIKeySummary []usageOverviewAPIKeySummary `json:"api_key_summary"`
-	Timezone      string                       `json:"timezone"`
-	RangeStart    *time.Time                   `json:"range_start,omitempty"`
-	RangeEnd      *time.Time                   `json:"range_end,omitempty"`
-}
-
-// usageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行 json 投影。api_key 字段在后端用
-// helper.RedactSensitiveValue 脱敏，前端 ApiKeySummaryTable 直接展示（不再额外遮罩）。
-type usageOverviewAPIKeySummary struct {
-	APIKey             string  `json:"api_key"`
-	RequestCount       int64   `json:"request_count"`
-	TotalTokens        int64   `json:"total_tokens"`
-	InputTokens        int64   `json:"input_tokens"`
-	OutputTokens       int64   `json:"output_tokens"`
-	CacheReadTokens    int64   `json:"cache_read_tokens"`
-	CacheCreationTokens int64  `json:"cache_creation_tokens"`
-	CostUSD            float64 `json:"cost_usd"`
-	CostAvailable      bool    `json:"cost_available"`
+	Usage    usageOverviewPayload `json:"usage"`
+	Summary  usageOverviewSummary `json:"summary"`
+	Series   usageOverviewSeries  `json:"series"`
+	Timezone string               `json:"timezone"`
 }
 
 type usageOverviewPayload struct {
@@ -49,9 +31,6 @@ type usageOverviewPayload struct {
 }
 
 type usageOverviewSummary struct {
-	RequestCount          int64    `json:"request_count"`
-	TokenCount            int64    `json:"token_count"`
-	WindowMinutes         int64    `json:"window_minutes"`
 	RPM                   float64  `json:"rpm"`
 	TPM                   float64  `json:"tpm"`
 	TotalCost             float64  `json:"total_cost"`
@@ -67,32 +46,13 @@ type usageOverviewSummary struct {
 }
 
 type usageOverviewSeries struct {
-	Requests      map[string]int64    `json:"requests"`
-	Tokens        map[string]int64    `json:"tokens"`
-	RPM           map[string]float64  `json:"rpm"`
-	TPM           map[string]float64  `json:"tpm"`
-	Cost          map[string]float64  `json:"cost"`
-	CacheReadRate map[string]*float64 `json:"cache_read_rate"`
-}
-
-type usageOverviewServiceHealth struct {
-	TotalSuccess  int64                             `json:"total_success"`
-	TotalFailure  int64                             `json:"total_failure"`
-	SuccessRate   float64                           `json:"success_rate"`
-	Rows          int                               `json:"rows"`
-	Columns       int                               `json:"columns"`
-	BucketSeconds int64                             `json:"bucket_seconds"`
-	WindowStart   time.Time                         `json:"window_start"`
-	WindowEnd     time.Time                         `json:"window_end"`
-	BlockDetails  []usageOverviewServiceHealthBlock `json:"block_details"`
-}
-
-type usageOverviewServiceHealthBlock struct {
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Success   int64     `json:"success"`
-	Failure   int64     `json:"failure"`
-	Rate      float64   `json:"rate"`
+	Buckets       []string   `json:"buckets"`
+	Requests      []int64    `json:"requests"`
+	Tokens        []int64    `json:"tokens"`
+	RPM           []float64  `json:"rpm"`
+	TPM           []float64  `json:"tpm"`
+	Cost          []float64  `json:"cost"`
+	CacheReadRate []*float64 `json:"cache_read_rate"`
 }
 
 type usageOverviewRealtime struct {
@@ -231,9 +191,9 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
-		filter, err := parseKeyOverviewFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		filter, err := parseKeyUsageOverviewTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		if authHandler != nil && !authHandler.allowKeyOverviewRequest(fmt.Sprint(token)) {
@@ -263,9 +223,9 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
-		filter, err := parseUsageRealtimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		filter, err := parseKeyUsageRealtimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		if authHandler != nil && !authHandler.allowKeyOverviewRequest(fmt.Sprint(token), "realtime") {
@@ -277,37 +237,15 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 	})
 }
 
-// registerUsageModelsRoute 提供 Overview 过滤器专用的去重 model 列表 endpoint。
-// 独立于 /usage/overview，保证 model 过滤激活时下拉列表不会被收窄。
-func registerUsageModelsRoute(router gin.IRoutes, usageProvider service.UsageProvider) {
-	router.GET("/usage/models", func(c *gin.Context) {
-		if usageProvider == nil {
-			c.JSON(http.StatusOK, gin.H{"models": []string{}})
-			return
-		}
-		filter, err := parseUsageTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		models, err := usageProvider.ListOverviewModels(c.Request.Context(), filter)
-		if err != nil {
-			writeInternalError(c, "get overview models failed", err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"models": models})
-	})
-}
-
 func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider) {
 	router.GET("/usage/overview", func(c *gin.Context) {
 		if usageProvider == nil {
 			writeUsageOverviewResponse(c, usageProvider, servicedto.UsageFilter{})
 			return
 		}
-		filter, err := parseUsageFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		filter, err := parseUsageOverviewTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		writeUsageOverviewResponse(c, usageProvider, filter)
@@ -315,41 +253,27 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 	router.GET("/usage/overview/realtime", func(c *gin.Context) {
 		filter, err := parseUsageRealtimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		writeUsageOverviewRealtimeResponse(c, usageProvider, cpaAPIKeyProvider, filter)
 	})
 }
 
-func parseKeyOverviewFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
-	query := req.URL.Query()
-	rangeValue := query.Get("range")
-	_, rollingRange := timeutil.ParseUsageRollingRange(rangeValue)
-	if rangeValue != "today" && rangeValue != "yesterday" && rangeValue != "custom" && !rollingRange {
-		return servicedto.UsageFilter{}, fmt.Errorf("unsupported key overview range %q", rangeValue)
-	}
-	return parseUsageFilterQuery(req, anchor)
-}
-
 func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvider, filter servicedto.UsageFilter) {
 	if usageProvider == nil {
 		c.JSON(http.StatusOK, usageOverviewResponse{
-			Usage:         buildUsageOverviewPayload(nil),
-			Summary:       usageOverviewSummary{},
-			Series:        emptyUsageOverviewSeries(),
-			ServiceHealth: usageOverviewServiceHealth{BlockDetails: []usageOverviewServiceHealthBlock{}},
-			APIKeySummary: []usageOverviewAPIKeySummary{},
-			Timezone:      time.Local.String(),
-			RangeStart:    filter.StartTime,
-			RangeEnd:      filter.EndTime,
+			Usage:    buildUsageOverviewPayload(nil),
+			Summary:  usageOverviewSummary{},
+			Series:   emptyUsageOverviewSeries(),
+			Timezone: time.Local.String(),
 		})
 		return
 	}
 
 	overview, err := usageProvider.GetUsageOverview(c.Request.Context(), filter)
 	if err != nil {
-		writeUsageOverviewProviderError(c, "get usage overview failed", err)
+		writeUsageProviderError(c, "get usage overview failed", err)
 		return
 	}
 
@@ -358,38 +282,11 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 		usage = overview.Usage
 	}
 	c.JSON(http.StatusOK, usageOverviewResponse{
-		Usage:         buildUsageOverviewPayload(usage),
-		Summary:       buildUsageOverviewSummary(overview),
-		Series:        buildUsageOverviewSeries(overview),
-		ServiceHealth: buildUsageOverviewServiceHealth(overview),
-		APIKeySummary: buildUsageOverviewAPIKeySummary(overview),
-		Timezone:      time.Local.String(),
-		RangeStart:    filter.StartTime,
-		RangeEnd:      filter.EndTime,
+		Usage:    buildUsageOverviewPayload(usage),
+		Summary:  buildUsageOverviewSummary(overview),
+		Series:   buildUsageOverviewSeries(overview),
+		Timezone: time.Local.String(),
 	})
-}
-
-// buildUsageOverviewAPIKeySummary 把 service 层的 APIKeySummary 投影成 json 行，api_key 用
-// helper.RedactSensitiveValue 统一脱敏（与 cpa-api-keys 等其它接口一致，前端不再二次遮罩）。
-func buildUsageOverviewAPIKeySummary(overview *servicedto.UsageOverviewSnapshot) []usageOverviewAPIKeySummary {
-	if overview == nil || len(overview.APIKeySummary) == 0 {
-		return []usageOverviewAPIKeySummary{}
-	}
-	rows := make([]usageOverviewAPIKeySummary, 0, len(overview.APIKeySummary))
-	for _, item := range overview.APIKeySummary {
-		rows = append(rows, usageOverviewAPIKeySummary{
-			APIKey:             helper.RedactSensitiveValue(item.APIGroupKey),
-			RequestCount:       item.RequestCount,
-			TotalTokens:        item.TotalTokens,
-			InputTokens:        item.InputTokens,
-			OutputTokens:       item.OutputTokens,
-			CacheReadTokens:    item.CacheReadTokens,
-			CacheCreationTokens: item.CacheCreationTokens,
-			CostUSD:            item.CostUSD,
-			CostAvailable:      item.CostAvailable,
-		})
-	}
-	return rows
 }
 
 func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider, filter servicedto.UsageFilter) {
@@ -399,7 +296,7 @@ func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.Us
 	}
 	realtime, err := usageProvider.GetUsageOverviewRealtime(c.Request.Context(), filter)
 	if err != nil {
-		writeUsageOverviewProviderError(c, "get usage overview realtime failed", err)
+		writeUsageProviderError(c, "get usage overview realtime failed", err)
 		return
 	}
 	apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
@@ -416,13 +313,13 @@ func writeKeyUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service
 	}
 	realtime, err := usageProvider.GetUsageOverviewRealtime(c.Request.Context(), filter)
 	if err != nil {
-		writeUsageOverviewProviderError(c, "get usage overview realtime failed", err)
+		writeUsageProviderError(c, "get usage overview realtime failed", err)
 		return
 	}
 	c.JSON(http.StatusOK, buildKeyUsageOverviewRealtime(realtime, filter.RealtimeWindow))
 }
 
-func writeUsageOverviewProviderError(c *gin.Context, message string, err error) {
+func writeUsageProviderError(c *gin.Context, message string, err error) {
 	if errors.Is(err, service.ErrInvalidID) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid api_key_id"})
 		return
@@ -454,9 +351,6 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 		return usageOverviewSummary{}
 	}
 	return usageOverviewSummary{
-		RequestCount:          overview.Summary.RequestCount,
-		TokenCount:            overview.Summary.TokenCount,
-		WindowMinutes:         overview.Summary.WindowMinutes,
 		RPM:                   overview.Summary.RPM,
 		TPM:                   overview.Summary.TPM,
 		TotalCost:             overview.Summary.TotalCost,
@@ -474,57 +368,28 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 
 func emptyUsageOverviewSeries() usageOverviewSeries {
 	return usageOverviewSeries{
-		Requests:      map[string]int64{},
-		Tokens:        map[string]int64{},
-		RPM:           map[string]float64{},
-		TPM:           map[string]float64{},
-		Cost:          map[string]float64{},
-		CacheReadRate: map[string]*float64{},
-	}
-}
-
-func mapUsageOverviewSeries(series servicedto.UsageOverviewSeries) usageOverviewSeries {
-	return usageOverviewSeries{
-		Requests:      cloneInt64Map(series.Requests),
-		Tokens:        cloneInt64Map(series.Tokens),
-		RPM:           cloneFloat64Map(series.RPM),
-		TPM:           cloneFloat64Map(series.TPM),
-		Cost:          cloneFloat64Map(series.Cost),
-		CacheReadRate: cloneFloat64PtrMap(series.CacheReadRate),
+		Buckets:       []string{},
+		Requests:      []int64{},
+		Tokens:        []int64{},
+		RPM:           []float64{},
+		TPM:           []float64{},
+		Cost:          []float64{},
+		CacheReadRate: []*float64{},
 	}
 }
 
 func buildUsageOverviewSeries(overview *servicedto.UsageOverviewSnapshot) usageOverviewSeries {
-	if overview == nil {
+	if overview == nil || overview.Series.Buckets == nil {
 		return emptyUsageOverviewSeries()
 	}
-	return mapUsageOverviewSeries(overview.Series)
-}
-
-func buildUsageOverviewServiceHealth(overview *servicedto.UsageOverviewSnapshot) usageOverviewServiceHealth {
-	if overview == nil {
-		return usageOverviewServiceHealth{BlockDetails: []usageOverviewServiceHealthBlock{}}
-	}
-	blocks := make([]usageOverviewServiceHealthBlock, 0, len(overview.Health.BlockDetails))
-	for _, block := range overview.Health.BlockDetails {
-		blocks = append(blocks, usageOverviewServiceHealthBlock{
-			StartTime: block.StartTime,
-			EndTime:   block.EndTime,
-			Success:   block.Success,
-			Failure:   block.Failure,
-			Rate:      block.Rate,
-		})
-	}
-	return usageOverviewServiceHealth{
-		TotalSuccess:  overview.Health.TotalSuccess,
-		TotalFailure:  overview.Health.TotalFailure,
-		SuccessRate:   overview.Health.SuccessRate,
-		Rows:          overview.Health.Rows,
-		Columns:       overview.Health.Columns,
-		BucketSeconds: overview.Health.BucketSeconds,
-		WindowStart:   overview.Health.WindowStart,
-		WindowEnd:     overview.Health.WindowEnd,
-		BlockDetails:  blocks,
+	return usageOverviewSeries{
+		Buckets:       overview.Series.Buckets,
+		Requests:      overview.Series.Requests,
+		Tokens:        overview.Series.Tokens,
+		RPM:           overview.Series.RPM,
+		TPM:           overview.Series.TPM,
+		Cost:          overview.Series.Cost,
+		CacheReadRate: overview.Series.CacheReadRate,
 	}
 }
 
@@ -817,42 +682,4 @@ func mapUsageOverviewRealtimeAPIKeyTopItems(items []servicedto.RealtimeUsageTopI
 		})
 	}
 	return result
-}
-
-func cloneInt64Map(source map[string]int64) map[string]int64 {
-	if len(source) == 0 {
-		return map[string]int64{}
-	}
-	cloned := make(map[string]int64, len(source))
-	for key, value := range source {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func cloneFloat64Map(source map[string]float64) map[string]float64 {
-	if len(source) == 0 {
-		return map[string]float64{}
-	}
-	cloned := make(map[string]float64, len(source))
-	for key, value := range source {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func cloneFloat64PtrMap(source map[string]*float64) map[string]*float64 {
-	if len(source) == 0 {
-		return map[string]*float64{}
-	}
-	cloned := make(map[string]*float64, len(source))
-	for key, value := range source {
-		if value == nil {
-			cloned[key] = nil
-			continue
-		}
-		copied := *value
-		cloned[key] = &copied
-	}
-	return cloned
 }

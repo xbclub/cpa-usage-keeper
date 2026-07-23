@@ -1,11 +1,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
-import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
+import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
-import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { IconRefreshCw } from '@/components/ui/icons';
@@ -14,7 +13,7 @@ import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useThemeStore } from '@/stores';
 import {
   StatCards,
-  DailyAveragePanel,
+  RecentActivityPanel,
   OverviewRealtimePanel,
   AnalysisPanel,
   ApiKeySettingsCard,
@@ -23,9 +22,10 @@ import {
   AuthFileCredentialsSection,
   AiProviderCredentialsSection,
   CredentialProviderFilterBar,
-  ServiceHealthCard,
   TimeRangeControl,
   useUsageData,
+  useRecentActivityWindow,
+  useUsageActivityData,
   useOverviewRealtimeData,
   usePricingData,
   useSparklines,
@@ -36,9 +36,9 @@ import {
   REQUEST_EVENT_COLUMN_IDS,
   type RequestEventColumnId,
 } from '@/components/usage/RequestEventsDetailsCard';
-import { clampStoredUsageRangeStateToCurrentBounds, parseLegacyCustomRange, parseStoredUsageRangeState, scheduleCustomRangeBoundsRefresh, serializeUsageRangeState, type StoredUsageRangeState } from '@/utils/usage/customRange';
+import { clampStoredUsageRangeStateToCurrentBounds, parseLegacyCustomRange, parseStoredUsageRangeState, resolveUsageRangeRecoveryTimeZone, serializeUsageRangeState, type StoredUsageRangeState } from '@/utils/usage/customRange';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
-import { getDailyAveragePanelUsage, isDailyAverageRange } from '@/utils/usage/overview';
+import { getDailyAverageCardUsage, isDailyAverageRange } from '@/utils/usage/overview';
 import type { Theme } from '@/types';
 import { BrandLink } from '@/components/BrandLink';
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed';
@@ -48,7 +48,7 @@ const TIME_RANGE_STORAGE_KEY = 'cli-proxy-usage-time-range-v1';
 const LEGACY_CUSTOM_RANGE_STORAGE_KEY = 'cli-proxy-usage-custom-range-v1';
 const OVERVIEW_REALTIME_WINDOW_STORAGE_KEY = 'cli-proxy-usage-overview-realtime-window-v1';
 export const REQUEST_EVENTS_PREFERENCES_STORAGE_KEY = 'cli-proxy-usage-request-events-preferences-v1';
-const DEFAULT_TIME_RANGE: UsageTimeRange = '8h';
+const DEFAULT_TIME_RANGE: UsageTimeRange = 'today';
 const DEFAULT_REALTIME_WINDOW: OverviewRealtimeWindow = '15m';
 const THEME_OPTIONS: ReadonlyArray<{ value: Theme; labelKey: string }> = [
   { value: 'white', labelKey: 'usage_stats.theme_light' },
@@ -77,6 +77,29 @@ const CPA_MANAGEMENT_PAGE = 'management.html';
 const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//i;
 const EXPLICIT_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:/i;
 const BARE_HOST_WITH_PORT_PATTERN = /^[a-z0-9.-]+:\d+(?:[/?#]|$)/i;
+
+type AnalysisSectionLoadOptions<TCore, TLatency> = {
+  loadCore: () => Promise<TCore>;
+  loadLatency: () => Promise<TLatency>;
+  onCoreLoaded: (value: TCore) => void;
+  onCoreError: (error: unknown) => void;
+  onLatencyLoaded: (value: TLatency) => void;
+  onLatencyError: (error: unknown) => void;
+};
+
+// 两个 Analysis 数据源同时启动，但各自完成后立即更新对应卡片，避免慢接口阻塞快接口展示。
+export const loadAnalysisSections = async <TCore, TLatency>({
+  loadCore,
+  loadLatency,
+  onCoreLoaded,
+  onCoreError,
+  onLatencyLoaded,
+  onLatencyError,
+}: AnalysisSectionLoadOptions<TCore, TLatency>) => {
+  const coreRequest = loadCore().then(onCoreLoaded, onCoreError);
+  const latencyRequest = loadLatency().then(onLatencyLoaded, onLatencyError);
+  await Promise.all([coreRequest, latencyRequest]);
+};
 
 export const getCredentialSectionVisibility = (tab: UsageTab) => ({
   enabled: tab === 'auth-files' || tab === 'ai-provider',
@@ -734,8 +757,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { range: timeRange, customRange } = timeRangeState;
   const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState('');
-  const [overviewModelFilter, setOverviewModelFilter] = useState<string[]>([]);
-  const [overviewModelNames, setOverviewModelNames] = useState<string[]>([]);
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionResponse | null>(null);
@@ -747,6 +768,24 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     customStart: customRange?.start,
     customEnd: customRange?.end,
   }), [customRange?.end, customRange?.start, customRange?.unit, timeRange]);
+  const {
+    request: activityRangeRequest,
+    manualWindow: manualActivityWindow,
+    setWindow: setActivityWindow,
+  } = useRecentActivityWindow(usageRangeQuery);
+  const rangeRecoveryTimeZone = resolveUsageRangeRecoveryTimeZone(timeRangeState, status?.timezone);
+  const recoverRangeBoundsConflict = useCallback((error: unknown) => {
+    if (!isUsageRangeBoundsConflict(error)) return false;
+    const timeZone = rangeRecoveryTimeZone?.trim();
+    if (!timeZone) return false;
+    const nextState = clampStoredUsageRangeStateToCurrentBounds(timeRangeState, {
+      nowMs: Date.now(),
+      timeZone,
+    });
+    if (nextState === timeRangeState) return false;
+    setTimeRangeState(nextState);
+    return true;
+  }, [rangeRecoveryTimeZone, timeRangeState]);
 
   const {
     usage,
@@ -762,8 +801,24 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     customEnd: customRange?.end,
     enabled: activeTab === 'overview',
     apiKeyId: selectedApiKeyId,
-    model: activeTab === 'overview' ? overviewModelFilter : undefined,
+    onRangeBoundsConflict: recoverRangeBoundsConflict,
   });
+  const {
+    activity,
+    activityMatchesRequest,
+    loading: activityLoading,
+    error: activityError,
+    requestIdentity: activityRequestIdentity,
+    loadActivity,
+  } = useUsageActivityData({
+    viewer: 'admin',
+    request: activityRangeRequest,
+    apiKeyId: selectedApiKeyId,
+    enabled: activeTab === 'overview' && usageRangeQuery.valid,
+    onAuthRequired,
+  });
+  const activityWindow = manualActivityWindow ?? activity?.window ?? null;
+  const activityWindowIsCurrent = manualActivityWindow !== null || activityMatchesRequest;
   const rangeTimeZone = status?.timezone ?? usage?.timezone ?? timeRangeState.timeZone;
   const handleTimeRangeChange = useCallback((range: UsageTimeRange, nextCustomRange?: UsageCustomRange) => {
     pendingLegacyCustomRangeRef.current = null;
@@ -867,6 +922,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
+  const [analysisLatencyLoading, setAnalysisLatencyLoading] = useState(false);
+  const [analysisLatencyError, setAnalysisLatencyError] = useState('');
+  const [analysisLatencyData, setAnalysisLatencyData] = useState<AnalysisLatencyDiagnostics | null>(null);
   const analysisRequestControllerRef = useRef<AbortController | null>(null);
 
   const tabOptions = useMemo(() => getUsageTabOptions(t), [t]);
@@ -1036,16 +1094,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
   }, [loadAuthSessions, onAuthRequired, showTopNotice, t]);
 
-  const loadOverviewModels = useCallback(async () => {
-    if (!usageRangeQuery.valid) return;
-    try {
-      const response = await fetchOverviewModels(usageRangeQuery, undefined, selectedApiKeyId);
-      setOverviewModelNames(response.models);
-    } catch {
-      // 模型列表加载失败不阻塞主页面
-    }
-  }, [usageRangeQuery, selectedApiKeyId]);
-
   const loadAnalysis = useCallback(async () => {
     if (!usageRangeQuery.valid) return;
     analysisRequestControllerRef.current?.abort();
@@ -1055,31 +1103,51 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setAnalysisLoading(true);
     setAnalysisError('');
     setAnalysisData(null);
-    try {
-      const response = await fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId);
-      if (analysisRequestControllerRef.current !== controller) {
-        return;
-      }
-      setAnalysisData(response);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return;
-      }
-      if (analysisRequestControllerRef.current === controller) {
-        setAnalysisData(null);
-      }
-      if (error instanceof ApiError && error.status === 401) {
-        onAuthRequired?.();
-        return;
-      }
-      setAnalysisError(error instanceof Error ? error.message : 'Failed to load usage analysis');
-    } finally {
-      if (analysisRequestControllerRef.current === controller) {
+    setAnalysisLatencyLoading(true);
+    setAnalysisLatencyError('');
+    setAnalysisLatencyData(null);
+
+    await loadAnalysisSections({
+      loadCore: () => fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId),
+      loadLatency: () => fetchAnalysisLatency(usageRangeQuery, controller.signal, selectedApiKeyId),
+      onCoreLoaded: (response) => {
+        if (analysisRequestControllerRef.current !== controller) return;
+        setAnalysisData(response);
         setAnalysisLoading(false);
-        analysisRequestControllerRef.current = null;
-      }
+      },
+      onCoreError: (error) => {
+        if (controller.signal.aborted || analysisRequestControllerRef.current !== controller) return;
+        setAnalysisData(null);
+        setAnalysisLoading(false);
+        if (recoverRangeBoundsConflict(error)) return;
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+          return;
+        }
+        setAnalysisError(error instanceof Error ? error.message : 'Failed to load usage analysis');
+      },
+      onLatencyLoaded: (response) => {
+        if (analysisRequestControllerRef.current !== controller) return;
+        setAnalysisLatencyData(response);
+        setAnalysisLatencyLoading(false);
+      },
+      onLatencyError: (error) => {
+        if (controller.signal.aborted || analysisRequestControllerRef.current !== controller) return;
+        setAnalysisLatencyData(null);
+        setAnalysisLatencyLoading(false);
+        if (recoverRangeBoundsConflict(error)) return;
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+          return;
+        }
+        setAnalysisLatencyError(error instanceof Error ? error.message : 'Failed to load analysis latency');
+      },
+    });
+
+    if (analysisRequestControllerRef.current === controller) {
+      analysisRequestControllerRef.current = null;
     }
-  }, [onAuthRequired, selectedApiKeyId, usageRangeQuery]);
+  }, [onAuthRequired, recoverRangeBoundsConflict, selectedApiKeyId, usageRangeQuery]);
 
   useEffect(() => {
     try {
@@ -1092,23 +1160,12 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
   }, [timeRangeState]);
 
-  // 切换 API Key 或时间范围时重置模型筛选，避免保留不存在的模型选择。
-  useEffect(() => {
-    setOverviewModelFilter([]);
-  }, [selectedApiKeyId, timeRange, customRange?.start, customRange?.end]);
-
-  // Overview tab 激活时加载模型列表（独立于 overview 数据，避免筛选时下拉框缩小）。
-  useEffect(() => {
-    if (activeTab !== 'overview') return;
-    void loadOverviewModels();
-  }, [activeTab, loadOverviewModels]);
-
   useEffect(() => {
     const pendingLegacyCustomRange = pendingLegacyCustomRangeRef.current;
     const timeZone = rangeTimeZone?.trim();
     if (!pendingLegacyCustomRange || !timeZone) return;
 
-    // 旧版 Custom 日期需要等项目时区到达后再按当前 30 天边界归一化，期间不覆盖旧存储。
+    // 旧版 Custom 日期需要等项目时区到达后再按当前一年边界归一化，期间不覆盖旧存储。
     const migratedState = migrateLegacyUsageRangeState(pendingLegacyCustomRange, {
       nowMs: Date.now(),
       timeZone,
@@ -1118,18 +1175,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
     setTimeRangeState(migratedState);
   }, [rangeTimeZone]);
-
-  useEffect(() => scheduleCustomRangeBoundsRefresh({
-    enabled: timeRange === 'custom' && Boolean(rangeTimeZone),
-    refreshBounds: () => {
-      const timeZone = rangeTimeZone?.trim();
-      if (!timeZone) return;
-      setTimeRangeState((current) => clampStoredUsageRangeStateToCurrentBounds(current, {
-        nowMs: Date.now(),
-        timeZone,
-      }));
-    },
-  }), [rangeTimeZone, timeRange]);
 
   useEffect(() => {
     try {
@@ -1314,6 +1359,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
         setEventsTotalCount(0);
         setEventsTotalPages(0);
       }
+      if (recoverRangeBoundsConflict(error)) return;
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
         return;
@@ -1325,7 +1371,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
         eventsRequestControllerRef.current = null;
       }
     }
-  }, [eventsModelFilter, eventsPage, eventsPageSize, eventsResultFilter, eventsSourceFilter, onAuthRequired, selectedApiKeyId, usageRangeQuery]);
+  }, [eventsModelFilter, eventsPage, eventsPageSize, eventsResultFilter, eventsSourceFilter, onAuthRequired, recoverRangeBoundsConflict, selectedApiKeyId, usageRangeQuery]);
 
   const resetEventsPage = useCallback(() => {
     setEventsPage(1);
@@ -1364,15 +1410,20 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       triggerBrowserFileDownload(file.blob, file.filename);
       showTopNotice('success', t('usage_stats.export_success'));
     } catch (error) {
+      if (recoverRangeBoundsConflict(error)) return;
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
+        return;
+      }
+      if (error instanceof ApiError && error.status === 429) {
+        showTopNotice('error', t('usage_stats.export_busy'));
         return;
       }
       showTopNotice('error', t('notification.download_failed'));
     } finally {
       setEventsExportingFormat(null);
     }
-  }, [eventsModelFilter, eventsResultFilter, eventsSourceFilter, onAuthRequired, selectedApiKeyId, showTopNotice, t, usageRangeQuery]);
+  }, [eventsModelFilter, eventsResultFilter, eventsSourceFilter, onAuthRequired, recoverRangeBoundsConflict, selectedApiKeyId, showTopNotice, t, usageRangeQuery]);
 
   const handleRequestLogOpen = useCallback(async (event: UsageEvent) => {
     if (!requestLogAccessEnabled) return;
@@ -1456,8 +1507,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([loadAuthSessions(), loadApiKeySettings(), loadPricing()]);
       return;
     }
-    await Promise.all([loadUsage(), loadRealtime()]);
-  }, [activeTab, credentialSectionVisibility.enabled, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadActivity(), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadActivity, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -1468,16 +1519,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await refreshCredentials();
       return;
     }
-    await Promise.all([loadUsage(), loadRealtime()]);
-  }, [activeTab, credentialSectionVisibility.enabled, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadActivity({ skipIfInFlight: true }), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadActivity, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
 
   const handleAutoRefreshError = useCallback((error: unknown) => {
+    if (recoverRangeBoundsConflict(error)) return;
     if (error instanceof ApiError && error.status === 401) {
       onAuthRequired?.();
       return;
     }
     setStatusError(error instanceof Error ? error.message : 'REFRESH_FAILED');
-  }, [onAuthRequired]);
+  }, [onAuthRequired, recoverRangeBoundsConflict]);
 
   const autoRefreshEnabled = shouldAutoRefreshUsageTab({
     activeTab,
@@ -1489,6 +1541,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     try {
       await refreshPageData({ refreshActiveTab });
     } catch (error) {
+      if (recoverRangeBoundsConflict(error)) return;
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
         return;
@@ -1497,7 +1550,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     } finally {
       setManualRefreshLoading(false);
     }
-  }, [onAuthRequired, refreshActiveTab]);
+  }, [onAuthRequired, recoverRangeBoundsConflict, refreshActiveTab]);
 
   const handleRequestLogout = useCallback(() => {
     setLogoutConfirmOpen(true);
@@ -1593,6 +1646,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       analysisRequestControllerRef.current?.abort();
       analysisRequestControllerRef.current = null;
       setAnalysisLoading(false);
+      setAnalysisLatencyLoading(false);
       return;
     }
     void loadAnalysis();
@@ -1668,13 +1722,13 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   } = useSparklines({ usage, loading });
 
   const overviewDisplayLoading = getOverviewDisplayLoading({ loading, hasUsage: Boolean(usage) });
-  const reserveDailyAveragePanel = isDailyAverageRange({
+  const reserveDailyAverageCard = isDailyAverageRange({
     range: timeRange,
     customUnit: customRange?.unit,
     customStart: customRange?.start,
     customEnd: customRange?.end,
   });
-  const dailyAveragePanelUsage = getDailyAveragePanelUsage(currentOverviewUsage, usage, reserveDailyAveragePanel, loading);
+  const dailyAverageCardUsage = getDailyAverageCardUsage(currentOverviewUsage, usage, reserveDailyAverageCard, loading);
 
   return (
     <div className={styles.pageShell} data-keeper-page="usage">
@@ -1726,15 +1780,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 </button>
               </div>
             )}
-            <div className={styles.signOutSwitcher} role="group" aria-label={t('common.clear_cache')}>
-              <button
-                type="button"
-                className={`${styles.signOutPill} ${styles.signOutPillActive}`.trim()}
-                onClick={() => { if (window.confirm(t('common.clear_cache_confirm'))) { try { localStorage.clear(); } catch { /* ignore */ } window.location.reload(); } }}
-              >
-                <span className={styles.signOutPillInner}>{t('common.clear_cache')}</span>
-              </button>
-            </div>
             <div className={styles.signOutSwitcher} role="group" aria-label={t('common.logout')}>
               <button
                 type="button"
@@ -1844,22 +1889,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       />
                     </label>
                   </div>
-                    {activeTab === 'overview' && overviewModelNames.length > 0 && (
-                    <div className={styles.apiKeyFilterGroup}>
-                      <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
-                        <span className={styles.usageFilterLabel}>{t('usage_stats.model_filter')}</span>
-                        <MultiSelect
-                          value={overviewModelFilter}
-                          options={overviewModelNames.map((name) => ({ value: name, label: name }))}
-                          onChange={setOverviewModelFilter}
-                          selectedLabel={(count) => t('usage_stats.model_filter_selected', { count })}
-                          placeholder={t('usage_stats.all_models')}
-                          className={styles.apiKeySelectControl}
-                          ariaLabel={t('usage_stats.model_filter')}
-                        />
-                      </label>
-                    </div>
-                    )}
                     <TimeRangeControl
                       value={timeRange}
                       customRange={customRange}
@@ -1907,11 +1936,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
             {activeTab === 'overview' && (
               <>
-                <DailyAveragePanel usage={dailyAveragePanelUsage} loading={overviewDisplayLoading} reserveVisible={reserveDailyAveragePanel} />
-
                 <StatCards
                   usage={usage}
                   loading={overviewDisplayLoading}
+                  dailyAverageUsage={dailyAverageCardUsage}
+                  reserveDailyAverage={reserveDailyAverageCard}
                   sparklines={{
                     requests: requestsSparkline,
                     tokens: tokensSparkline,
@@ -1922,7 +1951,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   }}
                 />
 
-                <ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />
+                <RecentActivityPanel
+                  activity={activity}
+                  loading={activityLoading}
+                  error={activityError}
+                  window={activityWindow}
+                  windowIsCurrent={activityWindowIsCurrent}
+                  requestIdentity={activityRequestIdentity}
+                  onWindowChange={setActivityWindow}
+                />
 
                 <OverviewRealtimePanel
                   realtime={currentRealtime ?? undefined}
@@ -1940,7 +1977,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
             {activeTab === 'analysis' && (
               <>
                 {analysisError && <div className={styles.errorBox}>{analysisError}</div>}
-                <AnalysisPanel analysis={analysisData} loading={analysisLoading} isDark={isDark} isMobile={isMobile} />
+                <AnalysisPanel
+                  analysis={analysisData}
+                  loading={analysisLoading}
+                  latencyDiagnostics={analysisLatencyData}
+                  latencyLoading={analysisLatencyLoading}
+                  latencyError={analysisLatencyError}
+                  isDark={isDark}
+                  isMobile={isMobile}
+                />
               </>
             )}
 

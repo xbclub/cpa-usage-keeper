@@ -146,9 +146,6 @@ func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions
 			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
 		}
 	}
-	if err := CleanupUsageOverviewHealthStats(db, now); err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
-	}
 	// PostgreSQL 不需要 VACUUM（由 autovacuum 自动维护）。
 	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
 }

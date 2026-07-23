@@ -1,185 +1,30 @@
 package repository
 
 import (
-	"sort"
+	"fmt"
 	"strings"
-	"time"
 
-	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
 )
 
-// apiKeySummaryAccumulator 在概览聚合过程中累积每个 API Key 的用量汇总。
-type apiKeySummaryAccumulator struct {
-	items map[string]*dto.UsageOverviewAPIKeySummary
+// ListOverviewModelNamesWithFilter 是 fork-unique 的 /usage/models endpoint 仓储层实现。
+// 返回 DISTINCT model 列表，不受 model filter 影响（避免筛选时下拉框缩小）。
+func ListOverviewModelNamesWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]string, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+	query := applyUsageQueryWindow(queryUsageEvents(db), filter)
+	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
+		query = query.Where("api_group_key = ?", apiGroupKey)
+	}
+	var values []string
+	if err := query.Select("DISTINCT model").Where("model <> ''").Order("model ASC").Pluck("model", &values).Error; err != nil {
+		return nil, fmt.Errorf("load overview model names: %w", err)
+	}
+	return values, nil
 }
 
-func newAPIKeySummaryAccumulator() apiKeySummaryAccumulator {
-	return apiKeySummaryAccumulator{items: make(map[string]*dto.UsageOverviewAPIKeySummary)}
-}
-
-// accumulateHourlyStat 将小时 stat 行按 api_group_key 累积，并按 model 精确计算 cost。
-func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOverviewHourlyStat, costResolver *UsageCostResolver) {
-	key := strings.TrimSpace(row.APIGroupKey)
-	if key == "" {
-		return
-	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
-	item := a.items[key]
-	if item == nil {
-		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
-		a.items[key] = item
-	}
-	item.RequestCount += row.RequestCount
-	item.TotalTokens += row.TotalTokens
-	item.InputTokens += row.InputTokens
-	item.OutputTokens += row.OutputTokens
-	item.CacheReadTokens += row.CacheReadTokens
-	item.CacheCreationTokens += row.CacheCreationTokens
-	item.CostUSD += cost
-	if !costAvailable {
-		item.CostAvailable = false
-	}
-}
-
-// accumulateDailyStat 将天 stat 行按 api_group_key 累积，并按 model 精确计算 cost。
-func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOverviewDailyStat, costResolver *UsageCostResolver) {
-	key := strings.TrimSpace(row.APIGroupKey)
-	if key == "" {
-		return
-	}
-	cost, costAvailable := apiKeySummaryRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
-	item := a.items[key]
-	if item == nil {
-		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
-		a.items[key] = item
-	}
-	item.RequestCount += row.RequestCount
-	item.TotalTokens += row.TotalTokens
-	item.InputTokens += row.InputTokens
-	item.OutputTokens += row.OutputTokens
-	item.CacheReadTokens += row.CacheReadTokens
-	item.CacheCreationTokens += row.CacheCreationTokens
-	item.CostUSD += cost
-	if !costAvailable {
-		item.CostAvailable = false
-	}
-}
-
-// accumulateEvent 将边界原始事件按 api_group_key 累积。计价按真实 model 优先、缺价时回退 ModelAlias。
-func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, costResolver *UsageCostResolver) {
-	key := strings.TrimSpace(event.APIGroupKey)
-	if key == "" {
-		return
-	}
-	costResult := costResolver.CalculateEvent(event)
-	cost := costResult.Cost.TotalCostUSD
-	costAvailable := costResult.Available
-
-	item := a.items[key]
-	if item == nil {
-		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
-		a.items[key] = item
-	}
-	item.RequestCount++
-	item.TotalTokens += event.TotalTokens
-	item.InputTokens += event.InputTokens
-	item.OutputTokens += event.OutputTokens
-	item.CacheReadTokens += event.CacheReadTokens
-	item.CacheCreationTokens += event.CacheCreationTokens
-	item.CostUSD += cost
-	if !costAvailable {
-		item.CostAvailable = false
-	}
-}
-
-// toSlice 返回按请求数降序排列的汇总列表。
-func (a *apiKeySummaryAccumulator) toSlice() []dto.UsageOverviewAPIKeySummary {
-	result := make([]dto.UsageOverviewAPIKeySummary, 0, len(a.items))
-	for _, item := range a.items {
-		result = append(result, *item)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].RequestCount == result[j].RequestCount {
-			return result[i].APIGroupKey < result[j].APIGroupKey
-		}
-		return result[i].RequestCount > result[j].RequestCount
-	})
-	return result
-}
-
-// apiKeySummaryRowCost 按 model（缺价时回退 alias）计算单行 stat 的 cost。
-func apiKeySummaryRowCost(model string, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costResolver *UsageCostResolver) (float64, bool) {
-	result := costResolver.Calculate(UsageCostSubject{
-		Model:      model,
-		ModelAlias: modelAlias,
-		Tokens: helper.UsageTokenCostInput{
-			InputTokens:         inputTokens,
-			OutputTokens:        outputTokens,
-			CacheReadTokens:     cacheReadTokens,
-			CacheCreationTokens: cacheCreationTokens,
-		},
-	})
-	return result.Cost.TotalCostUSD, result.Available
-}
-
-// accumulateAPIKeySummaryFromOverview 独立执行 API Key 汇总累积，复用主 Overview 的 filter 和时间窗口逻辑。
-func accumulateAPIKeySummaryFromOverview(db *gorm.DB, overview *dto.UsageOverviewRecord, filter dto.UsageQueryFilter, costResolver *UsageCostResolver, recentCache *UsageRecentEventCache, acc *apiKeySummaryAccumulator) error {
-	queryNow := usageOverviewQueryNow(filter)
-	effectiveFilter := usageOverviewEffectiveFilter(filter, queryNow)
-
-	fullStart, fullEnd := usageOverviewFullHourWindow(*effectiveFilter.StartTime, *effectiveFilter.EndTime)
-	currentRight := usageOverviewCurrentRightBoundary(filter, queryNow)
-	rawEventWindows := usageOverviewRawEventWindows(effectiveFilter, overview.Health, fullStart, fullEnd, currentRight)
-
-	// 边界原始事件
-	boundaryEvents, err := loadUsageOverviewRawEventWindowsWithFilter(db, effectiveFilter, rawEventWindows, recentCache)
-	if err != nil {
-		return err
-	}
-	for _, event := range boundaryEvents {
-		if usageOverviewEventInsideWindow(event, fullStart, fullEnd) {
-			continue
-		}
-		acc.accumulateEvent(event, costResolver)
-	}
-
-	// 小时 / 天 stats
-	if fullEnd.After(fullStart) {
-		windowMinutes := computeWindowMinutes(effectiveFilter)
-		bucketByDay := shouldBucketUsageOverviewByDay(effectiveFilter, windowMinutes)
-		fullDayStart, fullDayEnd := usageOverviewFullDayWindow(fullStart, fullEnd)
-		if !bucketByDay || !fullDayEnd.After(fullDayStart) {
-			hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, fullStart, fullEnd)
-			if err != nil {
-				return err
-			}
-			for _, row := range hourlyRows {
-				acc.accumulateHourlyStat(row, costResolver)
-			}
-		} else {
-			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, effectiveFilter, fullDayStart, fullDayEnd)
-			if err != nil {
-				return err
-			}
-			for _, row := range dailyRows {
-				acc.accumulateDailyStat(row, costResolver)
-			}
-			for _, window := range []struct{ start, end time.Time }{{fullStart, fullDayStart}, {fullDayEnd, fullEnd}} {
-				if !window.end.After(window.start) {
-					continue
-				}
-				hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, window.start, window.end)
-				if err != nil {
-					return err
-				}
-				for _, row := range hourlyRows {
-					acc.accumulateHourlyStat(row, costResolver)
-				}
-			}
-		}
-	}
-	return nil
-}
+// usage_apikey_summary.go 原本是 fork-unique 的 API Key 汇总功能。
+// 上游 v1.13.6 重构了 stat projection 系统（usageOverviewStatProjection），
+// APIKeySummary accumulator 待后续适配新架构后恢复。

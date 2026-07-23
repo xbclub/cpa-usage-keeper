@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
@@ -48,8 +52,7 @@ func (s *usageService) resolveAPIGroupKey(ctx context.Context, apiKeyID string) 
 	return apiKey.APIKey, nil
 }
 
-// ListOverviewModels 是 fork-unique 的独立 /usage/models endpoint，返回 DISTINCT model 列表。
-// 模型列表不受 model filter 影响（避免筛选某模型时下拉框缩小到一项）。
+// ListOverviewModels 是 fork-unique 的独立 /usage/models endpoint。
 func (s *usageService) ListOverviewModels(_ context.Context, filter servicedto.UsageFilter) ([]string, error) {
 	apiGroupKey, err := s.resolveAPIGroupKey(context.Background(), filter.APIKeyID)
 	if err != nil {
@@ -62,7 +65,7 @@ func (s *usageService) ListOverviewModels(_ context.Context, filter servicedto.U
 	})
 }
 
-// Usage 页面中的 Overview tab 下传时间窗口和全局 API-Key，仓储层负责构建 overview 聚合。
+// Usage 页面里的 Overview tab 下传时间窗口和全局 API-Key，仓储层负责构建 overview 聚合。
 func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	ctx = usageServiceContext(ctx)
 	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
@@ -77,7 +80,6 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 		EndExclusive: filter.EndExclusive,
 		QueryNow:     filter.QueryNow,
 		APIGroupKey:  apiGroupKey,
-		Models:       filter.Models,
 	}, s.recentUsage)
 	if err != nil {
 		return nil, err
@@ -85,9 +87,6 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 	return &servicedto.UsageOverviewSnapshot{
 		Usage: overview.Usage,
 		Summary: servicedto.UsageOverviewSummary{
-			RequestCount:          overview.Summary.RequestCount,
-			TokenCount:            overview.Summary.TokenCount,
-			WindowMinutes:         overview.Summary.WindowMinutes,
 			RPM:                   overview.Summary.RPM,
 			TPM:                   overview.Summary.TPM,
 			TotalCost:             overview.Summary.TotalCost,
@@ -101,32 +100,140 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 			DailyAverageCost:      overview.Summary.DailyAverageCost,
 			DailyAverageRangeDays: overview.Summary.DailyAverageRangeDays,
 		},
-		Series: mapUsageOverviewSeries(overview.Series),
-		Health: servicedto.UsageOverviewHealth{
-			TotalSuccess:  overview.Health.TotalSuccess,
-			TotalFailure:  overview.Health.TotalFailure,
-			SuccessRate:   overview.Health.SuccessRate,
-			Rows:          overview.Health.Rows,
-			Columns:       overview.Health.Columns,
-			BucketSeconds: overview.Health.BucketSeconds,
-			WindowStart:   overview.Health.WindowStart,
-			WindowEnd:     overview.Health.WindowEnd,
-			BlockDetails: func() []servicedto.UsageOverviewHealthBlock {
-				blocks := make([]servicedto.UsageOverviewHealthBlock, 0, len(overview.Health.BlockDetails))
-				for _, block := range overview.Health.BlockDetails {
-					blocks = append(blocks, servicedto.UsageOverviewHealthBlock{
-						StartTime: block.StartTime,
-						EndTime:   block.EndTime,
-						Success:   block.Success,
-						Failure:   block.Failure,
-						Rate:      block.Rate,
-					})
-				}
-				return blocks
-			}(),
-		},
-		APIKeySummary: overview.APIKeySummary,
+		Series: mapUsageOverviewSeries(overview.Series, filter),
 	}, nil
+}
+
+// GetUsageActivity 用统一时间条件选择档位；today/yesterday 额外保留本地自然日边界。
+func (s *usageService) GetUsageActivity(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	ctx = usageServiceContext(ctx)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
+	window, err := usageActivityWindowForFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	grain, err := usageActivityGrain(window)
+	if err != nil {
+		return nil, err
+	}
+	referenceEnd := time.Time{}
+	if filter.QueryNow != nil {
+		referenceEnd = *filter.QueryNow
+	}
+	if referenceEnd.IsZero() {
+		referenceEnd = time.Now()
+	}
+	dataEnd := referenceEnd
+	if isUsageActivityCalendarDayFilter(filter) {
+		if filter.StartTime == nil {
+			return nil, fmt.Errorf("activity calendar window %q requires start time", filter.ActivityWindow)
+		}
+		// Today/Yesterday 只改变网格终点，仍复用普通 Activity 聚合查询。
+		referenceEnd = filter.StartTime.AddDate(0, 0, 1)
+	}
+	grid, err := repository.QueryUsageActivityGrid(ctx, s.db, grain, referenceEnd, dataEnd, apiGroupKey)
+	if err != nil {
+		return nil, err
+	}
+	result := &servicedto.UsageActivitySnapshot{
+		Window:              window,
+		Grain:               string(grid.Grain),
+		Rows:                grid.Rows,
+		Columns:             grid.Columns,
+		BucketSeconds:       grid.BucketSeconds,
+		WindowStart:         grid.WindowStart,
+		WindowEnd:           grid.WindowEnd,
+		TotalSuccess:        grid.TotalSuccess,
+		TotalFailure:        grid.TotalFailure,
+		InputTokens:         grid.InputTokens,
+		OutputTokens:        grid.OutputTokens,
+		ReasoningTokens:     grid.ReasoningTokens,
+		CacheReadTokens:     grid.CacheReadTokens,
+		CacheCreationTokens: grid.CacheCreationTokens,
+		TotalTokens:         grid.TotalTokens,
+		Blocks:              make([]servicedto.UsageActivityBlock, len(grid.Blocks)),
+	}
+	if total := result.TotalSuccess + result.TotalFailure; total > 0 {
+		result.SuccessRate = (float64(result.TotalSuccess) / float64(total)) * 100
+	}
+	for index, block := range grid.Blocks {
+		rate := -1.0
+		if total := block.SuccessCount + block.FailureCount; total > 0 {
+			rate = float64(block.SuccessCount) / float64(total)
+		}
+		result.Blocks[index] = servicedto.UsageActivityBlock{
+			StartTime:           block.StartTime,
+			EndTime:             block.EndTime,
+			Success:             block.SuccessCount,
+			Failure:             block.FailureCount,
+			Rate:                rate,
+			InputTokens:         block.InputTokens,
+			OutputTokens:        block.OutputTokens,
+			ReasoningTokens:     block.ReasoningTokens,
+			CacheReadTokens:     block.CacheReadTokens,
+			CacheCreationTokens: block.CacheCreationTokens,
+			TotalTokens:         block.TotalTokens,
+		}
+	}
+	return result, nil
+}
+
+func usageActivityWindowForFilter(filter servicedto.UsageFilter) (servicedto.UsageActivityWindow, error) {
+	// 显式 Activity 档位直接选择对应增量粒度；today/yesterday 随后归一化为 Day 视图。
+	switch filter.ActivityWindow {
+	case servicedto.UsageActivityWindowDay,
+		servicedto.UsageActivityWindowWeek,
+		servicedto.UsageActivityWindowMonth,
+		servicedto.UsageActivityWindowYear:
+		return filter.ActivityWindow, nil
+	}
+	if isUsageActivityCalendarDayFilter(filter) {
+		return servicedto.UsageActivityWindowDay, nil
+	}
+	switch filter.RangeUnit {
+	case "hour":
+		if filter.RangeCount < 1 {
+			break
+		}
+		return servicedto.UsageActivityWindowDay, nil
+	case "day":
+		switch {
+		case filter.Range == "custom" && filter.CustomUnit == "day":
+			return servicedto.UsageActivityWindowYear, nil
+		case filter.RangeCount == 1:
+			return servicedto.UsageActivityWindowDay, nil
+		case filter.RangeCount >= 2 && filter.RangeCount <= 7:
+			return servicedto.UsageActivityWindowWeek, nil
+		case filter.RangeCount >= 8 && filter.RangeCount <= 30:
+			return servicedto.UsageActivityWindowMonth, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported activity time range %q (%s:%d)", filter.Range, filter.RangeUnit, filter.RangeCount)
+}
+
+func isUsageActivityCalendarDayFilter(filter servicedto.UsageFilter) bool {
+	if filter.ActivityWindow == servicedto.UsageActivityWindowToday || filter.ActivityWindow == servicedto.UsageActivityWindowYesterday {
+		return true
+	}
+	return filter.Range == "today" || filter.Range == "yesterday"
+}
+
+func usageActivityGrain(window servicedto.UsageActivityWindow) (entities.UsageActivityGrain, error) {
+	switch window {
+	case servicedto.UsageActivityWindowDay:
+		return entities.UsageActivityGrainShort, nil
+	case servicedto.UsageActivityWindowWeek:
+		return entities.UsageActivityGrainMedium, nil
+	case servicedto.UsageActivityWindowMonth:
+		return entities.UsageActivityGrainLong, nil
+	case servicedto.UsageActivityWindowYear:
+		return entities.UsageActivityGrainDaily, nil
+	default:
+		return "", fmt.Errorf("unsupported activity window %q", window)
+	}
 }
 
 func (s *usageService) GetUsageOverviewRealtime(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
@@ -147,15 +254,90 @@ func (s *usageService) GetUsageOverviewRealtime(ctx context.Context, filter serv
 	return &result, nil
 }
 
-func mapUsageOverviewSeries(series repodto.UsageOverviewSeriesRecord) servicedto.UsageOverviewSeries {
-	return servicedto.UsageOverviewSeries{
-		Requests:      series.Requests,
-		Tokens:        series.Tokens,
-		RPM:           series.RPM,
-		TPM:           series.TPM,
-		Cost:          series.Cost,
-		CacheReadRate: series.CacheReadRate,
+const usageOverviewSeriesMaxPoints = 90
+
+func mapUsageOverviewSeries(series repodto.UsageOverviewSeriesRecord, filter servicedto.UsageFilter) servicedto.UsageOverviewSeries {
+	if len(series.Requests) == 0 {
+		return emptyUsageOverviewServiceSeries(0)
 	}
+	labels := usageOverviewSeriesLabels(series, filter)
+	if len(labels) <= usageOverviewSeriesMaxPoints {
+		return mapUsageOverviewSeriesLabels(series, labels)
+	}
+
+	result := emptyUsageOverviewServiceSeries(usageOverviewSeriesMaxPoints)
+	for index := 0; index < usageOverviewSeriesMaxPoints; index++ {
+		start := index * len(labels) / usageOverviewSeriesMaxPoints
+		end := (index + 1) * len(labels) / usageOverviewSeriesMaxPoints
+		group := labels[start:end]
+		bucket := group[0]
+		var requests, tokens, inputTokens, cacheReadTokens int64
+		var cost float64
+		for _, label := range group {
+			requests += series.Requests[label]
+			tokens += series.Tokens[label]
+			cost += series.Cost[label]
+			inputTokens += series.CacheReadRateInputTokens[label]
+			cacheReadTokens += series.CacheReadRateReadTokens[label]
+		}
+		minutes := float64(len(group) * 24 * 60)
+		result.Buckets = append(result.Buckets, bucket)
+		result.Requests = append(result.Requests, requests)
+		result.Tokens = append(result.Tokens, tokens)
+		result.RPM = append(result.RPM, float64(requests)/minutes)
+		result.TPM = append(result.TPM, float64(tokens)/minutes)
+		result.Cost = append(result.Cost, cost)
+		result.CacheReadRate = append(result.CacheReadRate, usageOverviewSeriesCacheRate(inputTokens, cacheReadTokens))
+	}
+	return result
+}
+
+func usageOverviewSeriesLabels(series repodto.UsageOverviewSeriesRecord, filter servicedto.UsageFilter) []string {
+	if filter.Range == "custom" && filter.CustomUnit == "day" && filter.RangeCount > 30 && filter.StartTime != nil && filter.EndTime != nil {
+		start := time.Date(filter.StartTime.Year(), filter.StartTime.Month(), filter.StartTime.Day(), 0, 0, 0, 0, time.Local)
+		end := time.Date(filter.EndTime.Year(), filter.EndTime.Month(), filter.EndTime.Day(), 0, 0, 0, 0, time.Local)
+		labels := make([]string, 0, filter.RangeCount)
+		for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
+			labels = append(labels, day.Format(time.DateOnly))
+		}
+		return labels
+	}
+	labels := make([]string, 0, len(series.Requests))
+	for label := range series.Requests {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+func mapUsageOverviewSeriesLabels(series repodto.UsageOverviewSeriesRecord, labels []string) servicedto.UsageOverviewSeries {
+	result := emptyUsageOverviewServiceSeries(len(labels))
+	for _, label := range labels {
+		result.Buckets = append(result.Buckets, label)
+		result.Requests = append(result.Requests, series.Requests[label])
+		result.Tokens = append(result.Tokens, series.Tokens[label])
+		result.RPM = append(result.RPM, series.RPM[label])
+		result.TPM = append(result.TPM, series.TPM[label])
+		result.Cost = append(result.Cost, series.Cost[label])
+		result.CacheReadRate = append(result.CacheReadRate, series.CacheReadRate[label])
+	}
+	return result
+}
+
+func emptyUsageOverviewServiceSeries(capacity int) servicedto.UsageOverviewSeries {
+	return servicedto.UsageOverviewSeries{
+		Buckets: make([]string, 0, capacity), Requests: make([]int64, 0, capacity), Tokens: make([]int64, 0, capacity),
+		RPM: make([]float64, 0, capacity), TPM: make([]float64, 0, capacity), Cost: make([]float64, 0, capacity),
+		CacheReadRate: make([]*float64, 0, capacity),
+	}
+}
+
+func usageOverviewSeriesCacheRate(inputTokens, cacheReadTokens int64) *float64 {
+	if inputTokens <= 0 {
+		return nil
+	}
+	value := float64(cacheReadTokens) / float64(inputTokens) * 100
+	return &value
 }
 
 func mapUsageOverviewRealtime(realtime repodto.UsageOverviewRealtimeRecord) servicedto.UsageOverviewRealtime {
@@ -304,12 +486,32 @@ func (s *usageService) GetAnalysis(ctx context.Context, filter servicedto.UsageF
 		EndTime:      filter.EndTime,
 		EndExclusive: filter.EndExclusive,
 		APIGroupKey:  apiGroupKey,
-		Models:       filter.Models,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return mapAnalysisRecord(record), nil
+}
+
+func (s *usageService) GetAnalysisLatency(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
+	ctx = usageServiceContext(ctx)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
+	record, err := repository.BuildAnalysisLatencyDiagnosticsWithFilter(s.db.WithContext(ctx), repodto.UsageQueryFilter{
+		Range:        filter.Range,
+		CustomUnit:   filter.CustomUnit,
+		StartTime:    filter.StartTime,
+		EndTime:      filter.EndTime,
+		EndExclusive: filter.EndExclusive,
+		APIGroupKey:  apiGroupKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := mapAnalysisLatencyDiagnosticsRecord(record)
+	return &result, nil
 }
 
 func mapAnalysisRecord(record *repodto.AnalysisRecord) *servicedto.AnalysisSnapshot {
@@ -381,24 +583,6 @@ func mapAnalysisRecord(record *repodto.AnalysisRecord) *servicedto.AnalysisSnaps
 			CacheReadRate:          item.CacheReadRate,
 		})
 	}
-	latencyPoints := make([]servicedto.AnalysisLatencyPoint, 0, len(record.LatencyDiagnostics.Points))
-	for _, point := range record.LatencyDiagnostics.Points {
-		latencyPoints = append(latencyPoints, servicedto.AnalysisLatencyPoint{
-			TTFTMS:    point.TTFTMS,
-			LatencyMS: point.LatencyMS,
-		})
-	}
-	latencyDensity := make([]servicedto.AnalysisLatencyDensityCell, 0, len(record.LatencyDiagnostics.Density))
-	for _, cell := range record.LatencyDiagnostics.Density {
-		latencyDensity = append(latencyDensity, servicedto.AnalysisLatencyDensityCell{
-			TTFTMinMS:    cell.TTFTMinMS,
-			TTFTMaxMS:    cell.TTFTMaxMS,
-			LatencyMinMS: cell.LatencyMinMS,
-			LatencyMaxMS: cell.LatencyMaxMS,
-			Count:        cell.Count,
-			Intensity:    cell.Intensity,
-		})
-	}
 	return &servicedto.AnalysisSnapshot{
 		Granularity:           servicedto.AnalysisGranularity(record.Granularity),
 		RangeStart:            record.RangeStart,
@@ -418,16 +602,37 @@ func mapAnalysisRecord(record *repodto.AnalysisRecord) *servicedto.AnalysisSnaps
 			CostAvailable:        record.CostBreakdown.CostAvailable,
 		},
 		ModelEfficiency: modelEfficiency,
-		LatencyDiagnostics: servicedto.AnalysisLatencyDiagnostics{
-			Points:       latencyPoints,
-			Density:      latencyDensity,
-			TotalPoints:  record.LatencyDiagnostics.TotalPoints,
-			Sampled:      record.LatencyDiagnostics.Sampled,
-			P95TTFTMS:    record.LatencyDiagnostics.P95TTFTMS,
-			P95LatencyMS: record.LatencyDiagnostics.P95LatencyMS,
-			MaxTTFTMS:    record.LatencyDiagnostics.MaxTTFTMS,
-			MaxLatencyMS: record.LatencyDiagnostics.MaxLatencyMS,
-		},
+	}
+}
+
+func mapAnalysisLatencyDiagnosticsRecord(record repodto.AnalysisLatencyDiagnosticsRecord) servicedto.AnalysisLatencyDiagnostics {
+	points := make([]servicedto.AnalysisLatencyPoint, 0, len(record.Points))
+	for _, point := range record.Points {
+		points = append(points, servicedto.AnalysisLatencyPoint{
+			TTFTMS:    point.TTFTMS,
+			LatencyMS: point.LatencyMS,
+		})
+	}
+	density := make([]servicedto.AnalysisLatencyDensityCell, 0, len(record.Density))
+	for _, cell := range record.Density {
+		density = append(density, servicedto.AnalysisLatencyDensityCell{
+			TTFTMinMS:    cell.TTFTMinMS,
+			TTFTMaxMS:    cell.TTFTMaxMS,
+			LatencyMinMS: cell.LatencyMinMS,
+			LatencyMaxMS: cell.LatencyMaxMS,
+			Count:        cell.Count,
+			Intensity:    cell.Intensity,
+		})
+	}
+	return servicedto.AnalysisLatencyDiagnostics{
+		Points:       points,
+		Density:      density,
+		TotalPoints:  record.TotalPoints,
+		Sampled:      record.Sampled,
+		P95TTFTMS:    record.P95TTFTMS,
+		P95LatencyMS: record.P95LatencyMS,
+		MaxTTFTMS:    record.MaxTTFTMS,
+		MaxLatencyMS: record.MaxLatencyMS,
 	}
 }
 
@@ -464,7 +669,6 @@ func (s *usageService) ListUsageEvents(ctx context.Context, filter servicedto.Us
 		Page:         filter.Page,
 		PageSize:     filter.PageSize,
 		Offset:       filter.Offset,
-		Models:       filter.Models,
 		Model:        filter.Model,
 		AuthIndex:    filter.AuthIndex,
 		APIGroupKey:  apiGroupKey,
@@ -505,7 +709,7 @@ func (s *usageService) ListUsageEvents(ctx context.Context, filter servicedto.Us
 			PricingStyle:        row.PricingStyle,
 		})
 	}
-	return &servicedto.UsageEventsPage{Events: result, Models: page.Models, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
+	return &servicedto.UsageEventsPage{Events: result, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
 }
 
 // StreamUsageEvents 使用 Request Event Log 相同筛选条件逐行导出，不应用分页。
@@ -521,7 +725,6 @@ func (s *usageService) StreamUsageEvents(ctx context.Context, filter servicedto.
 		StartTime:    filter.StartTime,
 		EndTime:      filter.EndTime,
 		EndExclusive: filter.EndExclusive,
-		Models:       filter.Models,
 		Model:        filter.Model,
 		AuthIndex:    filter.AuthIndex,
 		APIGroupKey:  apiGroupKey,

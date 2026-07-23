@@ -17,11 +17,20 @@ import (
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 // RecentUsageEventAppender 接收已提交入库的 usage_events，供最近窗口纯内存缓存异步维护。
 type RecentUsageEventAppender interface {
 	TryAppend([]entities.UsageEvent) bool
+}
+
+// UsageAggregationNotifier 把已提交 usage 或 identity 变化转成后台 runner 的非阻塞唤醒。
+type UsageAggregationNotifier interface {
+	// NotifyUsageEventsCommitted 只接收已经与 inbox processed 状态共同提交的事件和 snapshots。
+	NotifyUsageEventsCommitted(events []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot)
+	// NotifyUsageIdentitiesChanged 只在三类 metadata 持久化全部成功后发送 identity 变化信号。
+	NotifyUsageIdentitiesChanged()
 }
 
 const (
@@ -36,12 +45,15 @@ const (
 
 // SyncService 负责同步 CPA metadata，并处理已经落入本地 inbox 的 usage 原始消息。
 type SyncService struct {
-	db                        *gorm.DB
-	client                    CPAClientFetcher
-	metadataFetcher           MetadataFetcher
-	baseURL                   string
-	now                       func() time.Time
-	recentUsage               RecentUsageEventAppender
+	db              *gorm.DB
+	client          CPAClientFetcher
+	metadataFetcher MetadataFetcher
+	baseURL         string
+	now             func() time.Time
+	recentUsage     RecentUsageEventAppender
+	// usageAggregation 只接收提交后通知，不允许热路径同步调用聚合仓储函数。
+	usageAggregation UsageAggregationNotifier
+	// usageHeaderQuota 只供没有 aggregation notifier 的兼容构造路径保留原 header 投递语义。
 	usageHeaderQuota          quota.UsageHeaderSnapshotAppender
 	cleanupUsageEventsEnabled bool
 }
@@ -57,11 +69,14 @@ func NewSyncService(db *gorm.DB, cfg config.Config) *SyncService {
 
 // SyncServiceOptions 提供测试和局部调用需要替换的依赖。
 type SyncServiceOptions struct {
-	BaseURL                   string
-	Client                    CPAClientFetcher
-	MetadataFetcher           MetadataFetcher
-	Now                       func() time.Time
-	RecentUsageEvents         RecentUsageEventAppender
+	BaseURL           string
+	Client            CPAClientFetcher
+	MetadataFetcher   MetadataFetcher
+	Now               func() time.Time
+	RecentUsageEvents RecentUsageEventAppender
+	// UsageAggregationNotifier 注入 App 唯一的单 writer runner。
+	UsageAggregationNotifier UsageAggregationNotifier
+	// UsageHeaderQuota 保留旧兼容入口；生产 App 的 header gate 统一由 aggregation runner 管理。
 	UsageHeaderQuota          quota.UsageHeaderSnapshotAppender
 	CleanupUsageEventsEnabled bool
 }
@@ -77,12 +92,15 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 		metadataFetcher = opts.Client
 	}
 	return &SyncService{
-		db:                        db,
-		client:                    opts.Client,
-		metadataFetcher:           metadataFetcher,
-		baseURL:                   strings.TrimSpace(opts.BaseURL),
-		now:                       now,
-		recentUsage:               opts.RecentUsageEvents,
+		db:              db,
+		client:          opts.Client,
+		metadataFetcher: metadataFetcher,
+		baseURL:         strings.TrimSpace(opts.BaseURL),
+		now:             now,
+		recentUsage:     opts.RecentUsageEvents,
+		// 构造时只保存 notifier 接口，不启动额外 goroutine。
+		usageAggregation: opts.UsageAggregationNotifier,
+		// 兼容 appender 只在 notifier 为空时使用，禁止生产路径重复投递。
 		usageHeaderQuota:          opts.UsageHeaderQuota,
 		cleanupUsageEventsEnabled: opts.CleanupUsageEventsEnabled,
 	}
@@ -102,32 +120,41 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return nil, err
 	}
+	// 本操作虽然从 SELECT pending inbox 开始，但它决定随后 usage_events 与 processed 状态的原子写入。
+	// 使用局部 Write scope 让列表、identity 解析、失败回读和事务都只依赖唯一 writer；普通页面查询仍自动走 reader。
+	// Write clause 后重新创建 session，既保留 writer 选择，又保证每个仓储调用从干净 Statement 开始，不继承上一条查询条件。
+	writeDB := s.db.Clauses(dbresolver.Write).Session(&gorm.Session{Context: ctx})
 	fetchedAt := timeutil.NormalizeStorageTime(s.now())
 	// process_failed 也在这里重试，避免临时 SQLite 锁或短暂解析外问题导致数据永久卡住。
-	processableRows, err := repository.ListProcessableRedisUsageInbox(s.db, redisInboxProcessLimit)
+	processableRows, err := repository.ListProcessableRedisUsageInbox(writeDB, redisInboxProcessLimit)
 	if err != nil {
 		// 列表失败时没有可靠取出行，返回 0 行失败结果供 runner 保守等待。
 		return newRedisBatchSyncResult("failed", 0), fmt.Errorf("list processable redis usage inbox: %w", err)
 	}
 	if len(processableRows) == 0 {
-		// 空轮次先做轻量 cursor 检查，只有发现 usage_events 尚未聚合时才写派生统计。
-		pendingAggregation, err := repository.HasPendingUsageOverviewAggregation(ctx, s.db)
-		if err != nil {
-			// 空批聚合检查失败仍然是空结果，runner 需要按失败路径等待。
-			result := newRedisBatchSyncResult("failed", 0)
-			// Empty 明确告诉调用方本轮没有 inbox 行参与处理。
-			result.Empty = true
-			// 返回失败结果和原始错误，保持既有错误语义。
-			return result, err
-		}
-		if pendingAggregation {
-			if err := s.aggregateUsageEventStats(ctx, fetchedAt); err != nil {
-				// 空批补聚合失败仍然不代表 inbox 有积压，runner 保守等待下一轮。
+		// 没有 notifier 的既有构造路径继续使用 main 的空批 catch-up，不静默停止派生统计。
+		if s.usageAggregation == nil {
+			// Overview 与 Activity 各自检查独立全局 cursor，避免空批无条件扫描 identities。
+			pendingOverview, overviewErr := repository.HasPendingUsageOverviewAggregation(ctx, writeDB)
+			if overviewErr != nil {
 				result := newRedisBatchSyncResult("failed", 0)
-				// Empty 明确告诉调用方本轮没有 inbox 行参与处理。
 				result.Empty = true
-				// 返回失败结果和原始错误，保持既有错误语义。
-				return result, err
+				return result, overviewErr
+			}
+			// Activity 失败后可能出现 Overview 已追平而 Activity 独立落后的状态。
+			pendingActivity, activityErr := repository.HasPendingUsageActivityAggregation(ctx, writeDB)
+			if activityErr != nil {
+				result := newRedisBatchSyncResult("failed", 0)
+				result.Empty = true
+				return result, activityErr
+			}
+			// 任一全局 cursor 落后时运行兼容完整 catch-up，并保留旧错误返回语义。
+			if pendingOverview || pendingActivity {
+				if aggregateErr := s.aggregateUsageEventStatsFallback(ctx, writeDB, fetchedAt); aggregateErr != nil {
+					result := newRedisBatchSyncResult("failed", 0)
+					result.Empty = true
+					return result, aggregateErr
+				}
 			}
 		}
 		// 空批成功时返回 0 行结果，避免 runner 误判为需要连续 drain。
@@ -138,7 +165,7 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 		return result, nil
 	}
 	logrus.WithField("row_count", len(processableRows)).Debug("redis usage inbox rows found for processing")
-	return s.processRedisInboxRows(ctx, processableRows, fetchedAt)
+	return s.processRedisInboxRows(ctx, writeDB, processableRows, fetchedAt)
 }
 
 // CleanupRedisUsageInbox 只清理 Redis inbox 表，供测试和单独维护入口使用；每日任务使用 CleanupStorage 统一执行。
@@ -168,7 +195,7 @@ func (s *SyncService) CleanupStorage(ctx context.Context) error {
 
 // processRedisInboxRows 只从已落库的原始消息解码和写入事件，坏消息会标记为 decode_failed，不阻塞同批其它数据。
 // 可解码但入库失败的消息标记为 process_failed，后续 ProcessRedisUsageInbox 会按 id 顺序重试。
-func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []entities.RedisUsageInbox, fetchedAt time.Time) (*servicedto.RedisBatchSyncResult, error) {
+func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.DB, inboxRows []entities.RedisUsageInbox, fetchedAt time.Time) (*servicedto.RedisBatchSyncResult, error) {
 	logrus.WithField("row_count", len(inboxRows)).Debug("redis usage inbox processing started")
 	// processedRows 记录本轮实际取出的原始 inbox 行数，包含后续 decode_failed/process_failed 行。
 	processedRows := len(inboxRows)
@@ -182,7 +209,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		event, _, snapshot, decodeErr := DecodeRedisUsageMessageWithHeaders(row.RawMessage, fetchedAt)
 		if decodeErr != nil {
 			logrus.WithError(decodeErr).WithField("inbox_id", row.ID).Error("redis usage message decode failed")
-			if markErr := repository.MarkRedisUsageInboxDecodeFailed(s.db, row.ID, decodeErr); markErr != nil {
+			if markErr := repository.MarkRedisUsageInboxDecodeFailed(writeDB, row.ID, decodeErr); markErr != nil {
 				// 标记坏消息失败时保留本轮已取行数，runner 仍按真正失败路径等待。
 				return newRedisBatchSyncResult("failed", processedRows), fmt.Errorf("mark redis usage inbox decode failed: %w", markErr)
 			}
@@ -212,7 +239,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		return result, nil
 	}
 	// executor-first 归一化会保留已知 executor 的 ready 结果，并只为 unresolved 事件查询 identity。
-	normalizedItems, unresolvedIndexes, typeErr := normalizeRedisUsageEventsDetailed(ctx, s.db, events)
+	normalizedItems, unresolvedIndexes, typeErr := normalizeRedisUsageEventsDetailed(ctx, writeDB, events)
 	readyRows := make([]entities.RedisUsageInbox, 0, len(events))
 	readyEvents := make([]entities.UsageEvent, 0, len(events))
 	headerSnapshots := make([]quota.UsageHeaderSnapshot, 0, len(events))
@@ -236,7 +263,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		for _, index := range unresolvedIndexes {
 			unresolvedRows = append(unresolvedRows, validRows[index])
 		}
-		failureCounts = markRedisInboxRowsProcessFailed(s.db, unresolvedRows, typeErr)
+		failureCounts = markRedisInboxRowsProcessFailed(writeDB, unresolvedRows, typeErr)
 		if len(readyEvents) == 0 {
 			// 本批没有任何可独立提交的 ready 事件时保持原有 failed 语义，等待 unresolved 重试。
 			logTokenProcessingBatch(normalizedItems, "failed", processedRows, 0, len(decodeErrs), failureCounts)
@@ -255,7 +282,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 	// usage_events 入库和 inbox processed 标记必须同事务提交，避免标记失败后同一 inbox 重试造成重复事件。
 	logrus.WithField("event_count", len(events)).Debug("redis usage events persistence started")
 	var result *servicedto.SyncResult
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := writeDB.Transaction(func(tx *gorm.DB) error {
 		var persistErr error
 		result, persistErr = s.persistRedisUsageEvents(tx, events)
 		if persistErr != nil {
@@ -272,7 +299,7 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 	// 事务错误或未产出持久化结果时统一走失败路径，避免两个等价分支后续漂移。
 	if err != nil || result == nil {
 		// 有具体错误时把可重试行标成 process_failed，异常空结果也复用同一保守返回。
-		readyFailures := markRedisInboxRowsProcessFailed(s.db, validRows, err)
+		readyFailures := markRedisInboxRowsProcessFailed(writeDB, validRows, err)
 		failureCounts = failureCounts.add(readyFailures)
 		// 失败返回仍保留本轮已取行数，但不允许 runner 立即忙循环。
 		logTokenProcessingBatch(normalizedItems, "failed", processedRows, 0, len(decodeErrs), failureCounts)
@@ -291,22 +318,25 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 			// 缓存队列满只影响 realtime/边界缓存的新鲜度，不能反向阻塞或回滚写入链路。
 			logrus.WithField("event_count", len(events)).Warn("recent usage event cache append skipped")
 		}
-		// Redis process 是 usage_events 的高频写入入口，成功插入后串行刷新依赖事件表的增量统计。
-		if err := s.aggregateUsageEventStats(ctx, timeutil.NormalizeStorageTime(s.now())); err != nil {
-			// 聚合失败时保留本轮已取行数，但保持失败路径的保守等待。
-			logTokenProcessingBatch(normalizedItems, "failed", processedRows, result.InsertedEvents, len(decodeErrs), failureCounts)
-			failureResult := newRedisBatchSyncResult("failed", processedRows)
-			// 同批 unresolved 状态若仍可重试或无法确认，失败结果继续携带保守等待信号。
-			failureResult.RetryPending = failureCounts.requiresRetryWait()
-			// 已确认丢弃由逐行日志负责，runner 不得对同一终态再次输出批次错误。
-			failureResult.DiscardedRows = failureCounts.discarded
-			return failureResult, err
-		}
-		// header quota 需要复用窗口 token/cost 兜底统计，因此必须在 usage overview 聚合追平后再通知 worker。
+		// 同批 header snapshots 先保持既有 auth_index 去重语义，减少 runner 内存合并输入。
 		headerSnapshots = coalesceUsageHeaderSnapshotsByAuthIndex(headerSnapshots)
-		if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
-			// header worker 队列满只影响 quota cache 新鲜度，不能影响 usage_events 写入成功。
-			logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
+		// usage 与 inbox 状态已经提交后，生产 notifier 只更新内存目标并立即返回。
+		if s.usageAggregation != nil {
+			// runner 用已回填自增 ID 的 events 建立 Overview checkpoint gate。
+			s.usageAggregation.NotifyUsageEventsCommitted(events, headerSnapshots)
+		} else {
+			// 没有 notifier 的兼容构造路径恢复 main 的同步聚合结果。
+			if aggregateErr := s.aggregateUsageEventStatsFallback(ctx, writeDB, timeutil.NormalizeStorageTime(s.now())); aggregateErr != nil {
+				logTokenProcessingBatch(normalizedItems, "failed", processedRows, result.InsertedEvents, len(decodeErrs), failureCounts)
+				failureResult := newRedisBatchSyncResult("failed", processedRows)
+				failureResult.RetryPending = failureCounts.requiresRetryWait()
+				failureResult.DiscardedRows = failureCounts.discarded
+				return failureResult, aggregateErr
+			}
+			// 兼容 appender 只在旧聚合已经追平后接收 header snapshots。
+			if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
+				logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
+			}
 		}
 	}
 	logrus.WithFields(logrus.Fields{
@@ -741,14 +771,21 @@ func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeRes
 	}
 }
 
-// aggregateUsageEventStats 串行追平 usage_events 派生统计；空 inbox 时也调用它补偿上次失败的聚合。
-func (s *SyncService) aggregateUsageEventStats(ctx context.Context, now time.Time) error {
-	if err := repository.AggregateUsageIdentityStats(ctx, s.db, now); err != nil {
+// aggregateUsageEventStatsFallback 只供未注入后台 notifier 的兼容构造路径保留 main 聚合语义。
+func (s *SyncService) aggregateUsageEventStatsFallback(ctx context.Context, writeDB *gorm.DB, now time.Time) error {
+	// Identity 继续保持 main 的第一执行顺序和每行 cursor 语义。
+	if err := repository.AggregateUsageIdentityStats(ctx, writeDB, now); err != nil {
 		return fmt.Errorf("aggregate usage identity stats after redis inbox processing: %w", err)
 	}
-	if err := repository.AggregateUsageOverviewStats(ctx, s.db, now); err != nil {
+	// Overview 继续维护旧 hourly/daily、cached_tokens 和原 checkpoint。
+	if err := repository.AggregateUsageOverviewStats(ctx, writeDB, now); err != nil {
 		return fmt.Errorf("aggregate usage overview stats after redis inbox processing: %w", err)
 	}
+	// Activity 是 PR1 新增结果，兼容路径也必须推进自己的独立 checkpoint。
+	if err := repository.AggregateUsageActivityStats(ctx, writeDB, now); err != nil {
+		return fmt.Errorf("aggregate usage activity stats after redis inbox processing: %w", err)
+	}
+	// 三类完整 catch-up 均成功后返回。
 	return nil
 }
 

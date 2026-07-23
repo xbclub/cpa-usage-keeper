@@ -14,19 +14,18 @@ import (
 )
 
 type analysisResponse struct {
-	Granularity           string                     `json:"granularity"`
-	Timezone              string                     `json:"timezone"`
-	RangeStart            *time.Time                 `json:"range_start,omitempty"`
-	RangeEnd              *time.Time                 `json:"range_end,omitempty"`
-	TokenUsage            []analysisTokenUsage       `json:"token_usage"`
-	APIKeyComposition     []analysisCompositionItem  `json:"api_key_composition"`
-	ModelComposition      []analysisCompositionItem  `json:"model_composition"`
-	AuthFilesComposition  []analysisCompositionItem  `json:"auth_files_composition"`
-	AIProviderComposition []analysisCompositionItem  `json:"ai_provider_composition"`
-	Heatmap               analysisHeatmap            `json:"heatmap"`
-	CostBreakdown         analysisCostBreakdown      `json:"cost_breakdown"`
-	ModelEfficiency       []analysisModelEfficiency  `json:"model_efficiency"`
-	LatencyDiagnostics    analysisLatencyDiagnostics `json:"latency_diagnostics"`
+	Granularity           string                    `json:"granularity"`
+	Timezone              string                    `json:"timezone"`
+	RangeStart            *time.Time                `json:"range_start,omitempty"`
+	RangeEnd              *time.Time                `json:"range_end,omitempty"`
+	TokenUsage            []analysisTokenUsage      `json:"token_usage"`
+	APIKeyComposition     []analysisCompositionItem `json:"api_key_composition"`
+	ModelComposition      []analysisCompositionItem `json:"model_composition"`
+	AuthFilesComposition  []analysisCompositionItem `json:"auth_files_composition"`
+	AIProviderComposition []analysisCompositionItem `json:"ai_provider_composition"`
+	Heatmap               analysisHeatmap           `json:"heatmap"`
+	CostBreakdown         analysisCostBreakdown     `json:"cost_breakdown"`
+	ModelEfficiency       []analysisModelEfficiency `json:"model_efficiency"`
 }
 
 type analysisTokenUsage struct {
@@ -119,15 +118,19 @@ type analysisLatencyDensityCell struct {
 }
 
 type analysisLatencyDiagnostics struct {
-	Points       []analysisLatencyPoint       `json:"points"`
-	Density      []analysisLatencyDensityCell `json:"density"`
-	TotalPoints  int64                        `json:"total_points"`
-	Sampled      bool                         `json:"sampled"`
-	P95TTFTMS    int64                        `json:"p95_ttft_ms"`
-	P95LatencyMS int64                        `json:"p95_latency_ms"`
-	MaxTTFTMS    int64                        `json:"max_ttft_ms"`
-	MaxLatencyMS int64                        `json:"max_latency_ms"`
+	Supported         bool                         `json:"supported"`
+	UnsupportedReason string                       `json:"unsupported_reason,omitempty"`
+	Points            []analysisLatencyPoint       `json:"points"`
+	Density           []analysisLatencyDensityCell `json:"density"`
+	TotalPoints       int64                        `json:"total_points"`
+	Sampled           bool                         `json:"sampled"`
+	P95TTFTMS         int64                        `json:"p95_ttft_ms"`
+	P95LatencyMS      int64                        `json:"p95_latency_ms"`
+	MaxTTFTMS         int64                        `json:"max_ttft_ms"`
+	MaxLatencyMS      int64                        `json:"max_latency_ms"`
 }
+
+const analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays = "range_outside_recent_30_days"
 
 type analysisAPIKeyInfo struct {
 	ID    string
@@ -141,9 +144,9 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		filter, err := parseUsageFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 
@@ -159,6 +162,35 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 
 		c.JSON(http.StatusOK, buildAnalysisPayload(analysis, apiKeyInfos))
 	})
+
+	router.GET("/usage/analysis/latency", func(c *gin.Context) {
+		if usageProvider == nil {
+			c.JSON(http.StatusOK, emptyAnalysisLatencyDiagnosticsResponse())
+			return
+		}
+
+		queryNow := timeutil.NormalizeStorageTime(time.Now())
+		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, queryNow)
+		if err != nil {
+			writeUsageFilterParseError(c, err)
+			return
+		}
+		if !analysisLatencyRangeSupported(filter, queryNow) {
+			c.JSON(http.StatusOK, unsupportedAnalysisLatencyDiagnosticsResponse())
+			return
+		}
+
+		latency, err := usageProvider.GetAnalysisLatency(c.Request.Context(), filter)
+		if err != nil {
+			writeInternalError(c, "get analysis latency failed", err)
+			return
+		}
+		if latency == nil {
+			c.JSON(http.StatusOK, emptyAnalysisLatencyDiagnosticsResponse())
+			return
+		}
+		c.JSON(http.StatusOK, buildAnalysisLatencyDiagnosticsPayload(*latency))
+	})
 }
 
 func emptyAnalysisResponse() analysisResponse {
@@ -173,8 +205,29 @@ func emptyAnalysisResponse() analysisResponse {
 		Heatmap:               analysisHeatmap{APIKeys: []string{}, APIKeyLabels: map[string]string{}, Models: []string{}, Cells: []analysisHeatmapCell{}},
 		CostBreakdown:         analysisCostBreakdown{CostAvailable: true},
 		ModelEfficiency:       []analysisModelEfficiency{},
-		LatencyDiagnostics:    analysisLatencyDiagnostics{Points: []analysisLatencyPoint{}, Density: []analysisLatencyDensityCell{}},
 	}
+}
+
+func emptyAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
+	return analysisLatencyDiagnostics{Supported: true, Points: []analysisLatencyPoint{}, Density: []analysisLatencyDensityCell{}}
+}
+
+func unsupportedAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
+	response := emptyAnalysisLatencyDiagnosticsResponse()
+	response.Supported = false
+	response.UnsupportedReason = analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays
+	return response
+}
+
+// Latency 依赖 raw usage_events；Custom 日范围必须完整落在最近 30 个自然日内。
+func analysisLatencyRangeSupported(filter servicedto.UsageFilter, anchor time.Time) bool {
+	if filter.Range != "custom" || filter.CustomUnit != "day" || filter.StartTime == nil {
+		return true
+	}
+	localAnchor := timeutil.NormalizeStorageTime(anchor)
+	today := time.Date(localAnchor.Year(), localAnchor.Month(), localAnchor.Day(), 0, 0, 0, 0, time.Local)
+	start := timeutil.NormalizeStorageTime(*filter.StartTime)
+	return !start.Before(today.AddDate(0, 0, -29))
 }
 
 func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map[string]analysisAPIKeyInfo, error) {
@@ -238,8 +291,7 @@ func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map
 			TotalCostUSD:         snapshot.CostBreakdown.TotalCostUSD,
 			CostAvailable:        snapshot.CostBreakdown.CostAvailable,
 		},
-		ModelEfficiency:    buildAnalysisModelEfficiencyPayload(snapshot.ModelEfficiency),
-		LatencyDiagnostics: buildAnalysisLatencyDiagnosticsPayload(snapshot.LatencyDiagnostics),
+		ModelEfficiency: buildAnalysisModelEfficiencyPayload(snapshot.ModelEfficiency),
 	}
 }
 
@@ -263,6 +315,7 @@ func buildAnalysisLatencyDiagnosticsPayload(diagnostics servicedto.AnalysisLaten
 		})
 	}
 	return analysisLatencyDiagnostics{
+		Supported:    true,
 		Points:       points,
 		Density:      density,
 		TotalPoints:  diagnostics.TotalPoints,

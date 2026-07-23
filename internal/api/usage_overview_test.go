@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +32,10 @@ func (s *usageFilterStub) GetUsageOverview(_ context.Context, filter servicedto.
 	return s.overview, s.err
 }
 
+func (s *usageFilterStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, s.err
+}
+
 func (s *usageFilterStub) GetUsageOverviewRealtime(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
 	s.lastRealtime = filter
 	s.realtimeCalls++
@@ -55,6 +58,10 @@ func (s *usageFilterStub) GetAnalysis(context.Context, servicedto.UsageFilter) (
 	return nil, s.err
 }
 
+func (s *usageFilterStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
+	return nil, s.err
+}
+
 func (s *usageFilterStub) ListOverviewModels(context.Context, servicedto.UsageFilter) ([]string, error) {
 	return nil, s.err
 }
@@ -68,7 +75,7 @@ func mustParseTime(t *testing.T, value string) time.Time {
 	return parsed
 }
 
-func TestKeyOverviewForcesViewerAPIKeyIDAndReturnsOverview(t *testing.T) {
+func TestKeyOverviewIgnoresClientAPIKeyIDAndReturnsViewerOverview(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	token, _, err := sessions.CreateAPIKeyViewer(42)
 	if err != nil {
@@ -80,7 +87,7 @@ func TestKeyOverviewForcesViewerAPIKeyIDAndReturnsOverview(t *testing.T) {
 	router := NewRouter(nil, nil, provider, nil, config, NewAuthHandler(config, sessions), "", OptionalProviders{CPAAPIKeys: keyProvider})
 
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/key-overview?range=24h&api_key_id=999", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/key-overview?range=24h&api_key_id=not-a-number", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	router.ServeHTTP(resp, req)
 
@@ -95,7 +102,7 @@ func TestKeyOverviewForcesViewerAPIKeyIDAndReturnsOverview(t *testing.T) {
 	}
 }
 
-func TestKeyOverviewRealtimeForcesViewerAPIKeyIDAndAllowsParallelOverviewRequest(t *testing.T) {
+func TestKeyOverviewRealtimeIgnoresClientAPIKeyIDAndAllowsParallelOverviewRequest(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	token, _, err := sessions.CreateAPIKeyViewer(42)
 	if err != nil {
@@ -126,7 +133,7 @@ func TestKeyOverviewRealtimeForcesViewerAPIKeyIDAndAllowsParallelOverviewRequest
 	}
 
 	realtimeResp := httptest.NewRecorder()
-	realtimeReq := httptest.NewRequest(http.MethodGet, "/api/v1/key-overview/realtime?window=60m&api_key_id=999", nil)
+	realtimeReq := httptest.NewRequest(http.MethodGet, "/api/v1/key-overview/realtime?window=60m&api_key_id=not-a-number", nil)
 	realtimeReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	router.ServeHTTP(realtimeResp, realtimeReq)
 
@@ -178,6 +185,30 @@ func TestKeyOverviewRejectsUnsupportedRanges(t *testing.T) {
 	}
 	if provider.overviewCalls != 0 {
 		t.Fatalf("expected invalid ranges not to call usage provider, got %d", provider.overviewCalls)
+	}
+}
+
+func TestKeyOverviewReturnsConflictForExpiredCustomRange(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	token, _, err := sessions.CreateAPIKeyViewer(42)
+	if err != nil {
+		t.Fatalf("CreateAPIKeyViewer returned error: %v", err)
+	}
+	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{}}
+	keyProvider := &authCPAAPIKeyStub{row: entities.CPAAPIKey{ID: 42, DisplayKey: "sk-*********live"}}
+	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}
+	router := NewRouter(nil, nil, provider, nil, config, NewAuthHandler(config, sessions), "", OptionalProviders{CPAAPIKeys: keyProvider})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/key-overview?range=custom&unit=day&start=2000-01-01&end=2000-01-02", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected expired Custom range to return 409, got %d %s", resp.Code, resp.Body.String())
+	}
+	if provider.overviewCalls != 0 {
+		t.Fatalf("expected expired range not to call usage provider, got %d", provider.overviewCalls)
 	}
 }
 
@@ -239,7 +270,7 @@ func TestKeyOverviewClearsInactiveViewerSession(t *testing.T) {
 	}
 }
 
-func TestUsageOverviewResponseIncludesResolvedRangeAndTimezone(t *testing.T) {
+func TestUsageOverviewResponseKeepsResolvedFilterAndTimezone(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -263,11 +294,13 @@ func TestUsageOverviewResponseIncludesResolvedRangeAndTimezone(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
-	expectedStart := startDay.Format(time.RFC3339Nano)
-	expectedEnd := today.AddDate(0, 0, 1).Format(time.RFC3339Nano)
 	body := resp.Body.String()
-	if !contains(body, `"timezone":"Asia/Shanghai"`) || !contains(body, `"range_start":"`+expectedStart+`"`) || !contains(body, `"range_end":"`+expectedEnd+`"`) {
-		t.Fatalf("expected overview response to include resolved range and timezone, got %s", body)
+	if !contains(body, `"timezone":"Asia/Shanghai"`) || contains(body, `"range_start":`) || contains(body, `"range_end":`) {
+		t.Fatalf("expected overview response to retain timezone without redundant range fields, got %s", body)
+	}
+	if provider.lastFilter.StartTime == nil || !provider.lastFilter.StartTime.Equal(startDay) ||
+		provider.lastFilter.EndTime == nil || !provider.lastFilter.EndTime.Equal(today.AddDate(0, 0, 1)) {
+		t.Fatalf("expected resolved range to remain in the service filter, got %+v", provider.lastFilter)
 	}
 }
 
@@ -539,9 +572,6 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			TotalTokens:   20,
 		},
 		Summary: servicedto.UsageOverviewSummary{
-			RequestCount:        1,
-			TokenCount:          20,
-			WindowMinutes:       1440,
 			RPM:                 1.0 / 1440.0,
 			TPM:                 20.0 / 1440.0,
 			TotalCost:           0.123,
@@ -552,24 +582,13 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			ReasoningTokens:     3,
 		},
 		Series: servicedto.UsageOverviewSeries{
-			Requests:      map[string]int64{"2026-04-22T11:00:00Z": 1},
-			Tokens:        map[string]int64{"2026-04-22T11:00:00Z": 20},
-			RPM:           map[string]float64{"2026-04-22T11:00:00Z": 1.0 / 60.0},
-			TPM:           map[string]float64{"2026-04-22T11:00:00Z": 20.0 / 60.0},
-			Cost:          map[string]float64{"2026-04-22T11:00:00Z": 0.123},
-			CacheReadRate: map[string]*float64{"2026-04-22T11:00:00Z": float64Ptr(18.18)},
-		},
-		Health: servicedto.UsageOverviewHealth{
-			TotalSuccess: 1,
-			TotalFailure: 0,
-			SuccessRate:  100,
-			BlockDetails: []servicedto.UsageOverviewHealthBlock{{
-				StartTime: mustParseTime(t, "2026-04-22T11:00:00Z"),
-				EndTime:   mustParseTime(t, "2026-04-22T11:15:00Z"),
-				Success:   1,
-				Failure:   0,
-				Rate:      1,
-			}},
+			Buckets:       []string{"2026-04-22T11:00:00Z"},
+			Requests:      []int64{1},
+			Tokens:        []int64{20},
+			RPM:           []float64{1.0 / 60.0},
+			TPM:           []float64{20.0 / 60.0},
+			Cost:          []float64{0.123},
+			CacheReadRate: []*float64{float64Ptr(18.18)},
 		},
 	}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
@@ -585,7 +604,7 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 	if !contains(body, `"usage":`) || !contains(body, `"total_requests":1`) {
 		t.Fatalf("unexpected response body: %s", body)
 	}
-	if !contains(body, `"summary":{"request_count":1,"token_count":20`) {
+	if !contains(body, `"summary":{"rpm":`) {
 		t.Fatalf("expected backend summary in response body: %s", body)
 	}
 	if !contains(body, `"cost_available":true`) {
@@ -594,15 +613,14 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 	if !contains(body, `"input_tokens":11`) {
 		t.Fatalf("expected summary input tokens in response body: %s", body)
 	}
-	if !contains(body, `"series":{"requests":{"2026-04-22T11:00:00Z":1}`) {
+	if !contains(body, `"series":{"buckets":["2026-04-22T11:00:00Z"],"requests":[1]`) {
 		t.Fatalf("expected backend series in response body: %s", body)
 	}
-	if !contains(body, `"cache_read_rate":{"2026-04-22T11:00:00Z":18.18}`) {
+	if !contains(body, `"cache_read_rate":[18.18]`) {
 		t.Fatalf("expected backend cache-rate series in response body: %s", body)
 	}
-	if !contains(body, `"service_health":{"total_success":1,"total_failure":0,"success_rate":100`) ||
-		!contains(body, `"block_details":[{"start_time":"2026-04-22T11:00:00Z","end_time":"2026-04-22T11:15:00Z","success":1,"failure":0,"rate":1}]`) {
-		t.Fatalf("expected service health in response body: %s", body)
+	if contains(body, `"service_health":`) {
+		t.Fatalf("expected overview response to omit Activity health: %s", body)
 	}
 	assertUsageOverviewResponseShape(t, body)
 	if contains(body, `"details":`) {
@@ -630,9 +648,6 @@ func TestUsageOverviewReturnsDailyAverageSummaryFields(t *testing.T) {
 			TotalTokens:   7000000,
 		},
 		Summary: servicedto.UsageOverviewSummary{
-			RequestCount:          14,
-			TokenCount:            7000000,
-			WindowMinutes:         10080,
 			RPM:                   14.0 / 10080.0,
 			TPM:                   7000000.0 / 10080.0,
 			TotalCost:             56.49,
@@ -674,10 +689,10 @@ func TestUsageOverviewNilProviderReturnsPrunedShape(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"summary":{"request_count":0`) || !contains(body, `"input_tokens":0`) {
+	if !contains(body, `"summary":{"rpm":0`) || !contains(body, `"input_tokens":0`) {
 		t.Fatalf("expected empty overview summary to include input_tokens, got %s", body)
 	}
-	if !contains(body, `"series":{"requests":{}`) || !contains(body, `"cache_read_rate":{}`) {
+	if !contains(body, `"series":{"buckets":[]`) || !contains(body, `"cache_read_rate":[]`) {
 		t.Fatalf("expected empty overview series to include cache_read_rate, got %s", body)
 	}
 	assertUsageOverviewResponseShape(t, body)
@@ -689,8 +704,7 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 		t.Fatalf("failed to decode overview response: %v\n%s", err, body)
 	}
-	// api_key_summary 是 fork-unique 字段（ApiKeySummaryTable 用），需加入白名单
-	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "service_health", "api_key_summary", "timezone", "range_start", "range_end")
+	assertAllowedJSONKeys(t, decoded, "overview response", body, "usage", "summary", "series", "timezone")
 
 	usage, ok := decoded["usage"].(map[string]any)
 	if !ok {
@@ -703,7 +717,7 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 		t.Fatalf("expected summary object in response, got %s", body)
 	}
 	assertAllowedJSONKeys(t, summary, "overview summary", body,
-		"request_count", "token_count", "window_minutes", "rpm", "tpm", "total_cost", "cost_available",
+		"rpm", "tpm", "total_cost", "cost_available",
 		"input_tokens", "cache_read_tokens", "cache_creation_tokens", "reasoning_tokens",
 		"daily_average_requests", "daily_average_tokens", "daily_average_cost", "daily_average_range_days",
 	)
@@ -712,7 +726,8 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 	if !ok {
 		t.Fatalf("expected series object in response, got %s", body)
 	}
-	assertAllowedJSONKeys(t, series, "overview series", body, "requests", "tokens", "rpm", "tpm", "cost", "cache_read_rate")
+	assertAllowedJSONKeys(t, series, "overview series", body, "buckets", "requests", "tokens", "rpm", "tpm", "cost", "cache_read_rate")
+
 }
 
 func assertAllowedJSONKeys(t *testing.T, values map[string]any, label, body string, allowedKeys ...string) {
@@ -733,49 +748,4 @@ func float64Ptr(value float64) *float64 {
 
 func int64Ptr(value int64) *int64 {
 	return &value
-}
-
-// TestUsageOverviewSerializesAPIKeySummaryWithRedaction 是 fork-unique ApiKeySummaryTable 的防回归测试：
-// 验证 overview response 的 api_key_summary 字段存在、包含数据行，且 api_key 已用 helper.RedactSensitiveValue 脱敏
-// （后端脱敏，前端不再二次遮罩 —— Step 4.5 #2/#12）。
-func TestUsageOverviewSerializesAPIKeySummaryWithRedaction(t *testing.T) {
-	config := AuthConfig{Enabled: false}
-	sessions := auth.NewSessionManager(0)
-	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{
-		APIKeySummary: []dto.UsageOverviewAPIKeySummary{
-			{APIGroupKey: "sk-supersecretkey1234567890", RequestCount: 5, TotalTokens: 100, CostUSD: 0.5, CostAvailable: true},
-		},
-	}}
-	router := NewRouter(nil, nil, provider, nil, config, NewAuthHandler(config, sessions), "")
-
-	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview?range=8h", nil)
-	router.ServeHTTP(resp, req)
-
-	var decoded struct {
-		APIKeySummary []struct {
-			APIKey        string  `json:"api_key"`
-			RequestCount  int64   `json:"request_count"`
-			TotalTokens   int64   `json:"total_tokens"`
-			CostUSD       float64 `json:"cost_usd"`
-			CostAvailable bool    `json:"cost_available"`
-		} `json:"api_key_summary"`
-	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &decoded); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, resp.Body.String())
-	}
-	if len(decoded.APIKeySummary) != 1 {
-		t.Fatalf("expected 1 api_key_summary row, got %d", len(decoded.APIKeySummary))
-	}
-	row := decoded.APIKeySummary[0]
-	// 脱敏后 api_key 不应是原始 key（sk-... 应被遮罩成 sk-*********7890）
-	if row.APIKey == "sk-supersecretkey1234567890" {
-		t.Fatalf("api_key not redacted: %s", row.APIKey)
-	}
-	if !strings.Contains(row.APIKey, "*") {
-		t.Fatalf("api_key should contain mask characters, got: %s", row.APIKey)
-	}
-	if row.RequestCount != 5 || row.TotalTokens != 100 {
-		t.Fatalf("unexpected row values: %+v", row)
-	}
 }

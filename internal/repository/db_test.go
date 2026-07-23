@@ -318,12 +318,6 @@ func TestCleanupStorageCleansRedisInboxAndHealthStats(t *testing.T) {
 	if err := db.Model(&entities.RedisUsageInbox{}).Where("id = ?", inboxRows[0].ID).Updates(map[string]any{"status": RedisUsageInboxStatusProcessed, "processed_at": time.Date(2026, 4, 26, 15, 59, 59, 0, time.UTC)}).Error; err != nil {
 		t.Fatalf("seed processed inbox row: %v", err)
 	}
-	if err := db.Create(&[]entities.UsageOverviewHealthStat{
-		{BucketStart: now.Add(-9 * 24 * time.Hour), SpanSeconds: 900, APIGroupKey: "old", SuccessCount: 1},
-		{BucketStart: now.Add(-7 * 24 * time.Hour), SpanSeconds: 900, APIGroupKey: "fresh", SuccessCount: 1},
-	}).Error; err != nil {
-		t.Fatalf("seed health stats: %v", err)
-	}
 
 	result, err := CleanupStorage(db, now)
 	if err != nil {
@@ -339,13 +333,6 @@ func TestCleanupStorageCleansRedisInboxAndHealthStats(t *testing.T) {
 	}
 	if len(inboxRemaining) != 1 || inboxRemaining[0].ID != inboxRows[1].ID {
 		t.Fatalf("expected only pending inbox row to remain, got %+v", inboxRemaining)
-	}
-	var healthRemaining []entities.UsageOverviewHealthStat
-	if err := db.Order("api_group_key asc").Find(&healthRemaining).Error; err != nil {
-		t.Fatalf("load remaining health stats: %v", err)
-	}
-	if len(healthRemaining) != 1 || healthRemaining[0].APIGroupKey != "fresh" {
-		t.Fatalf("expected only fresh health stat row to remain, got %+v", healthRemaining)
 	}
 }
 

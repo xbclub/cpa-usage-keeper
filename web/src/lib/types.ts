@@ -12,13 +12,14 @@ export interface AuthSessionResponse {
 }
 
 export type AuthManagedSessionKind = 'admin' | 'api_key'
+export type AuthManagedSessionSource = 'standard' | 'embed'
 
 export interface AuthManagedSessionItem {
   id: string
   kind: AuthManagedSessionKind
   role: AuthRole
+  source?: AuthManagedSessionSource
   current?: boolean
-  source?: string
   loginAt?: string
   expiresAt?: string
   apiKeyId?: string
@@ -34,12 +35,23 @@ export interface StatusResponse {
   running: boolean
   sync_running: boolean
   timezone: string
-  quotaAutoRefreshEnabled?: boolean
   cpa_public_url?: string
   cpa_request_log_access_enabled?: boolean
   last_error?: string
   last_warning?: string
   last_status?: string
+}
+
+export type QuotaAutoRefreshScheduleUnit = 'minute' | 'hour' | 'day' | 'week'
+
+export interface QuotaAutoRefreshSchedule {
+  unit: QuotaAutoRefreshScheduleUnit
+  value: number
+}
+
+export interface QuotaAutoRefreshSettings {
+  enabled: boolean
+  schedule: QuotaAutoRefreshSchedule | null
 }
 
 export interface VersionResponse {
@@ -63,9 +75,6 @@ export interface UsageOverviewUsageSnapshot {
 }
 
 export interface UsageOverviewSummary {
-  request_count: number
-  token_count: number
-  window_minutes: number
   rpm: number
   tpm: number
   total_cost: number
@@ -81,46 +90,50 @@ export interface UsageOverviewSummary {
 }
 
 export interface UsageOverviewSeries {
-  requests: Record<string, number>
-  tokens: Record<string, number>
-  rpm: Record<string, number>
-  tpm: Record<string, number>
-  cost: Record<string, number>
-	cache_read_rate: Record<string, number | null>
+  buckets: string[]
+  requests: number[]
+  tokens: number[]
+  rpm: number[]
+  tpm: number[]
+  cost: number[]
+	cache_read_rate: Array<number | null>
 }
 
-export interface UsageOverviewServiceHealthBlock {
+export type UsageActivityWindow = 'day' | 'week' | 'month' | 'year'
+
+export interface UsageActivityBlock {
   start_time: string
   end_time: string
   success: number
   failure: number
   rate: number
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	total_tokens: number
 }
 
-export interface UsageOverviewServiceHealth {
+export interface UsageActivityResponse {
+  window: UsageActivityWindow
+  grain: 'short' | 'medium' | 'long' | 'daily'
+  timezone?: string
   total_success: number
   total_failure: number
   success_rate: number
-  rows?: number
-  columns?: number
-  bucket_seconds?: number
-  window_start?: string
-  window_end?: string
-  block_details: UsageOverviewServiceHealthBlock[]
-}
-
-// UsageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行（后端 usageOverviewAPIKeySummary）。
-export interface UsageOverviewAPIKeySummary {
-  api_key: string
-  request_count: number
-  total_tokens: number
-  input_tokens: number
-  output_tokens: number
-  cache_read_tokens: number
-  cache_creation_tokens: number
-  cost_usd: number
-  cost_available: boolean
-  display_name?: string
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	total_tokens: number
+  rows: number
+  columns: number
+  bucket_seconds: number
+  window_start: string
+  window_end: string
+  blocks: UsageActivityBlock[]
 }
 
 export type OverviewRealtimeWindow = '15m' | '30m' | '60m'
@@ -213,11 +226,7 @@ export interface UsageOverviewResponse {
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
-  service_health?: UsageOverviewServiceHealth
-  api_key_summary?: UsageOverviewAPIKeySummary[]
   timezone?: string
-  range_start?: string
-  range_end?: string
 }
 
 export interface UsageEventTokens {
@@ -592,6 +601,8 @@ export interface AnalysisLatencyDensityCell {
 }
 
 export interface AnalysisLatencyDiagnostics {
+  supported?: boolean
+  unsupported_reason?: 'range_outside_recent_30_days'
   points: AnalysisLatencyPoint[]
   density: AnalysisLatencyDensityCell[]
   total_points: number
@@ -615,7 +626,6 @@ export interface AnalysisResponse {
   heatmap: AnalysisHeatmapPayload
   cost_breakdown: AnalysisCostBreakdown
   model_efficiency: AnalysisModelEfficiencyItem[]
-  latency_diagnostics: AnalysisLatencyDiagnostics
 }
 
 export interface CpaApiKeyDisplayItem {
@@ -679,18 +689,6 @@ export interface PricingEntry {
 	price_multiplier: number
 }
 
-export type QuotaAutoRefreshScheduleUnit = 'minute' | 'hour' | 'day' | 'week'
-
-export interface QuotaAutoRefreshSchedule {
-  unit: QuotaAutoRefreshScheduleUnit
-  value: number
-}
-
-export interface QuotaAutoRefreshSettings {
-  enabled: boolean
-  schedule: QuotaAutoRefreshSchedule | null
-}
-
 export interface UsedModelsResponse {
   models: string[]
 }
@@ -741,6 +739,10 @@ export interface UsageRangeRequest {
 	unit?: UsageCustomRangeUnit
 	start?: string
 	end?: string
+}
+
+export type UsageActivityRequest = UsageRangeRequest | {
+	window: UsageActivityWindow | 'today' | 'yesterday'
 }
 
 export interface UsageFilterWindow {

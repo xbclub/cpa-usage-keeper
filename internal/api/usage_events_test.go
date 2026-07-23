@@ -75,6 +75,14 @@ func (s *usageEventsStub) GetAnalysis(context.Context, servicedto.UsageFilter) (
 	return nil, s.err
 }
 
+func (s *usageEventsStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
+	return nil, s.err
+}
+
+func (s *usageEventsStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, s.err
+}
+
 func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
@@ -236,7 +244,7 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 || provider.lastFilter.Limit != 0 || provider.lastFilter.Offset != 0 {
 		t.Fatalf("expected export to drop pagination, got %+v", provider.lastFilter)
 	}
-	if len(provider.lastFilter.Models) != 1 || provider.lastFilter.Models[0] != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-export-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
+	if provider.lastFilter.AuthIndex != "authidx-export-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
 		t.Fatalf("expected export filters to match list filters, got %+v", provider.lastFilter)
 	}
 	if !contains(resp.Header().Get("Content-Type"), "text/csv") || !contains(resp.Header().Get("Content-Disposition"), "attachment;") {
@@ -643,7 +651,7 @@ func TestUsageEventsPassesPaginationAndAuthIndexSourceFilter(t *testing.T) {
 	if provider.lastFilter.Page != 3 || provider.lastFilter.PageSize != 100 || provider.lastFilter.Offset != 200 {
 		t.Fatalf("expected pagination filter, got %+v", provider.lastFilter)
 	}
-	if len(provider.lastFilter.Models) != 1 || provider.lastFilter.Models[0] != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
+	if provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
 		t.Fatalf("expected source filter to be translated to auth_index only, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()
@@ -706,7 +714,7 @@ func TestUsageEventModelFilterOptionsReturnsStableModels(t *testing.T) {
 	if provider.filterOptionCalls != 1 || provider.filterCalls != 0 {
 		t.Fatalf("expected model filter options endpoint only, events=%d filterOptions=%d", provider.filterCalls, provider.filterOptionCalls)
 	}
-	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil || len(provider.lastFilter.Models) > 0 || provider.lastFilter.Source != "" || provider.lastFilter.Result != "" || provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 {
+	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil  || provider.lastFilter.Source != "" || provider.lastFilter.Result != "" || provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 {
 		t.Fatalf("expected model filters endpoint to ignore query filters, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()

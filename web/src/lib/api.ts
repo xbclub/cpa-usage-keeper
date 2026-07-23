@@ -1,4 +1,4 @@
-import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type StatusResponse, type UpdateCheckResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
 import { resolveUsageRequestRange } from '@/utils/usage/rangeQuery'
 
@@ -11,6 +11,10 @@ export class ApiError extends Error {
     this.status = status
   }
 }
+
+export const isUsageRangeBoundsConflict = (error: unknown): error is ApiError => (
+  error instanceof ApiError && error.status === 409
+)
 
 const APP_BASE_PATH_PLACEHOLDER = '__APP_BASE_PATH__'
 const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
@@ -310,6 +314,31 @@ export async function fetchKeyOverview(request: UsageRangeRequest, signal?: Abor
   return response.json()
 }
 
+export interface FetchUsageActivityOptions {
+  request: UsageActivityRequest
+  apiKeyId?: string
+  signal?: AbortSignal
+}
+
+const buildUsageActivityParams = (request: UsageActivityRequest): URLSearchParams => {
+  // 显式 Activity window 使用 window 参数；其余选择复用 Overview 的 range 参数。
+  if ('window' in request) {
+    const params = new URLSearchParams()
+    params.set('window', request.window)
+    return params
+  }
+  return buildUsageRangeParams(request)
+}
+
+export async function fetchKeyActivity({ request, signal }: FetchUsageActivityOptions): Promise<UsageActivityResponse> {
+  const params = buildUsageActivityParams(request)
+  const response = await apiFetch(`${apiPath('/key-activity')}?${params.toString()}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load key activity: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function fetchKeyOverviewRealtime(options: FetchKeyOverviewRealtimeOptions = {}): Promise<OverviewRealtimeBlock> {
   const { window, signal } = options
   const params = new URLSearchParams()
@@ -327,19 +356,29 @@ export async function fetchKeyOverviewRealtime(options: FetchKeyOverviewRealtime
   return normalizeOverviewRealtimeBlock(payload, window)
 }
 
-export async function fetchUsageOverview(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string, model?: string[]): Promise<UsageOverviewResponse> {
+export async function fetchUsageOverview(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<UsageOverviewResponse> {
   const params = buildUsageRangeParams(request)
   const selectedAPIKeyId = apiKeyId?.trim()
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
   }
-  if (model != null && model.length > 0) {
-    params.set('model', model.join(','))
-  }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage overview: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageActivity({ request, apiKeyId, signal }: FetchUsageActivityOptions): Promise<UsageActivityResponse> {
+  const params = buildUsageActivityParams(request)
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
+  const response = await apiFetch(`${apiPath('/usage/activity')}?${params.toString()}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage activity: ${response.status}`)
   }
   return response.json()
 }
@@ -669,6 +708,19 @@ export async function fetchAnalysis(request: UsageRangeRequest, signal?: AbortSi
   return response.json()
 }
 
+export async function fetchAnalysisLatency(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<AnalysisLatencyDiagnostics> {
+  const params = buildUsageRangeParams(request)
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/analysis/latency')}${query ? `?${query}` : ''}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load analysis latency: ${response.status}`)
+  }
+  return response.json()
+}
 
 export async function fetchCpaApiKeyOptions(signal?: AbortSignal): Promise<CpaApiKeyOptionsResponse> {
   const response = await apiFetch(apiPath('/usage/api-keys/options'), { signal, cache: 'no-store' })
@@ -802,8 +854,7 @@ export async function deletePricing(model: string): Promise<void> {
   }
 }
 
-// fetchOverviewModels 是 fork-unique 的独立 /usage/models endpoint，
-// 返回 DISTINCT model 列表不受 model filter 影响。
+// fetchOverviewModels 是 fork-unique 的独立 /usage/models endpoint。
 export async function fetchOverviewModels(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<{ models: string[] }> {
   const params = buildUsageRangeParams(request)
   const selectedAPIKeyId = apiKeyId?.trim()
@@ -817,7 +868,7 @@ export async function fetchOverviewModels(request: UsageRangeRequest, signal?: A
   return response.json()
 }
 
-// markStatusActive 是 fork-unique 的 active-status heartbeat，让后端知道前端页面仍然活跃。
+// markStatusActive 是 fork-unique 的 active-status heartbeat。
 export async function markStatusActive(signal?: AbortSignal): Promise<void> {
   const response = await apiFetch(apiPath('/status/active'), { signal })
   if (!response.ok) {

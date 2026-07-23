@@ -61,6 +61,8 @@ type App struct {
 	MetadataSync     *MetadataSyncRunner
 	QuotaService     QuotaRunner
 	QuotaAutoRefresh QuotaRunner
+	// UsageAggregation 是唯一串行调度三类派生聚合事务的后台 runner。
+	UsageAggregation Runner
 	RecentUsageCache *repository.UsageRecentEventCache
 	LogCloser        io.Closer
 
@@ -122,35 +124,28 @@ func NewWithConfigWithDB(cfg config.Config, db *gorm.DB) (*App, error) {
 }
 
 func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error) {
-	// migrations 完成后、后台 runner 启动前先追平 Overview 增量表，避免首个 Overview 请求触发大批量聚合。
-	logrus.Info("starting usage overview aggregation catch-up")
-	if err := repository.AggregateUsageOverviewStats(context.Background(), db, time.Now()); err != nil {
-		_ = logCloser.Close()
-		return nil, err
-	}
-	logrus.Info("completed usage overview aggregation catch-up")
-
-	// 最近事件缓存只在增量表追平后创建，确保启动时能加载完整的最近 70 分钟事件投影。
+	// 最近事件缓存继续使用统一 DB；PG 单池由 GORM 自动路由。
 	recentUsageCache, err := newUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{})
 	if err != nil {
-		// 缓存初始化失败会让 realtime/最近边界降级到 DB，但不影响核心写入和查询能力。
 		logrus.WithError(err).Error("recent usage event cache initialization failed; falling back to database queries")
 		recentUsageCache = nil
 	}
 
-	// cpaClient / quotaService 提前创建：syncService 需要把 quotaService 作为 UsageHeaderQuota 注入，
-	// 用于 Redis usage response_headers 提交后异步 patch quota cache（不参与 usage_events 入库事务）。
+	// cpaClient / quotaService 提前创建。
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit})
+
+	// 单 writer aggregation runner 复用同一个数据库和 quota appender，并在 App.Run 时主动追平。
+	usageAggregationRunner := poller.NewUsageAggregationRunner(db, quotaService)
 
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		BaseURL: cfg.CPABaseURL,
 		Client:  cpaClient,
-		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
-		// Redis usage response_headers 提交后异步 patch quota cache，不参与 usage_events 入库事务。
-		UsageHeaderQuota: quotaService,
+		// usage 与 metadata 提交后只唤醒单 writer runner，不在前台链路执行派生聚合。
+		UsageAggregationNotifier: usageAggregationRunner,
+		CleanupUsageEventsEnabled: cfg.CleanupUsageEventsEnabled,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
@@ -229,6 +224,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		MetadataSync:     metadataSyncRunner,
 		QuotaService:     quotaService,
 		QuotaAutoRefresh: quotaAutoRefreshService(cfg, quotaService),
+		UsageAggregation: usageAggregationRunner,
 		RecentUsageCache: recentUsageCache,
 		LogCloser:        logCloser,
 		Router: api.NewRouter(
@@ -354,6 +350,14 @@ func (a *App) Run() error {
 			// quota 自动刷新和手动刷新共用队列，但作为独立后台任务跟随 App 生命周期启动和停止。
 			if err := a.QuotaAutoRefresh.StartAutoRefresh(ctx); err != nil {
 				logrus.Errorf("quota auto refresh stopped: %v", err)
+			}
+		})
+	}
+	if a.UsageAggregation != nil {
+		a.startBackgroundTask(func() {
+			// aggregation runner 在后台串行追平 Overview/Activity/Identity 三类派生聚合。
+			if err := a.UsageAggregation.Run(ctx); err != nil {
+				logrus.Errorf("usage aggregation runner stopped: %v", err)
 			}
 		})
 	}

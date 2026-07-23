@@ -72,6 +72,14 @@ func (s *usageAnalysisStub) GetAnalysis(_ context.Context, filter servicedto.Usa
 	return s.analysis, s.err
 }
 
+func (s *usageAnalysisStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
+	return nil, s.err
+}
+
+func (s *usageAnalysisStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, s.err
+}
+
 func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 	bucket := time.Date(2026, 4, 22, 10, 0, 0, 0, time.Local)
 	provider := &usageAnalysisStub{analysis: &servicedto.AnalysisSnapshot{
