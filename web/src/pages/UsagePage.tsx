@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
 import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { IconRefreshCw } from '@/components/ui/icons';
@@ -757,6 +758,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { range: timeRange, customRange } = timeRangeState;
   const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState('');
+  const [overviewModelFilter, setOverviewModelFilter] = useState<string[]>([]);
+  const [overviewModelNames, setOverviewModelNames] = useState<string[]>([]);
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionResponse | null>(null);
@@ -801,6 +804,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     customEnd: customRange?.end,
     enabled: activeTab === 'overview',
     apiKeyId: selectedApiKeyId,
+    model: activeTab === 'overview' ? overviewModelFilter : undefined,
     onRangeBoundsConflict: recoverRangeBoundsConflict,
   });
   const {
@@ -1094,6 +1098,16 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
   }, [loadAuthSessions, onAuthRequired, showTopNotice, t]);
 
+  const loadOverviewModels = useCallback(async () => {
+    if (!usageRangeQuery.valid) return;
+    try {
+      const response = await fetchOverviewModels(usageRangeQuery, undefined, selectedApiKeyId);
+      setOverviewModelNames(response.models);
+    } catch {
+      // 模型列表加载失败不阻塞主页面
+    }
+  }, [usageRangeQuery, selectedApiKeyId]);
+
   const loadAnalysis = useCallback(async () => {
     if (!usageRangeQuery.valid) return;
     analysisRequestControllerRef.current?.abort();
@@ -1159,6 +1173,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       // Ignore storage errors.
     }
   }, [timeRangeState]);
+
+  // 切换 API Key 或时间范围时重置模型筛选
+  useEffect(() => {
+    setOverviewModelFilter([]);
+  }, [selectedApiKeyId, timeRange, customRange?.start, customRange?.end]);
+
+  // Overview tab 激活时加载模型列表
+  useEffect(() => {
+    if (activeTab !== 'overview') return;
+    void loadOverviewModels();
+  }, [activeTab, loadOverviewModels]);
 
   useEffect(() => {
     const pendingLegacyCustomRange = pendingLegacyCustomRangeRef.current;
@@ -1556,6 +1581,13 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setLogoutConfirmOpen(true);
   }, []);
 
+  const handleClearCache = useCallback(() => {
+    if (window.confirm(t('common.clear_cache_confirm'))) {
+      try { localStorage.clear(); } catch (e) { void e; }
+      window.location.reload();
+    }
+  }, [t]);
+
   const handleConfirmLogout = useCallback(async () => {
     setLoggingOut(true);
     try {
@@ -1780,6 +1812,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 </button>
               </div>
             )}
+            <div className={styles.signOutSwitcher} role="group" aria-label={t('common.clear_cache')}>
+              <button
+                type="button"
+                className={`${styles.signOutPill} ${styles.signOutPillActive}`.trim()}
+                onClick={handleClearCache}
+              >
+                <span className={styles.signOutPillInner}>{t('common.clear_cache')}</span>
+              </button>
+            </div>
             <div className={styles.signOutSwitcher} role="group" aria-label={t('common.logout')}>
               <button
                 type="button"
@@ -1889,6 +1930,22 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       />
                     </label>
                   </div>
+                    {activeTab === 'overview' && overviewModelNames.length > 0 && (
+                    <div className={styles.apiKeyFilterGroup}>
+                      <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
+                        <span className={styles.usageFilterLabel}>{t('usage_stats.model_filter')}</span>
+                        <MultiSelect
+                          value={overviewModelFilter}
+                          options={overviewModelNames.map((name) => ({ value: name, label: name }))}
+                          onChange={setOverviewModelFilter}
+                          selectedLabel={(count) => t('usage_stats.model_filter_selected', { count })}
+                          placeholder={t('usage_stats.all_models')}
+                          className={styles.apiKeySelectControl}
+                          ariaLabel={t('usage_stats.model_filter')}
+                        />
+                      </label>
+                    </div>
+                    )}
                     <TimeRangeControl
                       value={timeRange}
                       customRange={customRange}

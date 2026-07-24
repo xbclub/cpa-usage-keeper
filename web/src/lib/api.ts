@@ -356,11 +356,14 @@ export async function fetchKeyOverviewRealtime(options: FetchKeyOverviewRealtime
   return normalizeOverviewRealtimeBlock(payload, window)
 }
 
-export async function fetchUsageOverview(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<UsageOverviewResponse> {
+export async function fetchUsageOverview(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string, model?: string[]): Promise<UsageOverviewResponse> {
   const params = buildUsageRangeParams(request)
   const selectedAPIKeyId = apiKeyId?.trim()
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
+  }
+  if (model != null && model.length > 0) {
+    params.set('model', model.join(','))
   }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })

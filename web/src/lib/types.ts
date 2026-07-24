@@ -222,11 +222,26 @@ export interface OverviewRealtimeBlock {
   cache_level: RealtimeCacheLevelPoint[]
 }
 
+// UsageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行。
+export interface UsageOverviewAPIKeySummary {
+  api_key: string
+  request_count: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  cost_usd: number
+  cost_available: boolean
+  display_name?: string
+}
+
 export interface UsageOverviewResponse {
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
   timezone?: string
+  api_key_summary?: UsageOverviewAPIKeySummary[]
 }
 
 export interface UsageEventTokens {

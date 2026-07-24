@@ -28,13 +28,14 @@ export interface UseUsageDataOptions {
   customEnd?: string;
   enabled?: boolean;
   apiKeyId?: string;
+  model?: string[];
   onRangeBoundsConflict?: (error: unknown) => boolean;
 }
 
 export const normalizeUsageOverviewRange = normalizeUsageRange;
 
 export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataReturn {
-  const { onAuthRequired, onRangeBoundsConflict, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId } = options;
+  const { onAuthRequired, onRangeBoundsConflict, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId, model } = options;
   const usageSnapshot = useUsageStatsStore((state) => state.usage);
   const loading = useUsageStatsStore((state) => state.loading);
   const storeError = useUsageStatsStore((state) => state.error);
@@ -58,6 +59,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         start: rangeQuery.start,
         end: rangeQuery.end,
         apiKeyId,
+        model,
       });
     } catch (error) {
       if (isUsageRangeBoundsConflict(error) && onRangeBoundsConflict?.(error)) {
@@ -68,7 +70,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
       }
       throw error;
     }
-  }, [apiKeyId, loadUsageStats, onAuthRequired, onRangeBoundsConflict, rangeQuery]);
+  }, [apiKeyId, loadUsageStats, model, onAuthRequired, onRangeBoundsConflict, rangeQuery]);
 
   useEffect(() => {
     if (!enabled || !rangeQuery.valid) {
@@ -81,6 +83,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
       start: rangeQuery.start,
       end: rangeQuery.end,
       apiKeyId,
+      model,
     }).catch((error) => {
       if (isUsageRangeBoundsConflict(error) && onRangeBoundsConflict?.(error)) {
         return;

@@ -141,8 +141,6 @@ func TestHealthTotalsFiltersByModelOnHourlyStats(t *testing.T) {
 	}
 }
 
-// TestAPIKeySummaryUsesModelAliasForPricing 暂时禁用：APIKeySummary accumulator 待适配 v1.13.6 stat projection 新架构后恢复。
-/*
 // TestAPIKeySummaryUsesModelAliasForPricing 验证 APIKeySummary 的计价复用 matchPricingByMap，
 // 真实 model 有价格时优先用 model 价格；model 无价格时回退 alias；都无价格且存在计费 token 时 CostAvailable=false。
 func TestAPIKeySummaryUsesModelAliasForPricing(t *testing.T) {
@@ -229,4 +227,3 @@ func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias str
 		t.Fatalf("expected cost=%.6f, got %.6f", expectCost, item.CostUSD)
 	}
 }
-*/
