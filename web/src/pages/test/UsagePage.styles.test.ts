@@ -9,7 +9,11 @@ const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
 const keyOverviewPageStyles = readSource(new URL('../KeyOverviewPage.module.scss', import.meta.url))
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
+const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
 const priceSettingsSource = readSource(new URL('../../components/usage/PriceSettingsCard.tsx', import.meta.url))
+const priceRulesSource = readSource(new URL('../../components/usage/pricing/PriceRulesModal.tsx', import.meta.url))
+const priceRulesHelpSource = readSource(new URL('../../components/usage/pricing/PriceRulesHelp.tsx', import.meta.url))
+const priceRulesStyles = readSource(new URL('../../components/usage/pricing/PriceRulesModal.module.scss', import.meta.url))
 const credentialStyles = readSource(new URL('../../components/usage/credentials/CredentialSections.module.scss', import.meta.url))
 const selectSource = readSource(new URL('../../components/ui/Select.tsx', import.meta.url))
 const apiIndexSource = readSource(new URL('../../components/usage/index.ts', import.meta.url))
@@ -581,6 +585,24 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.sessionSettingsLogoutButton\s*\{[\s\S]*?min-width:\s*92px;/)
   })
 
+  it('keeps both logout confirmation button pairs aligned with Usage dialog actions', () => {
+    const sessionLogoutModalStart = sessionSettingsSource.indexOf('<Modal\n          open={Boolean(confirmingSession)}')
+    const pageLogoutModalStart = usagePageSource.indexOf('<Modal\n        open={logoutConfirmOpen}')
+    const sessionLogoutModal = sessionSettingsSource.slice(
+      sessionLogoutModalStart,
+      sessionSettingsSource.indexOf('</Modal>', sessionLogoutModalStart),
+    )
+    const pageLogoutModal = usagePageSource.slice(
+      pageLogoutModalStart,
+      usagePageSource.indexOf('</Modal>', pageLogoutModalStart),
+    )
+
+    for (const modalSource of [sessionLogoutModal, pageLogoutModal]) {
+      expect(modalSource).toMatch(/variant="secondary"\s+className=\{styles\.usagePillAction\}/)
+      expect(modalSource).toContain('className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`}')
+    }
+  })
+
   it('keeps Session and API Key Settings row actions compact like Model Pricing actions', () => {
     const apiKeyButtonsBlock = usagePageStyles.slice(
       usagePageStyles.indexOf('.apiKeySettingsCopyButton,'),
@@ -1021,5 +1043,68 @@ describe('UsagePage toolbar styles', () => {
     expect(clearFilterButtonBlock).toMatch(/min-height:\s*32px;/)
     expect(clearFilterButtonBlock).not.toContain('margin-bottom')
     expect(usagePageStyles).toMatch(/\.requestEventsClearFiltersButton:global\(\.btn\.btn-sm\)\s*\{[\s\S]*?min-height:\s*32px;[\s\S]*?padding:\s*7px 12px;[\s\S]*?font-size:\s*12px;/)
+  })
+
+  it('matches Request Event header action spacing to Auth Files actions', () => {
+    const requestEventActionsBlock = styleRuleBlock(usagePageStyles, '.requestEventsActions')
+    const credentialActionsBlock = styleRuleBlock(credentialStyles, '.credentialSectionActionButtons')
+
+    expect(credentialActionsBlock).toContain('gap: 10px;')
+    expect(requestEventActionsBlock).toContain('gap: 10px;')
+  })
+
+  it('matches the Request Event column visibility switch to Auth Files Enabled only', () => {
+    const visibilitySwitchBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsColumnVisibilityControl {'),
+      usagePageStyles.indexOf('.requestEventsColumnSettingsAction:global(.btn.btn-sm) {')
+    )
+
+    expect(visibilitySwitchBlock).toMatch(/\.requestEventsColumnVisibilityTrack\s*\{[\s\S]*?width:\s*42px;[\s\S]*?height:\s*24px;/)
+    expect(visibilitySwitchBlock).toContain('background: linear-gradient(135deg, #2563eb 0%, #38bdf8 58%, #67e8f9 100%);')
+    expect(visibilitySwitchBlock).toMatch(/\.requestEventsColumnVisibilityThumb\s*\{[\s\S]*?width:\s*20px;[\s\S]*?height:\s*20px;/)
+    expect(visibilitySwitchBlock).toContain('background: linear-gradient(145deg, #fff, color-mix(in srgb, var(--bg-primary) 86%, #dbeafe));')
+    expect(visibilitySwitchBlock).toContain('transform: translateX(18px);')
+    expect(requestEventsColumnSettingsSource).toContain('styles.requestEventsColumnVisibilityTrack')
+    expect(requestEventsColumnSettingsSource).toContain('styles.requestEventsColumnVisibilityThumb')
+    expect(credentialStyles).toContain('background: linear-gradient(135deg, #2563eb 0%, #38bdf8 58%, #67e8f9 100%);')
+  })
+
+  it('disables Request Event column switch transitions for reduced motion', () => {
+    expect(usagePageStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.requestEventsColumnVisibilityTrack,[\s\S]*?\.requestEventsColumnVisibilityThumb\s*\{[\s\S]*?transition:\s*none;/
+    )
+  })
+})
+
+describe('Pricing rules component boundary', () => {
+  it('keeps rule form behavior and responsive styles out of PriceSettingsCard and UsagePage styles', () => {
+    expect(priceSettingsSource).toContain('<PriceRulesModal')
+    expect(priceSettingsSource).not.toContain('data-rule-field="key"')
+    expect(priceRulesSource).toContain('data-rule-field="key"')
+    expect(priceRulesSource).toContain('className={styles.modal}')
+    expect(priceRulesStyles).toMatch(/\.ruleRow\s*\{[\s\S]*?grid-template-columns:/)
+    expect(priceRulesStyles).toMatch(/\.modal\s+:global\(\.modal-header\)\s*\{[\s\S]*?padding-right:/)
+	expect(priceRulesHelpSource).toContain('createPortal')
+	expect(styleRuleBlock(priceRulesStyles, '.help')).toMatch(/display:\s*inline-flex;/)
+	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/box-sizing:\s*border-box;/)
+	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/position:\s*fixed;/)
+	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/overflow-y:\s*auto;/)
+	expect(priceRulesHelpSource).toContain('maxHeight')
+	expect(priceRulesHelpSource).toContain("placement === 'above'")
+    expect(priceRulesStyles).toMatch(/@media \(max-width:/)
+    expect(usagePageStyles).not.toMatch(/\.pricingRules/)
+  })
+
+  it('matches the compact model-pricing control sizes and aligns each rule row', () => {
+    expect(priceRulesSource.match(/className=\{styles\.ruleInput\}/g)).toHaveLength(3)
+    expect(styleRuleBlock(priceRulesStyles, '.ruleInput')).toMatch(/height:\s*40px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.ruleInput')).toMatch(/border-radius:\s*999px;/)
+    expect(priceRulesStyles).toMatch(/\.ruleRow\s+:global\(\.form-group > label\)\s*\{[\s\S]*?font-size:\s*10px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.removeButton')).not.toMatch(/min-height:/)
+    expect(styleRuleBlock(priceRulesStyles, '.removeButton')).toMatch(/margin-top:\s*20px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.actionButton')).toMatch(/min-height:\s*32px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.actionButton')).toMatch(/font-size:\s*12px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.actionButton')).toMatch(/border-radius:\s*999px;/)
+    expect(priceRulesSource).toContain('${usageStyles.usagePillAction} ${usageStyles.usagePillActionDanger}')
   })
 })

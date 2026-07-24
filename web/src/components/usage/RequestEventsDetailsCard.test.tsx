@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   RequestEventsDetailsCard,
   isRequestEventColumnSelectionControlled,
-  resolveRequestEventColumnMenuFocusIndex,
   shouldCloseMenuOnFocusLeave,
   toggleRequestEventColumnId,
   type RequestEventColumnId,
@@ -398,7 +397,7 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('Clear Filters');
     expect(countOccurrences(html, '>Export<')).toBe(1);
     expect(html.indexOf('aria-label="Result"')).toBeLessThan(html.indexOf('Clear Filters'));
-    expect(html.indexOf('Clear Filters')).toBeLessThan(html.indexOf('aria-label="Columns"'));
+    expect(html.indexOf('aria-label="Columns"')).toBeLessThan(html.indexOf('>Export<'));
     expect(html.indexOf('>Export<')).toBeLessThan(html.indexOf('aria-label="Result"'));
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('_requestEventsExportButton_');
@@ -423,12 +422,13 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('title="Set pricing to calculate cost">-</td>');
   });
 
-  it('renders a column selector before the page size control', () => {
+  it('renders the column settings trigger before Export', () => {
     const html = renderCard();
 
-    expect(html).toContain('aria-label="Columns"');
-    expect(html.indexOf('aria-label="Columns"')).toBeLessThan(html.indexOf('<span>Size</span>'));
-    expect(html).toContain('>All</span>');
+    expect(html).toContain('data-request-events-column-settings-trigger="true"');
+    expect(html.indexOf('data-request-events-column-settings-trigger="true"')).toBeLessThan(html.indexOf('>Export<'));
+    expect(html.indexOf('data-request-events-column-settings-trigger="true"')).toBeLessThan(html.indexOf('aria-label="Result"'));
+    expect(html).not.toContain('_requestEventsColumnTrigger_');
   });
 
   it('can render only the selected request event columns', () => {
@@ -486,13 +486,4 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(shouldCloseMenuOnFocusLeave(container, null)).toBe(true);
   });
 
-  it('cycles column menu focus for arrow and tab navigation', () => {
-    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'ArrowDown')).toBe(1);
-    expect(resolveRequestEventColumnMenuFocusIndex(2, 3, 'ArrowDown')).toBe(0);
-    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'ArrowUp')).toBe(2);
-    expect(resolveRequestEventColumnMenuFocusIndex(2, 3, 'Tab')).toBe(0);
-    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'Tab', true)).toBe(2);
-    expect(resolveRequestEventColumnMenuFocusIndex(1, 3, 'Escape')).toBeNull();
-    expect(resolveRequestEventColumnMenuFocusIndex(0, 0, 'ArrowDown')).toBeNull();
-  });
 });

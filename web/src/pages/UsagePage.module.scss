@@ -2574,8 +2574,247 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: $spacing-xs;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.requestEventsColumnSettingsShell {
+  display: inline-flex;
+  align-items: stretch;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.requestEventsColumnSettingsButton:global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: var(--bg-primary);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+
+  &:global(.btn-secondary),
+  &:global(.btn-secondary):hover:not(:disabled) {
+    background: var(--bg-primary);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.requestEventsColumnSettingsButton:global(.btn.btn-sm) {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.requestEventsColumnSettingsButtonInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  line-height: 1;
+
+  svg {
+    display: block;
+    flex: 0 0 auto;
+  }
+}
+
+.requestEventsColumnSettingsModal {
+  max-width: min(560px, calc(100vw - 28px));
+
+  :global(.modal-body) {
+    padding: 18px 22px;
+  }
+}
+
+.requestEventsColumnSettingsPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.requestEventsColumnSettingsDescription {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.requestEventsColumnSettingsAnnouncement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.requestEventsColumnSettingsList {
+  display: grid;
+  gap: 6px;
+}
+
+.requestEventsColumnSettingsRow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.requestEventsColumnSettingsRowDragging {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+  border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color) 9%, var(--bg-primary));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+  will-change: transform;
+}
+
+.requestEventsColumnDragHandle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: $radius-sm;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 1px;
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.requestEventsColumnSettingsLabel {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.requestEventsColumnVisibilityControl {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  cursor: pointer;
+
+  input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  input:checked + .requestEventsColumnVisibilityTrack {
+    border-color: color-mix(in srgb, #38bdf8 68%, var(--border-color));
+    background: linear-gradient(135deg, #2563eb 0%, #38bdf8 58%, #67e8f9 100%);
+  }
+
+  input:checked + .requestEventsColumnVisibilityTrack .requestEventsColumnVisibilityThumb {
+    transform: translateX(18px);
+  }
+
+  input:focus-visible + .requestEventsColumnVisibilityTrack {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
+}
+
+.requestEventsColumnVisibilityControlDisabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.requestEventsColumnVisibilityTrack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, #dbeafe);
+  border-radius: 999px;
+  background: color-mix(in srgb, #dbeafe 34%, var(--bg-primary));
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.requestEventsColumnVisibilityThumb {
+  position: absolute;
+  z-index: 1;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #fff, color-mix(in srgb, var(--bg-primary) 86%, #dbeafe));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 4px 10px rgba(15, 23, 42, 0.22);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .requestEventsColumnVisibilityTrack,
+  .requestEventsColumnVisibilityThumb {
+    transition: none;
+  }
+}
+
+.requestEventsColumnSettingsAction:global(.btn.btn-sm) {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .requestEventsExportMenu {
@@ -2835,120 +3074,6 @@
     font-weight: 800;
     cursor: pointer;
   }
-}
-
-.requestEventsColumnPicker {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.requestEventsColumnTrigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 72px;
-  height: 32px;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-full;
-  padding: 0 10px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
-  }
-
-  &:focus,
-  &:focus-visible,
-  &[aria-expanded='true'] {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba($primary-color, 0.14);
-    outline: none;
-  }
-}
-
-.requestEventsColumnTriggerIcon {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-secondary);
-  transition: transform 0.2s ease;
-
-  .requestEventsColumnTrigger[aria-expanded='true'] & {
-    transform: rotate(180deg);
-  }
-}
-
-.requestEventsColumnDropdown {
-  position: fixed;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 6px;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-lg;
-  background: var(--bg-primary);
-  box-shadow: var(--shadow-lg);
-}
-
-.requestEventsColumnOption {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 32px;
-  border: 1px solid transparent;
-  border-radius: $radius-md;
-  padding: 7px 10px;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--bg-secondary);
-  }
-}
-
-.requestEventsColumnOptionSelected {
-  background: color-mix(in srgb, var(--primary-color) 9%, var(--bg-primary));
-  border-color: color-mix(in srgb, var(--primary-color) 34%, transparent);
-}
-
-.requestEventsColumnOptionLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.requestEventsColumnCheck,
-.requestEventsColumnCheckPlaceholder {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-}
-
-.requestEventsColumnCheck {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: $radius-full;
-  background: rgba($success-color, 0.12);
-  color: var(--success-color);
-}
-
-.requestEventsColumnCheckPlaceholder {
-  display: inline-flex;
 }
 
 @include mobile {
