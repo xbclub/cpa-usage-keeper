@@ -377,6 +377,7 @@ func (a *App) buildHTTPServer() *http.Server {
 		ReadTimeout:       a.Config.HTTPReadTimeout,
 		WriteTimeout:      a.Config.HTTPWriteTimeout,
 		IdleTimeout:       a.Config.HTTPIdleTimeout,
+		ErrorLog:          logging.NewStandardLogger(logrus.ErrorLevel),
 	}
 }
 

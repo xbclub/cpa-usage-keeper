@@ -6,6 +6,7 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/logging"
 	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/driver/postgres"
@@ -19,6 +20,7 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
+		Logger:  logging.NewGORMLogger(),
 		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
 	})
 	if err != nil {
