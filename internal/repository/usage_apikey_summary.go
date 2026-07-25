@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
 )
@@ -22,20 +22,12 @@ func newAPIKeySummaryAccumulator() apiKeySummaryAccumulator {
 }
 
 // accumulateHourlyStat 将小时 stat 行按 api_group_key 累积。
-func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOverviewHourlyStat, costResolver *UsageCostResolver) {
+func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOverviewHourlyStat, costResolver pricing.Resolver) {
 	key := strings.TrimSpace(row.APIGroupKey)
 	if key == "" {
 		return
 	}
-	costResult := costResolver.Calculate(UsageCostSubject{
-		Model:      row.Model,
-		ModelAlias: row.ModelAlias,
-		Tokens: helper.UsageTokenCostInput{
-			InputTokens:         row.InputTokens,
-			CacheReadTokens:     row.CacheReadTokens,
-			CacheCreationTokens: row.CacheCreationTokens,
-		},
-	})
+	costResult := costResolver.Calculate(UsageOverviewHourlyCostSubject(row))
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -53,20 +45,12 @@ func (a *apiKeySummaryAccumulator) accumulateHourlyStat(row entities.UsageOvervi
 }
 
 // accumulateDailyStat 将天 stat 行按 api_group_key 累积。
-func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOverviewDailyStat, costResolver *UsageCostResolver) {
+func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOverviewDailyStat, costResolver pricing.Resolver) {
 	key := strings.TrimSpace(row.APIGroupKey)
 	if key == "" {
 		return
 	}
-	costResult := costResolver.Calculate(UsageCostSubject{
-		Model:      row.Model,
-		ModelAlias: row.ModelAlias,
-		Tokens: helper.UsageTokenCostInput{
-			InputTokens:         row.InputTokens,
-			CacheReadTokens:     row.CacheReadTokens,
-			CacheCreationTokens: row.CacheCreationTokens,
-		},
-	})
+	costResult := costResolver.Calculate(UsageOverviewDailyCostSubject(row))
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -84,12 +68,12 @@ func (a *apiKeySummaryAccumulator) accumulateDailyStat(row entities.UsageOvervie
 }
 
 // accumulateEvent 将边界原始事件按 api_group_key 累积。
-func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, costResolver *UsageCostResolver) {
+func (a *apiKeySummaryAccumulator) accumulateEvent(event entities.UsageEvent, costResolver pricing.Resolver) {
 	key := strings.TrimSpace(event.APIGroupKey)
 	if key == "" {
 		return
 	}
-	costResult := costResolver.CalculateEvent(event)
+	costResult := costResolver.Calculate(UsageEventCostSubject(event))
 	item := a.items[key]
 	if item == nil {
 		item = &dto.UsageOverviewAPIKeySummary{APIGroupKey: key, CostAvailable: true}
@@ -123,7 +107,7 @@ func (a *apiKeySummaryAccumulator) toSlice() []dto.UsageOverviewAPIKeySummary {
 
 // accumulateAPIKeySummaryFromOverview 独立执行 API Key 汇总累积。
 // 使用 entity 级别的 stat 行（含 api_group_key），不使用 usageOverviewStatProjection（按 bucket_start 分组，不含 api_group_key）。
-func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilter, costResolver *UsageCostResolver, recentCache *UsageRecentEventCache, acc *apiKeySummaryAccumulator) error {
+func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver, recentCache *UsageRecentEventCache, acc *apiKeySummaryAccumulator) error {
 	queryNow := usageOverviewQueryNow(filter)
 	effectiveFilter := usageOverviewEffectiveFilter(filter, queryNow)
 
@@ -132,7 +116,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilte
 	rawEventWindows := usageOverviewRawEventWindows(effectiveFilter, fullStart, fullEnd, currentRight)
 
 	// 边界原始事件
-	boundaryEvents, err := loadUsageOverviewRawEventWindowsWithFilter(db, effectiveFilter, rawEventWindows, recentCache)
+	boundaryEvents, err := loadUsageOverviewRawEventWindowsWithFilter(db, effectiveFilter, rawEventWindows, recentCache, costResolver.ActiveFields())
 	if err != nil {
 		return err
 	}

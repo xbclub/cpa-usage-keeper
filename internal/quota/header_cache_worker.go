@@ -294,7 +294,7 @@ func usageHeaderSnapshotAuthIndexes(snapshots []UsageHeaderSnapshot) []string {
 }
 
 func (s *Service) usageHeaderWindowStatsProvider(ctx context.Context) usageWindowStatsProvider {
-	calculator, err := repository.NewUsageWindowStatsCalculator(ctx, s.db)
+	calculator, err := repository.NewUsageWindowStatsCalculator(ctx, s.db, s.pricing.NewResolver())
 	if err != nil {
 		logrus.WithError(err).Debug("usage header quota window stats calculator unavailable")
 		return nil

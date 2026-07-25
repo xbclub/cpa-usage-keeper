@@ -10,6 +10,7 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/repository/percentile"
 	"cpa-usage-keeper/internal/timeutil"
@@ -56,7 +57,7 @@ type usageEventProjection struct {
 }
 
 // Request Event Log Tab：先按列表条件统计总数，再加载当前页。
-func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageEventsPageRecord, error) {
+func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver) (*dto.UsageEventsPageRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -92,7 +93,7 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.U
 	query := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
 	query = query.Select(usageEventProjectionColumns).Order("timestamp DESC, id DESC").Limit(pageSize).Offset(offset)
 
-	rows, err := loadUsageEventRecordsForQuery(db, query)
+	rows, err := loadUsageEventRecordsForQuery(db, query, costResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -104,25 +105,25 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.U
 }
 
 // ExportUsageEventsWithFilter 使用 Request Event Log 相同筛选，但不应用分页。
-func ExportUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageEventRecord, error) {
+func ExportUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver) ([]dto.UsageEventRecord, error) {
 	rows := []dto.UsageEventRecord{}
 	if err := StreamUsageEventsWithFilter(db, filter, func(row dto.UsageEventRecord) error {
 		rows = append(rows, row)
 		return nil
-	}); err != nil {
+	}, costResolver); err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
 // StreamUsageEventsWithFilter 使用 Request Event Log 相同筛选逐行导出，不应用分页。
-func StreamUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, emit func(dto.UsageEventRecord) error) error {
+func StreamUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, emit func(dto.UsageEventRecord) error, costResolver pricing.Resolver) error {
 	if db == nil {
 		return fmt.Errorf("database is nil")
 	}
 	query := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
 	query = query.Select(usageEventProjectionColumns).Order("timestamp DESC, id DESC")
-	return streamUsageEventRecordsForQuery(db, query, emit)
+	return streamUsageEventRecordsForQuery(db, query, emit, costResolver)
 }
 
 // Request Event Log Filter Options：只按时间窗口收集 model 候选值。
@@ -175,16 +176,11 @@ func FindUsageEventRequestIDByID(db *gorm.DB, id int64) (string, error) {
 	return strings.TrimSpace(event.RequestID), nil
 }
 
-func loadUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB) ([]dto.UsageEventRecord, error) {
+func loadUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB, costResolver pricing.Resolver) ([]dto.UsageEventRecord, error) {
 	var events []usageEventProjection
 	if err := query.Find(&events).Error; err != nil {
 		return nil, fmt.Errorf("load usage events: %w", err)
 	}
-	costResolver, err := newUsageCostResolverForDB(db)
-	if err != nil {
-		return nil, fmt.Errorf("load usage event pricing settings: %w", err)
-	}
-
 	rows := make([]dto.UsageEventRecord, 0, len(events))
 	for _, event := range events {
 		record := usageEventProjectionToRecord(event)
@@ -195,13 +191,9 @@ func loadUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB) ([]dto.UsageEven
 	return rows, nil
 }
 
-func streamUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB, emit func(dto.UsageEventRecord) error) error {
+func streamUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB, emit func(dto.UsageEventRecord) error, costResolver pricing.Resolver) error {
 	if emit == nil {
 		return fmt.Errorf("usage event stream callback is nil")
-	}
-	costResolver, err := newUsageCostResolverForDB(db)
-	if err != nil {
-		return fmt.Errorf("load usage event pricing settings: %w", err)
 	}
 	rows, err := query.Rows()
 	if err != nil {
@@ -263,19 +255,8 @@ func usageEventProjectionToRecord(event usageEventProjection) dto.UsageEventReco
 	}
 }
 
-func usageEventRecordCost(record dto.UsageEventRecord, costResolver *UsageCostResolver) (float64, bool, string) {
-	result := costResolver.Calculate(UsageCostSubject{
-		Model:        record.Model,
-		ModelAlias:   record.ModelAlias,
-		ServiceTier:  record.ServiceTier,
-		ExecutorType: record.ExecutorType,
-		Tokens: helper.UsageTokenCostInput{
-			InputTokens:         record.InputTokens,
-			OutputTokens:        record.OutputTokens,
-			CacheReadTokens:     record.CacheReadTokens,
-			CacheCreationTokens: record.CacheCreationTokens,
-		},
-	})
+func usageEventRecordCost(record dto.UsageEventRecord, costResolver pricing.Resolver) (float64, bool, string) {
+	result := costResolver.Calculate(UsageEventRecordCostSubject(record))
 	return result.Cost.TotalCostUSD, result.Available, result.PricingStyle
 }
 
@@ -371,16 +352,12 @@ func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm
 	return query
 }
 
-func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.AnalysisRecord, error) {
+func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver) (*dto.AnalysisRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 	if filter.StartTime == nil || filter.EndTime == nil {
 		return nil, fmt.Errorf("analysis requires start_time and end_time")
-	}
-	costResolver, err := newUsageCostResolverForDB(db)
-	if err != nil {
-		return nil, err
 	}
 	windowMinutes := computeWindowMinutes(filter)
 	bucketByDay := windowMinutes > 24*60
@@ -634,7 +611,7 @@ func loadAnalysisIdentityLookup(db *gorm.DB, authIndexes []string) (analysisIden
 	return lookup, nil
 }
 
-func applyAnalysisHourlyRows(record *dto.AnalysisRecord, rows []entities.UsageOverviewHourlyStat, identityLookup analysisIdentityLookup, costResolver *UsageCostResolver) {
+func applyAnalysisHourlyRows(record *dto.AnalysisRecord, rows []entities.UsageOverviewHourlyStat, identityLookup analysisIdentityLookup, costResolver pricing.Resolver) {
 	bucketTotals := map[time.Time]*dto.AnalysisTokenUsageBucketRecord{}
 	apiTotals := map[string]*dto.AnalysisCompositionRecord{}
 	modelTotals := map[string]*dto.AnalysisCompositionRecord{}
@@ -643,14 +620,15 @@ func applyAnalysisHourlyRows(record *dto.AnalysisRecord, rows []entities.UsageOv
 	heatmapTotals := map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord{}
 	for _, row := range rows {
 		bucket := timeutil.NormalizeStorageTime(row.BucketStart).Truncate(time.Hour)
-		cost, costAvailable := analysisRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
+		costResult := costResolver.Calculate(UsageOverviewHourlyCostSubject(row))
+		cost, costAvailable := costResult.Cost, costResult.Available
 		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 		applyAnalysisIdentityComposition(identityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 	}
 	finalizeAnalysisRecord(record, bucketTotals, apiTotals, modelTotals, authFileTotals, aiProviderTotals, heatmapTotals)
 }
 
-func applyAnalysisDailyAndBoundaryHourlyRows(record *dto.AnalysisRecord, dailyRows []entities.UsageOverviewDailyStat, dailyIdentityLookup analysisIdentityLookup, hourlyRows []entities.UsageOverviewHourlyStat, hourlyIdentityLookup analysisIdentityLookup, costResolver *UsageCostResolver) {
+func applyAnalysisDailyAndBoundaryHourlyRows(record *dto.AnalysisRecord, dailyRows []entities.UsageOverviewDailyStat, dailyIdentityLookup analysisIdentityLookup, hourlyRows []entities.UsageOverviewHourlyStat, hourlyIdentityLookup analysisIdentityLookup, costResolver pricing.Resolver) {
 	bucketTotals := map[time.Time]*dto.AnalysisTokenUsageBucketRecord{}
 	apiTotals := map[string]*dto.AnalysisCompositionRecord{}
 	modelTotals := map[string]*dto.AnalysisCompositionRecord{}
@@ -659,32 +637,20 @@ func applyAnalysisDailyAndBoundaryHourlyRows(record *dto.AnalysisRecord, dailyRo
 	heatmapTotals := map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord{}
 	for _, row := range dailyRows {
 		bucket := timeutil.NormalizeStorageTime(row.BucketStart)
-		cost, costAvailable := analysisRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
+		costResult := costResolver.Calculate(UsageOverviewDailyCostSubject(row))
+		cost, costAvailable := costResult.Cost, costResult.Available
 		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 		applyAnalysisIdentityComposition(dailyIdentityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 	}
 	for _, row := range hourlyRows {
 		bucketStart := timeutil.NormalizeStorageTime(row.BucketStart)
 		bucket := time.Date(bucketStart.Year(), bucketStart.Month(), bucketStart.Day(), 0, 0, 0, 0, bucketStart.Location())
-		cost, costAvailable := analysisRowCost(row.Model, row.ModelAlias, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, costResolver)
+		costResult := costResolver.Calculate(UsageOverviewHourlyCostSubject(row))
+		cost, costAvailable := costResult.Cost, costResult.Available
 		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 		applyAnalysisIdentityComposition(hourlyIdentityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, row.TotalTokens, cost, costAvailable)
 	}
 	finalizeAnalysisRecord(record, bucketTotals, apiTotals, modelTotals, authFileTotals, aiProviderTotals, heatmapTotals)
-}
-
-func analysisRowCost(model string, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costResolver *UsageCostResolver) (helper.UsageTokenCostBreakdown, bool) {
-	result := costResolver.Calculate(UsageCostSubject{
-		Model:      model,
-		ModelAlias: modelAlias,
-		Tokens: helper.UsageTokenCostInput{
-			InputTokens:         inputTokens,
-			OutputTokens:        outputTokens,
-			CacheReadTokens:     cacheReadTokens,
-			CacheCreationTokens: cacheCreationTokens,
-		},
-	})
-	return result.Cost, result.Available
 }
 
 func applyAnalysisRow(record *dto.AnalysisRecord, bucketTotals map[time.Time]*dto.AnalysisTokenUsageBucketRecord, apiTotals, modelTotals map[string]*dto.AnalysisCompositionRecord, heatmapTotals map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord, bucket time.Time, apiGroupKey, model string, requests, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, reasoningTokens, totalTokens int64, cost helper.UsageTokenCostBreakdown, costAvailable bool) {
@@ -892,11 +858,11 @@ func sortAnalysisComposition(items []dto.AnalysisCompositionRecord) {
 }
 
 // Overview 使用预聚合完整小时，并用原始事件补偿窗口边界以保持非整点查询精确。
-func BuildUsageOverviewWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageOverviewRecord, error) {
-	return BuildUsageOverviewWithFilterAndRecentCache(db, filter, nil)
+func BuildUsageOverviewWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver) (*dto.UsageOverviewRecord, error) {
+	return BuildUsageOverviewWithFilterAndRecentCache(db, filter, nil, costResolver)
 }
 
-func BuildUsageOverviewWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQueryFilter, recentCache *UsageRecentEventCache) (*dto.UsageOverviewRecord, error) {
+func BuildUsageOverviewWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQueryFilter, recentCache *UsageRecentEventCache, costResolver pricing.Resolver) (*dto.UsageOverviewRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -906,17 +872,12 @@ func BuildUsageOverviewWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQue
 		return nil, fmt.Errorf("usage overview requires start_time and end_time")
 	}
 
-	// stats 表不保存价格，所有 cost 都按本次请求的 resolver 在查询阶段动态计算。
-	costResolver, err := newUsageCostResolverForDB(db)
-	if err != nil {
-		return nil, err
-	}
-
+	// stats 表不保存价格，所有 cost 都使用调用方固定的请求级 resolver 动态计算。
 	overview, err := buildUsageOverviewFromStats(db, filter, costResolver, recentCache)
 	if err != nil {
 		return nil, err
 	}
-	// API Key 汇总独立于主聚合。
+	// API Key 汇总独立于主聚合（fork-unique）。
 	summaryAcc := newAPIKeySummaryAccumulator()
 	if err := accumulateAPIKeySummaryFromOverview(db, filter, costResolver, recentCache, &summaryAcc); err != nil {
 		return nil, err
@@ -926,17 +887,13 @@ func BuildUsageOverviewWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQue
 }
 
 // BuildUsageOverviewRealtimeWithFilter 单独构建 Overview 实时运行态，避免主 Overview 查询承担短窗口 raw event 扫描。
-func BuildUsageOverviewRealtimeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (dto.UsageOverviewRealtimeRecord, error) {
-	return BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, filter, nil)
+func BuildUsageOverviewRealtimeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver) (dto.UsageOverviewRealtimeRecord, error) {
+	return BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, filter, nil, costResolver)
 }
 
-func BuildUsageOverviewRealtimeWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQueryFilter, recentCache *UsageRecentEventCache) (dto.UsageOverviewRealtimeRecord, error) {
+func BuildUsageOverviewRealtimeWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQueryFilter, recentCache *UsageRecentEventCache, costResolver pricing.Resolver) (dto.UsageOverviewRealtimeRecord, error) {
 	if db == nil {
 		return dto.UsageOverviewRealtimeRecord{}, fmt.Errorf("database is nil")
-	}
-	costResolver, err := newUsageCostResolverForDB(db)
-	if err != nil {
-		return dto.UsageOverviewRealtimeRecord{}, err
 	}
 	return buildUsageOverviewRealtime(db, filter, costResolver, recentCache)
 }
@@ -954,7 +911,7 @@ func newUsageOverviewRecord(windowMinutes int64) *dto.UsageOverviewRecord {
 }
 
 // buildUsageOverviewFromStats 用预聚合表覆盖完整 bucket，用原始事件补偿窗口边界。
-func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costResolver *UsageCostResolver, recentCache *UsageRecentEventCache) (*dto.UsageOverviewRecord, error) {
+func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver, recentCache *UsageRecentEventCache) (*dto.UsageOverviewRecord, error) {
 	// queryNow 固定本次仓储查询的“当前时刻”，避免不同步骤各自 time.Now() 造成边界漂移。
 	queryNow := usageOverviewQueryNow(filter)
 	// currentRight 只描述范围语义：滚动范围和今天类范围要读取最新缓存，不用 end 截断。
@@ -970,7 +927,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 		switch strings.TrimSpace(filter.CustomUnit) {
 		case "hour":
 			// Custom 小时的边界已由 API 对齐，包含当前小时也只读取增量 hourly 桶。
-			hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, filter, *filter.StartTime, *filter.EndTime)
+			hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, filter, *filter.StartTime, *filter.EndTime, costResolver.ActiveFields())
 			if err != nil {
 				return nil, err
 			}
@@ -981,7 +938,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 			return overview, nil
 		case "day":
 			// Custom 天始终读取完整 daily 桶，当前日由后台增量汇总持续刷新。
-			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, filter, *filter.StartTime, *filter.EndTime)
+			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, filter, *filter.StartTime, *filter.EndTime, costResolver.ActiveFields())
 			if err != nil {
 				return nil, err
 			}
@@ -999,7 +956,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 	rawEventWindows := usageOverviewRawEventWindows(effectiveFilter, fullStart, fullEnd, currentRight)
 
 	// 非整点窗口的头尾不能用小时 stats，否则会把窗口外事件算进去。
-	boundaryEvents, err := loadUsageOverviewRawEventWindowsWithFilter(db, effectiveFilter, rawEventWindows, recentCache)
+	boundaryEvents, err := loadUsageOverviewRawEventWindowsWithFilter(db, effectiveFilter, rawEventWindows, recentCache, costResolver.ActiveFields())
 	if err != nil {
 		return nil, err
 	}
@@ -1015,7 +972,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 		// 短窗口的主序列和 snapshot 小时图必须保持小时粒度，不能因为内部包含完整天就压成 daily bucket。
 		fullDayStart, fullDayEnd := usageOverviewFullDayWindow(fullStart, fullEnd)
 		if !bucketByDay || !fullDayEnd.After(fullDayStart) {
-			hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, fullStart, fullEnd)
+			hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, fullStart, fullEnd, costResolver.ActiveFields())
 			if err != nil {
 				return nil, err
 			}
@@ -1024,7 +981,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 			}
 		} else {
 			// 长窗口中间的完整本地天用 daily stats，减少大量小时 row 累加。
-			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, effectiveFilter, fullDayStart, fullDayEnd)
+			dailyRows, err := loadUsageOverviewDailyStatsWithFilter(db, effectiveFilter, fullDayStart, fullDayEnd, costResolver.ActiveFields())
 			if err != nil {
 				return nil, err
 			}
@@ -1037,7 +994,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, costR
 				if !window.end.After(window.start) {
 					continue
 				}
-				hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, window.start, window.end)
+				hourlyRows, err := loadUsageOverviewHourlyStatsWithFilter(db, effectiveFilter, window.start, window.end, costResolver.ActiveFields())
 				if err != nil {
 					return nil, err
 				}
@@ -1253,56 +1210,6 @@ func usageOverviewEventInsideWindow(event entities.UsageEvent, start, end time.T
 	return !timestamp.Before(start) && timestamp.Before(end)
 }
 
-type usageOverviewStatProjection struct {
-	BucketStart             time.Time
-	Model                   string
-	ModelAlias              string
-	RequestCount            int64
-	SuccessCount            int64
-	FailureCount            int64
-	InputTokens             int64
-	ReasoningTokens         int64
-	CacheReadTokens         int64
-	CacheCreationTokens     int64
-	TotalTokens             int64
-	CostUncachedInputTokens int64
-	CostOutputTokens        int64
-	CostCacheReadTokens     int64
-	CostCacheCreationTokens int64
-}
-
-// 标准 SQL CASE 先逐行完成计费 Token 的非负与普通输入归一化，再按卡片所需维度合并。
-const usageOverviewStatProjectionColumns = `
-	bucket_start,
-	model,
-	model_alias,
-	SUM(request_count) AS request_count,
-	SUM(success_count) AS success_count,
-	SUM(failure_count) AS failure_count,
-	SUM(input_tokens) AS input_tokens,
-	SUM(reasoning_tokens) AS reasoning_tokens,
-	SUM(cache_read_tokens) AS cache_read_tokens,
-	SUM(cache_creation_tokens) AS cache_creation_tokens,
-	SUM(total_tokens) AS total_tokens,
-	SUM(CASE
-		WHEN (CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END) -
-			(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END) -
-			(CASE WHEN cache_creation_tokens > 0 THEN cache_creation_tokens ELSE 0 END) > 0
-		THEN (CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END) -
-			(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END) -
-			(CASE WHEN cache_creation_tokens > 0 THEN cache_creation_tokens ELSE 0 END)
-		ELSE 0
-	END) AS cost_uncached_input_tokens,
-	SUM(CASE WHEN output_tokens > 0 THEN output_tokens ELSE 0 END) AS cost_output_tokens,
-	SUM(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END) AS cost_cache_read_tokens,
-	SUM(CASE WHEN cache_creation_tokens > 0 THEN cache_creation_tokens ELSE 0 END) AS cost_cache_creation_tokens`
-
-// loadUsageOverviewHourlyStatsWithFilter 只读取 Overview 卡片字段，并在 SQL 侧消除身份维度。
-func loadUsageOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]usageOverviewStatProjection, error) {
-	query := db.Model(&entities.UsageOverviewHourlyStat{})
-	return loadUsageOverviewStatProjection(query, filter, start, end, "hourly")
-}
-
 func loadAnalysisOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewHourlyStat, error) {
 	return loadUsageOverviewHourlyStats(db, filter, start, end, true)
 }
@@ -1356,26 +1263,6 @@ func loadUsageOverviewHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, star
 	return rows, nil
 }
 
-// loadUsageOverviewDailyStatsWithFilter 只读取 Overview 卡片字段，并在 SQL 侧消除身份维度。
-func loadUsageOverviewDailyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]usageOverviewStatProjection, error) {
-	query := db.Model(&entities.UsageOverviewDailyStat{})
-	return loadUsageOverviewStatProjection(query, filter, start, end, "daily")
-}
-
-func loadUsageOverviewStatProjection(query *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, grain string) ([]usageOverviewStatProjection, error) {
-	rows := make([]usageOverviewStatProjection, 0)
-	query = query.
-		Select(usageOverviewStatProjectionColumns).
-		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end))
-	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
-		query = query.Where("api_group_key = ?", apiGroupKey)
-	}
-	if err := query.Group("bucket_start, model, model_alias").Order("bucket_start asc").Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("load usage overview %s projection: %w", grain, err)
-	}
-	return rows, nil
-}
-
 func loadAnalysisOverviewDailyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewDailyStat, error) {
 	return loadUsageOverviewDailyStats(db, filter, start, end, true)
 }
@@ -1397,7 +1284,7 @@ func loadUsageOverviewDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start
 	return rows, nil
 }
 
-func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, windows []usageOverviewRawEventWindow, recentCache *UsageRecentEventCache) ([]entities.UsageEvent, error) {
+func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, windows []usageOverviewRawEventWindow, recentCache *UsageRecentEventCache, activeFields pricing.ActiveFields) ([]entities.UsageEvent, error) {
 	// 所有边界事件先汇总到一个切片，后续统一补入 Overview 的 usage、summary 和 series。
 	events := make([]entities.UsageEvent, 0)
 	// queryNow 来自 filter.QueryNow 或当前项目时区时间，覆盖判断只用这个稳定时刻。
@@ -1425,7 +1312,7 @@ func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQue
 			}
 		}
 		// 缓存不存在或窗口早于 70 分钟覆盖范围时，回到原来的窄边界 DB 查询。
-		windowEvents, err := loadUsageOverviewBoundaryEventRangeWithFilter(db, filter, window.start, window.end, window.includeEnd)
+		windowEvents, err := loadUsageOverviewBoundaryEventRangeWithFilter(db, filter, window.start, window.end, window.includeEnd, activeFields)
 		if err != nil {
 			return nil, err
 		}
@@ -1451,12 +1338,28 @@ func usageOverviewRecentCacheCoversWindow(recentCache *UsageRecentEventCache, wi
 	return !timeutil.NormalizeStorageTime(window.start).Before(coveredStart)
 }
 
-func loadUsageOverviewBoundaryEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, includeEnd bool) ([]entities.UsageEvent, error) {
-	return loadUsageOverviewEventRangeWithProjection(db, filter, start, end, includeEnd, usageOverviewBoundaryEventProjectionColumns)
+func loadUsageOverviewBoundaryEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, includeEnd bool, activeFields pricing.ActiveFields) ([]entities.UsageEvent, error) {
+	return loadUsageOverviewEventRangeWithProjection(db, filter, start, end, includeEnd, usagePricingProjectionColumns(usageOverviewBoundaryEventProjectionColumns, activeFields))
 }
 
-func loadUsageOverviewRealtimeEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, includeEnd bool) ([]entities.UsageEvent, error) {
-	return loadUsageOverviewEventRangeWithProjection(db, filter, start, end, includeEnd, usageOverviewRealtimeEventProjectionColumns)
+func loadUsageOverviewRealtimeEventRangeWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, includeEnd bool, activeFields pricing.ActiveFields) ([]entities.UsageEvent, error) {
+	return loadUsageOverviewEventRangeWithProjection(db, filter, start, end, includeEnd, usagePricingProjectionColumns(usageOverviewRealtimeEventProjectionColumns, activeFields))
+}
+
+func usagePricingProjectionColumns(base string, activeFields pricing.ActiveFields) string {
+	columns := strings.Split(base, ", ")
+	seen := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		seen[column] = struct{}{}
+	}
+	for _, column := range UsagePricingDimensionColumns(activeFields) {
+		if _, exists := seen[column]; exists {
+			continue
+		}
+		columns = append(columns, column)
+		seen[column] = struct{}{}
+	}
+	return strings.Join(columns, ", ")
 }
 
 // loadUsageOverviewEventRangeWithProjection 使用单段 timestamp 范围查询，避免 OR 影响 usage_events 时间索引。
@@ -1486,36 +1389,6 @@ func loadUsageOverviewEventRangeWithProjection(db *gorm.DB, filter dto.UsageQuer
 		events = append(events, usageEventProjectionToEntity(row))
 	}
 	return events, nil
-}
-
-// applyUsageOverviewStatToOverview 把已确认完整的 hourly/daily stats 写入 summary、snapshot 和主序列。
-func applyUsageOverviewStatToOverview(overview *dto.UsageOverviewRecord, row usageOverviewStatProjection, bucketByDay bool, costResolver *UsageCostResolver) {
-	applyUsageOverviewStatToSnapshotTotals(overview.Usage, row.RequestCount, row.SuccessCount, row.FailureCount, row.TotalTokens)
-	// cost 不入 stats 表，必须在读取时按当前价格表重新计算。
-	result := calculateUsageOverviewProjectionCost(costResolver, row)
-	if !result.Available {
-		overview.Summary.CostAvailable = false
-	}
-	rowCost := result.Cost.TotalCostUSD
-	applyUsageOverviewStatToSummary(overview, row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.ReasoningTokens, rowCost)
-
-	// 主序列按当前窗口选择小时或天粒度。
-	bucketKey, bucketMinutes := usageOverviewBucket(timeutil.NormalizeStorageTime(row.BucketStart), bucketByDay)
-	applyUsageOverviewStatToSeries(&overview.Series, row.RequestCount, row.InputTokens, row.CacheReadTokens, row.TotalTokens, rowCost, bucketKey, bucketMinutes)
-}
-
-func calculateUsageOverviewProjectionCost(costResolver *UsageCostResolver, row usageOverviewStatProjection) UsageCostResult {
-	return costResolver.Calculate(UsageCostSubject{
-		Model:      row.Model,
-		ModelAlias: row.ModelAlias,
-		Tokens: helper.UsageTokenCostInput{
-			// SQL 已逐行归一化；重新拼成 resolver 输入后不会跨身份行改变 max(..., 0) 结果。
-			InputTokens:         row.CostUncachedInputTokens + row.CostCacheReadTokens + row.CostCacheCreationTokens,
-			OutputTokens:        row.CostOutputTokens,
-			CacheReadTokens:     row.CostCacheReadTokens,
-			CacheCreationTokens: row.CostCacheCreationTokens,
-		},
-	})
 }
 
 // applyUsageOverviewStatToSummary 写入 summary 中不在 StatisticsSnapshot 里的 token/cost 字段。
@@ -1583,7 +1456,7 @@ type usageOverviewRealtimeEvent struct {
 }
 
 // buildUsageOverviewRealtime 从最近事件缓存聚合 Overview 下方实时图表；缓存对象不可用时回退到 usage_events 窄窗查询。
-func buildUsageOverviewRealtime(db *gorm.DB, filter dto.UsageQueryFilter, costResolver *UsageCostResolver, recentCache *UsageRecentEventCache) (dto.UsageOverviewRealtimeRecord, error) {
+func buildUsageOverviewRealtime(db *gorm.DB, filter dto.UsageQueryFilter, costResolver pricing.Resolver, recentCache *UsageRecentEventCache) (dto.UsageOverviewRealtimeRecord, error) {
 	// window/span 由 15m/30m/60m 统一映射，前端所有 realtime 图共享同一窗口。
 	window, span := usageOverviewRealtimeWindow(filter.RealtimeWindow)
 	// 滑动聚合需要窗口左侧的少量预热 bucket，避免切换窗口时曲线从左边界重新爬坡。
@@ -1603,7 +1476,7 @@ func buildUsageOverviewRealtime(db *gorm.DB, filter dto.UsageQueryFilter, costRe
 	events, cacheOK := loadUsageOverviewRealtimeEventsFromRecentCache(recentCache, filter, readStart, end)
 	if !cacheOK {
 		// 缓存对象不可用时，直接回退到 usage_events 的同窗口投影，不影响正常缓存命中语义。
-		dbEvents, err := loadUsageOverviewRealtimeEventsFromDB(db, filter, readStart, end)
+		dbEvents, err := loadUsageOverviewRealtimeEventsFromDB(db, filter, readStart, end, costResolver.ActiveFields())
 		if err != nil {
 			return dto.UsageOverviewRealtimeRecord{}, err
 		}
@@ -1653,7 +1526,7 @@ func buildUsageOverviewRealtime(db *gorm.DB, filter dto.UsageQueryFilter, costRe
 		}
 
 		// cost 仍按本次请求的 resolver 动态计算，保持 Overview 和 Analysis 的价格口径一致。
-		costResult := costResolver.CalculateEvent(event)
+		costResult := costResolver.Calculate(UsageEventCostSubject(event))
 		cost := costResult.Cost.TotalCostUSD
 		// token velocity/cache level 都从同一个 bucket accumulator 派生。
 		bucket.tokens += event.TotalTokens
@@ -1761,9 +1634,9 @@ func loadUsageOverviewRealtimeEventsFromRecentCache(recentCache *UsageRecentEven
 }
 
 // loadUsageOverviewRealtimeEventsFromDB 在最近事件缓存完全不可用时，使用 usage_events 窄窗兜底。
-func loadUsageOverviewRealtimeEventsFromDB(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]usageOverviewRealtimeEvent, error) {
+func loadUsageOverviewRealtimeEventsFromDB(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeFields pricing.ActiveFields) ([]usageOverviewRealtimeEvent, error) {
 	// 兜底查询仍然只读实时窗口，不扩大成 Overview 的大范围扫描。
-	rows, err := loadUsageOverviewRealtimeEventRangeWithFilter(db, filter, start, end, false)
+	rows, err := loadUsageOverviewRealtimeEventRangeWithFilter(db, filter, start, end, false, activeFields)
 	if err != nil {
 		return nil, err
 	}
@@ -2262,13 +2135,13 @@ func applyUsageEventToOverviewSeries(series *dto.UsageOverviewSeriesRecord, even
 }
 
 // applyUsageEventToOverview 把边界 raw event 合并进 Overview，语义必须和 stats row 合并保持一致。
-func applyUsageEventToOverview(overview *dto.UsageOverviewRecord, event entities.UsageEvent, bucketByDay bool, costResolver *UsageCostResolver) {
+func applyUsageEventToOverview(overview *dto.UsageOverviewRecord, event entities.UsageEvent, bucketByDay bool, costResolver pricing.Resolver) {
 	overview.Summary.InputTokens += event.InputTokens
 	overview.Summary.CacheReadTokens += event.CacheReadTokens
 	overview.Summary.CacheCreationTokens += event.CacheCreationTokens
 	overview.Summary.ReasoningTokens += event.ReasoningTokens
 	// 边界事件也按当前价格表计算 cost；缺价格且有计费 token 时标记 cost 不完整。
-	result := costResolver.CalculateEvent(event)
+	result := costResolver.Calculate(UsageEventCostSubject(event))
 	if !result.Available {
 		overview.Summary.CostAvailable = false
 	}

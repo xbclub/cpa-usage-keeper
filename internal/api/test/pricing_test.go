@@ -45,6 +45,18 @@ func (s *pricingStub) DeletePricing(_ context.Context, model string) error {
 	return s.err
 }
 
+func (s *pricingStub) UpdatePricingBatch(_ context.Context, _ []servicedto.UpdatePricingInput) ([]entities.ModelPriceSetting, error) {
+	return nil, nil
+}
+
+func (s *pricingStub) ListPricingRules(context.Context, string) ([]servicedto.PricingRule, error) {
+	return nil, nil
+}
+
+func (s *pricingStub) ReplacePricingRules(_ context.Context, _ servicedto.ReplacePricingRulesInput) ([]servicedto.PricingRule, error) {
+	return nil, nil
+}
+
 func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
 

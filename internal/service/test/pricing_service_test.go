@@ -14,6 +14,7 @@ import (
 	"cpa-usage-keeper/internal/cpa/dto/models"
 	"cpa-usage-keeper/internal/cpa/dto/response"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/service"
@@ -24,7 +25,7 @@ import (
 
 func TestPricingServiceAllowsModelWithoutUsage(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-sonnet",
@@ -44,7 +45,7 @@ func TestPricingServiceAllowsModelWithoutUsage(t *testing.T) {
 
 func TestPricingServicePreservesOpenAICacheReadAndWritePrices(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "gpt-5.6-terra",
@@ -64,7 +65,7 @@ func TestPricingServicePreservesOpenAICacheReadAndWritePrices(t *testing.T) {
 
 func TestPricingServiceDefaultsPriceMultiplierToOne(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "default-multiplier-model",
@@ -82,7 +83,7 @@ func TestPricingServiceDefaultsPriceMultiplierToOne(t *testing.T) {
 
 func TestPricingServiceAllowsZeroPriceMultiplier(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 	zero := 0.0
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
@@ -108,7 +109,7 @@ func TestPricingServiceRejectsInvalidPriceMultiplier(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := openPricingServiceTestDatabase(t)
-			service := service.NewPricingService(db)
+			service := service.NewPricingService(db, emptyPricingCatalogForTest())
 
 			_, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 				Model:                name + "-multiplier-model",
@@ -135,7 +136,7 @@ func TestPricingServiceStoresPricingForUsedModel(t *testing.T) {
 		t.Fatalf("insert usage event: %v", err)
 	}
 
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-sonnet",
 		PricingStyle:         "claude",
@@ -170,7 +171,7 @@ func TestPricingServiceRejectsUnknownPricingStyle(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("insert usage event: %v", err)
 	}
-	service := service.NewPricingService(db)
+	service := service.NewPricingService(db, emptyPricingCatalogForTest())
 
 	_, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:        "claude-sonnet",
@@ -201,7 +202,7 @@ func TestPricingServiceMergesCPAAndLocalModelsWhenCPAAvailable(t *testing.T) {
 	}
 	logs := captureDebugLogs(t)
 
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
 		{ID: " zeta-model "},
 		{ID: "alpha-model"},
 		{ID: "zeta-model"},
@@ -233,7 +234,7 @@ func TestPricingServiceFallsBackToLocalModelsWhenCPAFetchFails(t *testing.T) {
 	}
 	logs := captureDebugLogs(t)
 
-	service := service.NewPricingService(db, stubModelsFetcher{err: errors.New("cpa unavailable")})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{err: errors.New("cpa unavailable")})
 	modelsList, err := service.ListUsedModels(context.Background())
 	if err != nil {
 		t.Fatalf("list models: %v", err)
@@ -264,7 +265,7 @@ func TestPricingServiceKeepsLocalModelsWhenCPAListIsEmpty(t *testing.T) {
 		t.Fatalf("insert usage event: %v", err)
 	}
 
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{}}}})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{}}}})
 	modelsList, err := service.ListUsedModels(context.Background())
 	if err != nil {
 		t.Fatalf("list models: %v", err)
@@ -276,7 +277,7 @@ func TestPricingServiceKeepsLocalModelsWhenCPAListIsEmpty(t *testing.T) {
 
 func TestPricingServiceAllowsPricingForCPAModelWithoutUsage(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "claude-opus"}}}}})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "claude-opus"}}}}})
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-opus",
@@ -294,7 +295,7 @@ func TestPricingServiceAllowsPricingForCPAModelWithoutUsage(t *testing.T) {
 
 func TestPricingServiceAllowsModelOutsideCPAModelList(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "cpa-model"}}}}})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "cpa-model"}}}}})
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "local-model",
@@ -314,7 +315,7 @@ func TestPricingServiceAllowsModelOutsideCPAModelList(t *testing.T) {
 
 func TestPricingServiceSavesPricingWhenCPAFetchFails(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db, stubModelsFetcher{err: errors.New("cpa unavailable")})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{err: errors.New("cpa unavailable")})
 
 	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "any-model",
@@ -338,7 +339,7 @@ func TestBuildPricingSyncPreviewMatchesMetadataModels(t *testing.T) {
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
 		{ID: "openai/gpt-4o"},
 		{ID: "Claude Sonnet 4"},
 		{ID: "deepseek-chat"},
@@ -437,7 +438,7 @@ func TestBuildPricingSyncPreviewStripsCPAPrefixBeforeMatchingModelsDev(t *testin
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	pricingService := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "openai/gpt-5.6-terra"}}}}})
+	pricingService := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "openai/gpt-5.6-terra"}}}}})
 	preview, err := pricingService.PreviewPricingSync(context.Background())
 	if err != nil {
 		t.Fatalf("build pricing sync preview: %v", err)
@@ -484,7 +485,7 @@ func TestBuildPricingSyncPreviewIgnoresCustomCPAPrefixForProviderSelection(t *te
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	pricingService := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "MIMO/mimo-v2.5-pro"}}}}})
+	pricingService := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "MIMO/mimo-v2.5-pro"}}}}})
 	preview, err := pricingService.PreviewPricingSync(context.Background())
 	if err != nil {
 		t.Fatalf("build pricing sync preview: %v", err)
@@ -531,7 +532,7 @@ func TestBuildPricingSyncPreviewKeepsCandidatesWhenPrefixProviderLacksModel(t *t
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	pricingService := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "deepseek/deepseek-v3.2"}}}}})
+	pricingService := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "deepseek/deepseek-v3.2"}}}}})
 	preview, err := pricingService.PreviewPricingSync(context.Background())
 	if err != nil {
 		t.Fatalf("build pricing sync preview: %v", err)
@@ -566,7 +567,7 @@ func TestBuildPricingSyncPreviewDefaultsMissingCachePricesToZero(t *testing.T) {
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	pricingService := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "gpt-no-cache-price"}}}}})
+	pricingService := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "gpt-no-cache-price"}}}}})
 	preview, err := pricingService.PreviewPricingSync(context.Background())
 	if err != nil {
 		t.Fatalf("build pricing sync preview: %v", err)
@@ -601,7 +602,7 @@ func TestBuildPricingSyncPreviewRejectsNegativeOpenAICacheWrite(t *testing.T) {
 	})
 
 	db := openPricingServiceTestDatabase(t)
-	service := service.NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "gpt-negative-write"}}}}})
+	service := service.NewPricingService(db, emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "gpt-negative-write"}}}}})
 	preview, err := service.PreviewPricingSync(context.Background())
 	if err != nil {
 		t.Fatalf("build pricing sync preview: %v", err)
@@ -802,4 +803,14 @@ func captureDebugLogs(t *testing.T) *bytes.Buffer {
 func openPricingServiceTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
 	return testutil.OpenTestDatabase(t)
+}
+
+// emptyPricingCatalogForTest 返回基于空快照的定价 catalog，供不需要真实价格数据的测试使用。
+func emptyPricingCatalogForTest() *pricing.Catalog {
+	return pricing.NewCatalog(pricing.EmptySnapshot())
+}
+
+// emptyPricingResolverForTest 返回基于空快照的定价 resolver，供不需要真实价格数据的测试使用。
+func emptyPricingResolverForTest() pricing.Resolver {
+	return emptyPricingCatalogForTest().NewResolver()
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
 )
 
@@ -30,7 +31,7 @@ func TestRecentCacheFiltersByModelOnBoundedEvents(t *testing.T) {
 		APIGroupKey: "provider-a",
 		Models:      []string{"model-a"},
 		QueryNow:    &now,
-	}, windows, cache)
+	}, windows, cache, pricing.ActiveFields(0))
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestRecentCacheFiltersByModelOnEventsSince(t *testing.T) {
 		APIGroupKey: "provider-a",
 		Models:      []string{"model-a"},
 		QueryNow:    &now,
-	}, windows, cache)
+	}, windows, cache, pricing.ActiveFields(0))
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestRecentCacheEmptyModelsDoesNotFilter(t *testing.T) {
 	events, err := loadUsageOverviewRawEventWindowsWithFilter(db, dto.UsageQueryFilter{
 		APIGroupKey: "provider-a",
 		QueryNow:    &now,
-	}, windows, cache)
+	}, windows, cache, pricing.ActiveFields(0))
 	if err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestHealthTotalsFiltersByModelOnHourlyStats(t *testing.T) {
 		EndTime:   &end,
 		Models:    []string{"model-a"},
 		QueryNow:  &queryNow,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -189,20 +190,22 @@ func TestAPIKeySummaryUsesModelAliasForPricing(t *testing.T) {
 func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias string, pricedModel string, expectCost float64, expectAvailable bool) {
 	t.Helper()
 	db := openTestDatabase(t)
-	pricingByModel := map[string]entities.ModelPriceSetting{}
 	if pricedModel != "" {
-		setting, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
+		if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 			Model:             pricedModel,
 			PromptPricePer1M:  3,
 			CompletionPricePer1M: 0,
 			CacheReadPricePer1M: 0,
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatalf("UpsertModelPriceSetting %s: %v", pricedModel, err)
 		}
-		pricingByModel[pricedModel] = *setting
 	}
-	costResolver := &UsageCostResolver{pricesByModel: pricingByModel}
+	// #353 起 UsageCostResolver 被 pricing.Resolver 取代；价格已 seed 到 db，从 snapshot 构造 resolver。
+	snapshot, err := LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatalf("LoadPricingSnapshot: %v", err)
+	}
+	costResolver := pricing.NewCatalog(snapshot).NewResolver()
 
 	acc := newAPIKeySummaryAccumulator()
 	alias := eventAlias

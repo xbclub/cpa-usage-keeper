@@ -84,7 +84,7 @@ func TestAttachWindowUsageStatsNilServiceReturnsOriginalResponse(t *testing.T) {
 
 func TestAttachWindowUsageStatsOnlyBackfillsMissingKnownWindowScopeRows(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	windowSeconds := int64(5 * 60 * 60)
 	weeklySeconds := int64(7 * 24 * 60 * 60)
@@ -204,7 +204,7 @@ func TestAttachWindowUsageStatsOnlyBackfillsMissingKnownWindowScopeRows(t *testi
 
 func TestAttachWindowUsageStatsBackfillsBothFieldsWhenProviderWindowUsageIncomplete(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	windowSeconds := int64(5 * 60 * 60)
 	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)
@@ -256,7 +256,7 @@ func TestAttachWindowUsageStatsBackfillsBothFieldsWhenProviderWindowUsageIncompl
 
 func TestAttachWindowUsageStatsDropsIncompleteProviderWindowUsageWhenFallbackUnavailable(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	windowSeconds := int64(5 * 60 * 60)
 
@@ -276,7 +276,7 @@ func TestAttachWindowUsageStatsDropsIncompleteProviderWindowUsageWhenFallbackUna
 
 func TestAttachWindowUsageStatsDoesNotBackfillPartialAdditionalOrCodeReviewRows(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	windowSeconds := int64(5 * 60 * 60)
 	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)
@@ -323,7 +323,7 @@ func TestAttachWindowUsageStatsDoesNotBackfillPartialAdditionalOrCodeReviewRows(
 
 func TestAttachWindowUsageStatsPreservesProviderZeroWindowUsage(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	windowSeconds := int64(5 * 60 * 60)
 	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)

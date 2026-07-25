@@ -96,7 +96,7 @@ func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T)
 	// quota window 读取 usage_events 的 corrected Total，但成本仍按 Input=100、Output=20 计算为 0.00014。
 	windowStart := event.Timestamp.Add(-time.Minute)
 	windowEnd := event.Timestamp.Add(time.Minute)
-	window, err := repository.SumUsageWindowStatsByAuthIndex(context.Background(), db, "missing-but-not-needed", windowStart, &windowEnd)
+	window, err := repository.SumUsageWindowStatsByAuthIndex(context.Background(), db, "missing-but-not-needed", windowStart, &windowEnd, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("sum usage window stats: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T)
 	}
 
 	// Request Events 服务层也必须返回同一 corrected Total 和不受 Total 改写影响的成本。
-	page, err := service.NewUsageService(db).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &windowStart, EndTime: &windowEnd})
+	page, err := service.NewUsageService(db, emptyPricingCatalogForTest()).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &windowStart, EndTime: &windowEnd})
 	if err != nil {
 		t.Fatalf("list usage events: %v", err)
 	}

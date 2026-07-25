@@ -28,7 +28,7 @@ func TestBuildUsageOverviewRealtimeWithFilterRequiresValidTTFTAndLatencyForBothD
 	realtime, err := repository.BuildUsageOverviewRealtimeWithFilter(db, repodto.UsageQueryFilter{
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilter returned error: %v", err)
 	}

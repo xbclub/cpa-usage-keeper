@@ -30,7 +30,7 @@ func (h *recordingProviderHandler) Check(ctx context.Context, input quota.Provid
 }
 
 func TestServiceRejectsEmptyAuthIndex(t *testing.T) {
-	service := quota.NewServiceWithRegistry(openQuotaTestDB(t), quota.NewProviderRegistry(nil))
+	service := quota.NewServiceWithRegistry(openQuotaTestDB(t), quota.NewProviderRegistry(nil), emptyPricingCatalogForTest())
 
 	_, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "   "})
 	if !errors.Is(err, quota.ErrValidation) {
@@ -42,7 +42,7 @@ func TestServiceIgnoresProviderOnlyIdentity(t *testing.T) {
 	db := openQuotaTestDB(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{AuthType: entities.UsageIdentityAuthTypeAIProvider, Identity: "shared-auth", Type: "codex", Name: "provider"})
 	handler := &recordingProviderHandler{}
-	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"codex": handler}))
+	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"codex": handler}), emptyPricingCatalogForTest())
 
 	_, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "shared-auth"})
 	if !errors.Is(err, quota.ErrNotFound) {
@@ -57,7 +57,7 @@ func TestServiceDispatchesAuthFileIdentityByProviderBeforeType(t *testing.T) {
 	db := openQuotaTestDB(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{AuthType: entities.UsageIdentityAuthTypeAuthFile, Identity: "codex-auth", Provider: "codex", Type: "unknown", Name: "auth file"})
 	handler := &recordingProviderHandler{output: quota.ProviderOutput{Provider: "codex", Result: quota.CodexResult{Usage: &quota.CodexUsagePayload{RateLimit: &quota.CodexRateLimitInfo{PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 25, LimitWindowSeconds: 18000}}}}}}
-	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"codex": handler}))
+	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"codex": handler}), emptyPricingCatalogForTest())
 
 	response, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "codex-auth"})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestServiceFallsBackToTypeWhenProviderMissing(t *testing.T) {
 	db := openQuotaTestDB(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{AuthType: entities.UsageIdentityAuthTypeAuthFile, Identity: "gemini-auth", Provider: "Gemini", Type: "gemini-cli", Name: "auth file"})
 	handler := &recordingProviderHandler{output: quota.ProviderOutput{Provider: "gemini-cli", Result: quota.GeminiCLIResult{Quota: &quota.GeminiCliQuotaPayload{Buckets: []quota.GeminiCliQuotaBucket{{ModelID: "gemini-2.5-pro_vertex", TokenType: "PROMPT", RemainingAmount: 42}}}}}}
-	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"gemini-cli": handler}))
+	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"gemini-cli": handler}), emptyPricingCatalogForTest())
 
 	response, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "gemini-auth"})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestServiceFallsBackToTypeWhenProviderMissing(t *testing.T) {
 func TestServiceReturnsUnsupportedType(t *testing.T) {
 	db := openQuotaTestDB(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{AuthType: entities.UsageIdentityAuthTypeAuthFile, Identity: "unknown-auth", Type: "unknown", Name: "auth file"})
-	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(nil))
+	service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(nil), emptyPricingCatalogForTest())
 
 	_, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "unknown-auth"})
 	if !errors.Is(err, quota.ErrUnsupportedType) {
@@ -108,7 +108,7 @@ func TestServiceAllowsCodexQuotaWithoutAccountID(t *testing.T) {
 		BodyText:   `{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false}}`,
 		Body:       json.RawMessage(`{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false}}`),
 	}}}
-	service := quota.NewServiceWithRegistry(db, quota.NewDefaultProviderRegistry(caller, quota.DefaultProviderConfigs()))
+	service := quota.NewServiceWithRegistry(db, quota.NewDefaultProviderRegistry(caller, quota.DefaultProviderConfigs()), emptyPricingCatalogForTest())
 
 	response, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "codex-auth"})
 	if err != nil {
@@ -126,7 +126,7 @@ func openQuotaTestDB(t *testing.T) *gorm.DB {
 
 func newQuotaServiceWithRegistry(t *testing.T, db *gorm.DB, registry quota.ProviderRegistry) *quota.Service {
 	t.Helper()
-	service := quota.NewServiceWithRegistry(db, registry)
+	service := quota.NewServiceWithRegistry(db, registry, emptyPricingCatalogForTest())
 	t.Cleanup(service.StopRefreshTasks)
 	return service
 }

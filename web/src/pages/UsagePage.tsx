@@ -865,6 +865,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     loadPricing,
     saveModelPrice,
     deleteModelPrice,
+    loadPricingRules,
+    savePricingRules,
     syncModelPrices,
     previewPricingSync,
   } = usePricingData({
@@ -2176,6 +2178,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   modelPrices={modelPrices}
                   onPriceSave={saveModelPrice}
                   onPriceDelete={deleteModelPrice}
+                  onRulesLoad={loadPricingRules}
+                  onRulesSave={savePricingRules}
                   onSyncPricesChange={syncModelPrices}
                   onSyncPreview={previewPricingSync}
                   onNotice={showTopNotice}

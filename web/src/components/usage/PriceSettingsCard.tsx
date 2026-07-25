@@ -7,7 +7,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { IconCheck, IconCircleAlert, IconRefreshCw } from '@/components/ui/icons';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
-import type { ModelPrice, PricingSaveResult, PricingStyle, PricingSyncMatch, PricingSyncPreviewResponse } from '@/lib/types';
+import type { ModelPrice, PricingRule, PricingSaveResult, PricingStyle, PricingSyncMatch, PricingSyncPreviewResponse, ReplacePricingRuleInput } from '@/lib/types';
+import { PriceRulesModal } from './pricing/PriceRulesModal';
 import styles from '@/pages/UsagePage.module.scss';
 
 const formatDisplayName = (value: string): string => {
@@ -40,11 +41,15 @@ export interface PriceSettingsCardProps {
   modelPrices: Record<string, ModelPrice>;
   onPriceSave: (model: string, price: ModelPrice) => void | Promise<void>;
   onPriceDelete: (model: string) => void | Promise<void>;
+  onRulesLoad?: (model: string) => Promise<PricingRule[] | null>;
+  onRulesSave?: (model: string, rules: ReplacePricingRuleInput[]) => Promise<PricingRule[] | null>;
   onSyncPricesChange?: (prices: Record<string, ModelPrice>) => Promise<PricingSaveResult>;
   onSyncPreview?: () => Promise<PricingSyncPreviewResponse>;
   onNotice?: (kind: 'success' | 'info' | 'error', message: string) => void;
   loading?: boolean;
 }
+
+const emptyPricingRules = async (): Promise<PricingRule[]> => [];
 
 export interface PricingSyncDraft {
   model: string;
@@ -185,6 +190,23 @@ export const notifyPricingSyncUnexpectedError = (
   );
 };
 
+export const notifyPricingSyncFailures = (
+  result: PricingSaveResult,
+  t: (key: string, options?: { success: number; failed: number }) => string,
+  onNotice: PriceSettingsCardProps['onNotice'],
+) => {
+  if (result.failures.length === 0) return;
+  const summary = t('usage_stats.model_price_sync_apply_partial', {
+    success: result.successModels.length,
+    failed: result.failures.length,
+  });
+  const detail = result.failures.find((failure) => failure.message.trim())?.message.trim() ?? '';
+  onNotice?.(
+    result.successModels.length > 0 ? 'info' : 'error',
+    `${summary}${detail ? `: ${detail}` : ''}`,
+  );
+};
+
 export interface SelectedSyncPrices {
   selectedDrafts: PricingSyncDraft[];
   prices: Record<string, ModelPrice>;
@@ -280,6 +302,8 @@ export function PriceSettingsCard({
   modelPrices,
   onPriceSave,
   onPriceDelete,
+  onRulesLoad,
+  onRulesSave,
   onSyncPricesChange,
   onSyncPreview,
   onNotice,
@@ -309,6 +333,7 @@ export function PriceSettingsCard({
   const [editSaving, setEditSaving] = useState(false);
   const [deleteModel, setDeleteModel] = useState<string | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [rulesModel, setRulesModel] = useState<string | null>(null);
 
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -486,40 +511,16 @@ export function PriceSettingsCard({
 
     setSyncApplying(true);
     try {
-      if (!onSyncPricesChange) {
-        const result = await saveSyncDraftsWithSingleModelCallback(selectedDrafts, syncPrices, onPriceSave);
-        setSyncDrafts((current) => markPricingSyncFailures(current, result));
-        if (result.failures.length === 0) {
-          onNotice?.('success', t('usage_stats.model_price_sync_apply_success', { count: result.successModels.length }));
-          setSyncOpen(false);
-          return;
-        }
-
-        onNotice?.(
-          result.successModels.length > 0 ? 'info' : 'error',
-          t('usage_stats.model_price_sync_apply_partial', {
-            success: result.successModels.length,
-            failed: result.failures.length,
-          }),
-        );
-        return;
-      }
-
-      const result = await onSyncPricesChange(syncPrices);
+      const result = onSyncPricesChange
+        ? await onSyncPricesChange(syncPrices)
+        : await saveSyncDraftsWithSingleModelCallback(selectedDrafts, syncPrices, onPriceSave);
       setSyncDrafts((current) => markPricingSyncFailures(current, result));
       if (result.failures.length === 0) {
         onNotice?.('success', t('usage_stats.model_price_sync_apply_success', { count: result.successModels.length }));
         setSyncOpen(false);
         return;
       }
-
-      onNotice?.(
-        result.successModels.length > 0 ? 'info' : 'error',
-        t('usage_stats.model_price_sync_apply_partial', {
-          success: result.successModels.length,
-          failed: result.failures.length,
-        }),
-      );
+      notifyPricingSyncFailures(result, t, onNotice);
     } catch (error) {
       notifyPricingSyncUnexpectedError(error, t, onNotice);
     } finally {
@@ -700,6 +701,9 @@ export function PriceSettingsCard({
                           </div>
                         </div>
                         <div className={styles.priceActions}>
+                          <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => setRulesModel(model)}>
+                            {t('usage_stats.model_price_rules')}
+                          </Button>
                           <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => handleOpenEdit(model)}>
                             {t('common.edit')}
                           </Button>
@@ -718,6 +722,15 @@ export function PriceSettingsCard({
           )}
         </div>
       </Card>
+
+      <PriceRulesModal
+        open={rulesModel !== null}
+        model={rulesModel ?? ''}
+        onClose={() => setRulesModel(null)}
+        loadRules={onRulesLoad ?? emptyPricingRules}
+        saveRules={onRulesSave ?? emptyPricingRules}
+        onNotice={onNotice}
+      />
 
       {/* 编辑弹窗不作为价格卡片内容参与布局，只负责编辑当前模型价格。 */}
       <Modal

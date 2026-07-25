@@ -1,4 +1,4 @@
-import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingRulesResponse, type PricingSyncPreviewResponse, type QuotaAutoRefreshSettings, type ReplacePricingRulesRequest, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
 import { resolveUsageRequestRange } from '@/utils/usage/rangeQuery'
 
@@ -825,6 +825,36 @@ export async function fetchPricing(signal?: AbortSignal): Promise<PricingRespons
   return response.json()
 }
 
+export async function fetchPricingRules(model: string, signal?: AbortSignal): Promise<PricingRulesResponse> {
+  const params = new URLSearchParams({ model })
+  const response = await apiFetch(`${apiPath('/pricing/rules')}?${params.toString()}`, {
+    signal,
+    cache: 'no-store',
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load pricing rules: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function replacePricingRules(
+  request: ReplacePricingRulesRequest,
+  signal?: AbortSignal,
+): Promise<PricingRulesResponse> {
+  const response = await apiFetch(apiPath('/pricing/rules'), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+    signal,
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update pricing rules: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function fetchPricingSyncPreview(signal?: AbortSignal): Promise<PricingSyncPreviewResponse> {
   const response = await apiFetch(apiPath('/pricing/sync/preview'), { signal, cache: 'no-store' })
   if (!response.ok) {
@@ -840,6 +870,20 @@ export async function updatePricing(model: string, pricing: Omit<PricingEntry, '
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ model, ...pricing }),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update pricing: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function updatePricingBatch(pricing: PricingEntry[]): Promise<PricingResponse> {
+  const response = await apiFetch(apiPath('/pricing/batch'), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ pricing }),
   })
   if (!response.ok) {
     await parseApiError(response, `Failed to update pricing: ${response.status}`)

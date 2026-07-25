@@ -22,7 +22,7 @@ func BenchmarkUsageOverviewStatsBacked(b *testing.B) {
 				filter := repositorydto.UsageQueryFilter{Range: window.name, StartTime: &window.start, EndTime: &window.end}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					if _, err := repository.BuildUsageOverviewWithFilter(db, filter); err != nil {
+					if _, err := repository.BuildUsageOverviewWithFilter(db, filter, emptyPricingResolverForTest()); err != nil {
 						b.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 					}
 				}

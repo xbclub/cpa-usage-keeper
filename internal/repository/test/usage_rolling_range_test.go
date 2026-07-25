@@ -35,7 +35,7 @@ func TestBuildAnalysisIncludesCurrentHourStatsForArbitraryHourRange(t *testing.T
 		t.Fatalf("drop usage_events: %v", err)
 	}
 
-	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "13h", StartTime: &start, EndTime: &end})
+	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "13h", StartTime: &start, EndTime: &end}, emptyPricingResolverForTest())
 	if len(analysis.TokenUsage) != 1 || !analysis.TokenUsage[0].Bucket.Equal(currentHour) || analysis.TokenUsage[0].TotalTokens != 100 {
 		t.Fatalf("expected arbitrary hour range to include current hour stats, got %+v", analysis.TokenUsage)
 	}
@@ -67,7 +67,7 @@ func TestBuildAnalysisIncludesCurrentHourStatsForRollingDayRange(t *testing.T) {
 		t.Fatalf("drop usage_events: %v", err)
 	}
 
-	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "13d", StartTime: &start, EndTime: &end})
+	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "13d", StartTime: &start, EndTime: &end}, emptyPricingResolverForTest())
 	currentDay := time.Date(2026, 5, 21, 0, 0, 0, 0, location)
 	if len(analysis.TokenUsage) != 1 || !analysis.TokenUsage[0].Bucket.Equal(currentDay) || analysis.TokenUsage[0].TotalTokens != 100 {
 		t.Fatalf("expected rolling day range to include current hour stats, got %+v", analysis.TokenUsage)
@@ -100,7 +100,7 @@ func TestBuildAnalysisKeepsDailyStatsAcrossDSTBoundary(t *testing.T) {
 		t.Fatalf("drop usage_events: %v", err)
 	}
 
-	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "8d", StartTime: &start, EndTime: &end})
+	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "8d", StartTime: &start, EndTime: &end}, emptyPricingResolverForTest())
 	if len(analysis.TokenUsage) != 1 || !analysis.TokenUsage[0].Bucket.Equal(dailyBucket) || analysis.TokenUsage[0].TotalTokens != 100 {
 		t.Fatalf("expected DST-adjacent daily stat to remain included, got %+v", analysis.TokenUsage)
 	}
@@ -113,7 +113,7 @@ func TestBuildUsageOverviewUsesShortHealthWindowForArbitraryHourRange(t *testing
 
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repodto.UsageQueryFilter{
 		Range: "13h", StartTime: &start, EndTime: &end, QueryNow: &end,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}

@@ -32,7 +32,7 @@ func TestCustomHourOverviewReadsCompleteHourlyBucketsWithoutUsageEvents(t *testi
 	queries := captureOverviewDataQueries(t, db, "custom_hour")
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &queryNow,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestCustomOverviewRollupQueryProjectsAndGroupsOnlyCardDimensions(t *testing
 	queries := captureOverviewDataQueries(t, db, "projection")
 	if _, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &end,
-	}); err != nil {
+	}, emptyPricingResolverForTest()); err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestCustomOverviewGroupedProjectionPreservesPerRowCostNormalization(t *test
 
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &end,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestPresetOverviewRawBoundaryUsesCardOnlyProjection(t *testing.T) {
 
 	if _, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "4h", StartTime: &start, EndTime: &end, QueryNow: &end,
-	}); err != nil {
+	}, emptyPricingResolverForTest()); err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestCustomDayOverviewReadsCompleteDailyBucketsWithoutUsageEvents(t *testing
 	queries := captureOverviewDataQueries(t, db, "custom_day")
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "day", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &queryNow,
-	})
+	}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}

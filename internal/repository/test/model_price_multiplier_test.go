@@ -10,7 +10,7 @@ import (
 )
 
 func TestUpsertModelPriceSettingDefaultsMultiplierToOne(t *testing.T) {
-	db := openUsageCostResolverDatabase(t, "model-price-multiplier-default.db")
+	db := openTestDatabase(t)
 
 	created, err := repository.UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
 		Model:                "default-model",
@@ -35,7 +35,7 @@ func TestUpsertModelPriceSettingDefaultsMultiplierToOne(t *testing.T) {
 }
 
 func TestUpsertModelPriceSettingPreservesExplicitZeroMultiplier(t *testing.T) {
-	db := openUsageCostResolverDatabase(t, "model-price-multiplier-zero.db")
+	db := openTestDatabase(t)
 	zero := 0.0
 
 	created, err := repository.UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
@@ -68,7 +68,7 @@ func TestUpsertModelPriceSettingRejectsInvalidMultiplier(t *testing.T) {
 		"infinite": math.Inf(1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			db := openUsageCostResolverDatabase(t, "model-price-multiplier-invalid-"+name+".db")
+			db := openTestDatabase(t)
 
 			_, err := repository.UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
 				Model:                "invalid-" + name,

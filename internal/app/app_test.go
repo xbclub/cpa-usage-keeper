@@ -16,6 +16,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/poller"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/testutil"
@@ -103,7 +104,7 @@ func TestAppCloseStopsRealQuotaRefreshTasksBeforeDatabaseClose(t *testing.T) {
 	}
 	block := make(chan struct{})
 	handler := &appQuotaHandlerStub{block: block}
-	quotaService := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}))
+	quotaService := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}), pricing.NewCatalog(pricing.EmptySnapshot()))
 	quotaService.SetRefreshContext(context.Background())
 	app := &App{DB: db, QuotaService: quotaService}
 

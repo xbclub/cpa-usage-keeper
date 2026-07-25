@@ -16,7 +16,7 @@ import (
 
 func TestUsageActivityMapsNormalizedTimeRangesToFixedWindowGrains(t *testing.T) {
 	db := openUsageActivityServiceDatabase(t)
-	provider := service.NewUsageService(db)
+	provider := service.NewUsageService(db, emptyPricingCatalogForTest())
 	now := time.Date(2026, 7, 20, 12, 34, 56, 0, time.UTC)
 	testCases := []struct {
 		name         string
@@ -80,7 +80,7 @@ func TestUsageActivityMapsNormalizedTimeRangesToFixedWindowGrains(t *testing.T) 
 }
 
 func TestUsageActivityDirectWindowsMatchEquivalentNormalizedRanges(t *testing.T) {
-	provider := service.NewUsageService(openUsageActivityServiceDatabase(t))
+	provider := service.NewUsageService(openUsageActivityServiceDatabase(t), emptyPricingCatalogForTest())
 	now := time.Date(2026, 7, 20, 12, 34, 56, 0, time.UTC)
 	testCases := []struct {
 		name       string
@@ -148,7 +148,7 @@ func TestCustomDayUsageActivityReadsDailyRollupWithoutRawEvents(t *testing.T) {
 		t.Fatalf("drop raw usage events: %v", err)
 	}
 
-	activity, err := service.NewUsageService(db).GetUsageActivity(context.Background(), servicedto.UsageFilter{
+	activity, err := service.NewUsageService(db, emptyPricingCatalogForTest()).GetUsageActivity(context.Background(), servicedto.UsageFilter{
 		Range: "custom", CustomUnit: "day", RangeUnit: "day", RangeCount: 7, QueryNow: &now,
 	})
 	if err != nil {
@@ -191,7 +191,7 @@ func TestUsageActivityNaturalDayUsesExactLocalDayAndExcludesAdjacentEvents(t *te
 
 	filterEnd := dayEnd.Add(-time.Nanosecond)
 	queryNow := dayEnd.Add(12 * time.Hour)
-	activity, err := service.NewUsageService(db).GetUsageActivity(context.Background(), servicedto.UsageFilter{
+	activity, err := service.NewUsageService(db, emptyPricingCatalogForTest()).GetUsageActivity(context.Background(), servicedto.UsageFilter{
 		Range:          "yesterday",
 		RangeUnit:      "day",
 		RangeCount:     1,
@@ -251,7 +251,7 @@ func TestUsageActivityTodayKeepsFullDayAxisButExcludesFutureData(t *testing.T) {
 	}
 
 	filterEnd := dayEnd.Add(-time.Nanosecond)
-	activity, err := service.NewUsageService(db).GetUsageActivity(context.Background(), servicedto.UsageFilter{
+	activity, err := service.NewUsageService(db, emptyPricingCatalogForTest()).GetUsageActivity(context.Background(), servicedto.UsageFilter{
 		Range:          "today",
 		RangeUnit:      "day",
 		RangeCount:     1,
@@ -295,7 +295,7 @@ func TestUsageActivityHeaderAndBlocksUseTheSameAPIKeyScope(t *testing.T) {
 		t.Fatalf("seed Activity rows: %v", err)
 	}
 
-	activity, err := service.NewUsageService(db).GetUsageActivity(context.Background(), servicedto.UsageFilter{
+	activity, err := service.NewUsageService(db, emptyPricingCatalogForTest()).GetUsageActivity(context.Background(), servicedto.UsageFilter{
 		Range: "24h", RangeUnit: "hour", RangeCount: 24, QueryNow: &now, APIKeyID: fmt.Sprint(apiKey.ID),
 	})
 	if err != nil {

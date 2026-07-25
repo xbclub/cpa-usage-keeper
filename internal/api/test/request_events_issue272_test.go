@@ -49,7 +49,7 @@ func TestIssue272RedisIngressKeepsRequestEventSpeedTPS(t *testing.T) {
 	}
 
 	// Request Events 必须看到 fold 后 Output=70、Reasoning=50，才能用 20 个可见输出 Token 计算非空速度。
-	router := NewRouter(nil, nil, service.NewUsageService(db), nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, service.NewUsageService(db, emptyPricingCatalogForTest()), nil, AuthConfig{}, nil, "")
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/testutil"
 )
@@ -28,7 +29,7 @@ func TestSumUsageWindowStatsByAuthIndexUsesAuthIndexAndWindow(t *testing.T) {
 		t.Fatalf("seed usage events: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end)
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestSumUsageWindowStatsByAuthIndexCalculatesClaudeCacheReadAndCreationCost(
 		t.Fatalf("seed usage event: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-claude", start, &end)
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-claude", start, &end, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestSumUsageWindowStatsByAuthIndexUsesHourlyStatsForLongWindow(t *testing.T
 		t.Fatalf("delete full-hour raw events: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end)
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
@@ -128,11 +129,11 @@ func TestSumLongUsageWindowTokenStatsDoesNotDoubleCountWhenBoundaryClips(t *test
 		t.Fatalf("seed usage event: %v", err)
 	}
 
-	rows, err := sumLongUsageWindowTokenStats(db, "auth-1", start, end)
+	rows, err := sumLongUsageWindowTokenStats(db, "auth-1", start, end, pricing.ActiveFields(0))
 	if err != nil {
 		t.Fatalf("sumLongUsageWindowTokenStats returned error: %v", err)
 	}
-	stats := usageWindowStatsFromTokenStats(rows, nil)
+	stats := usageWindowStatsFromTokenStats(rows, emptyPricingResolverForTest())
 	if stats.Tokens != 1_000_000 {
 		t.Fatalf("expected clipped boundaries to count event once, got %d", stats.Tokens)
 	}
@@ -146,14 +147,14 @@ func TestSumUsageWindowStatsByAuthIndexIgnoresZeroWindowTimes(t *testing.T) {
 		t.Fatalf("seed usage event: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", time.Time{}, nil)
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", time.Time{}, nil, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex with zero start returned error: %v", err)
 	}
 	if stats.Tokens != 0 || stats.Cost != 0 {
 		t.Fatalf("expected zero start to return empty stats, got %+v", stats)
 	}
-	stats, err = SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &zero)
+	stats, err = SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &zero, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex with zero end returned error: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestSumUsageWindowStatsByAuthIndexTreatsMissingPriceAsZeroCost(t *testing.T
 	if err := db.Create(&entities.UsageEvent{AuthType: "oauth", AuthIndex: "auth-1", Model: "missing", Timestamp: start, InputTokens: 1_000_000, TotalTokens: 1_000_000}).Error; err != nil {
 		t.Fatalf("seed usage event: %v", err)
 	}
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start.Add(-time.Minute), nil)
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start.Add(-time.Minute), nil, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
