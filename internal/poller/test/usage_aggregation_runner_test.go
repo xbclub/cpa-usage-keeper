@@ -112,13 +112,7 @@ func TestUsageAggregationRunnerRetriesFailedActivityWithoutChangingOverview(t *t
 	assertUsageAggregationCheckpoint(t, db, "overview", 1)
 
 	// trigger 强制 Activity INSERT 失败，模拟新聚合自身错误。
-	if err := db.Exec(`CREATE TRIGGER fail_runner_activity
-		BEFORE INSERT ON usage_activity_stats
-		BEGIN
-			SELECT RAISE(ABORT, 'forced runner activity failure');
-		END`).Error; err != nil {
-		t.Fatalf("create activity failure trigger: %v", err)
-	}
+	forceFailInsertTrigger(t, db, "fail_runner_activity", "usage_activity_stats", "forced runner activity failure")
 	result, err = runner.RunOnce(context.Background())
 	if err == nil {
 		t.Fatalf("expected activity failure, got %+v", result)
@@ -127,9 +121,7 @@ func TestUsageAggregationRunnerRetriesFailedActivityWithoutChangingOverview(t *t
 	assertUsageAggregationCheckpointMissing(t, db, "activity")
 
 	// 移除故障后必须重试同一个 Activity kind，而不是错误地跳到下一事务。
-	if err := db.Exec("DROP TRIGGER fail_runner_activity").Error; err != nil {
-		t.Fatalf("drop activity failure trigger: %v", err)
-	}
+	dropForceFailTrigger(t, db, "fail_runner_activity", "usage_activity_stats")
 	result, err = runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatalf("retry activity RunOnce: %v", err)
@@ -566,13 +558,7 @@ func TestUsageAggregationRunnerShutdownStillLogsDetachedTransactionFailure(t *te
 	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "runner-shutdown-error", APIGroupKey: "provider-a", Model: "model-a", Timestamp: now, TotalTokens: 1}}); err != nil {
 		t.Fatalf("insert shutdown error event: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_shutdown_overview
-		BEFORE INSERT ON usage_overview_hourly_stats
-		BEGIN
-			SELECT RAISE(ABORT, 'forced shutdown overview failure');
-		END`).Error; err != nil {
-		t.Fatalf("create shutdown failure trigger: %v", err)
-	}
+	forceFailInsertTrigger(t, db, "fail_shutdown_overview", "usage_overview_hourly_stats", "forced shutdown overview failure")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	callbackName := "test:cancel_before_shutdown_overview_failure"
@@ -731,13 +717,7 @@ func TestUsageAggregationRunnerRunWakesOnStartupAndKeepsOtherKindsMovingAfterFai
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("insert background event: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_background_activity
-		BEFORE INSERT ON usage_activity_stats
-		BEGIN
-			SELECT RAISE(ABORT, 'forced background activity failure');
-		END`).Error; err != nil {
-		t.Fatalf("create background activity failure trigger: %v", err)
-	}
+	forceFailInsertTrigger(t, db, "fail_background_activity", "usage_activity_stats", "forced background activity failure")
 	runner := poller.NewUsageAggregationRunner(db, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -1014,4 +994,24 @@ func assertUsageAggregationCheckpointMissing(t *testing.T, db *gorm.DB, name str
 	if count != 0 {
 		t.Fatalf("expected %s checkpoint to be missing, got %d rows", name, count)
 	}
+}
+
+// forceFailInsertTrigger 在 PG 上创建 BEFORE INSERT 触发器强制抛错（等价 SQLite 的 RAISE(ABORT)）。
+// SQLite 的 CREATE TRIGGER...BEGIN RAISE(ABORT)...END 语法在 PG 上需转 plpgsql 函数 + 触发器（Step 4.9 #4）。
+func forceFailInsertTrigger(t *testing.T, db *gorm.DB, name, table, message string) {
+	t.Helper()
+	body := fmt.Sprintf(`'BEGIN RAISE EXCEPTION ''%s''; RETURN NEW; END'`, message)
+	if err := db.Exec(fmt.Sprintf(`CREATE OR REPLACE FUNCTION %s_fn() RETURNS TRIGGER AS %s LANGUAGE plpgsql`, name, body)).Error; err != nil {
+		t.Fatalf("create %s trigger function: %v", name, err)
+	}
+	if err := db.Exec(fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s_fn()`, name, table, name)).Error; err != nil {
+		t.Fatalf("create %s trigger: %v", name, err)
+	}
+}
+
+// dropForceFailTrigger 移除触发器与函数。
+func dropForceFailTrigger(t *testing.T, db *gorm.DB, name, table string) {
+	t.Helper()
+	_ = db.Exec(fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON %s`, name, table)).Error
+	_ = db.Exec(fmt.Sprintf(`DROP FUNCTION IF EXISTS %s_fn()`, name)).Error
 }
