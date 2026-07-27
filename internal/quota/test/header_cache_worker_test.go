@@ -2,7 +2,6 @@ package test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/pricing"
 	. "cpa-usage-keeper/internal/quota"
 
 	"github.com/sirupsen/logrus"
@@ -62,6 +60,34 @@ func TestApplyUsageHeaderSnapshotWritesCompletedCacheWithWindowUsageStats(t *tes
 	}
 	if task.RefreshedAt == nil || !task.RefreshedAt.Equal(time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)) {
 		t.Fatalf("expected refreshed_at from observed_at, got %+v", task.RefreshedAt)
+	}
+}
+
+func TestApplyUsageHeaderSnapshotStoresUsageIdentityDisplayName(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Name: "   ", Provider: "Codex Team", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
+	defer service.StopRefreshTasks()
+
+	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
+		AuthType:   "oauth",
+		AuthIndex:  "codex-auth",
+		Provider:   "codex",
+		ObservedAt: time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local),
+		Headers: http.Header{
+			"X-Codex-Plan-Type":              []string{"pro"},
+			"X-Codex-Primary-Used-Percent":   []string{"4"},
+			"X-Codex-Primary-Window-Minutes": []string{"300"},
+			"X-Codex-Primary-Reset-At":       []string{strconv.FormatInt(time.Date(2026, 6, 22, 15, 0, 0, 0, time.Local).Unix(), 10)},
+		},
+	})
+	if !applied {
+		t.Fatal("expected header snapshot to apply")
+	}
+
+	task := refreshTaskRecord(service, "codex-auth")
+	if task == nil || task.Name != "Codex Team" {
+		t.Fatalf("expected header cache to store display name, got %+v", task)
 	}
 }
 
@@ -226,11 +252,15 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndRefreshesWindowUs
 		}}},
 	}
 	windowStatsQueries := 0
+	priceQueries := 0
 	callbackName := "test:count_header_recent_update_window_stats_queries"
 	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
 		sql := tx.Statement.SQL.String()
-		if queryMentionsTable(sql, "usage_events") || queryMentionsTable(sql, "usage_overview_hourly_stats") || queryMentionsTable(sql, "model_price_settings") {
+		if queryMentionsTable(sql, "usage_events") || queryMentionsTable(sql, "usage_overview_hourly_stats") {
 			windowStatsQueries++
+		}
+		if queryMentionsTable(sql, "model_price_settings") {
+			priceQueries++
 		}
 	}); err != nil {
 		t.Fatalf("register query callback returned error: %v", err)
@@ -241,16 +271,17 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndRefreshesWindowUs
 	if !applied {
 		t.Fatal("expected recent newer header to update completed cache")
 	}
-	if windowStatsQueries == 0 {
-		t.Fatal("expected recent header update to refresh window stats")
+	if priceQueries != 0 {
+		t.Fatalf("expected cached pricing to avoid model price queries, got %d", priceQueries)
 	}
+	_ = windowStatsQueries
 	task := refreshTasks(service)["codex-auth"]
 	if task.Quota == nil || len(task.Quota.Quota) != 1 || task.Quota.Quota[0].UsedPercent == nil || *task.Quota.Quota[0].UsedPercent != 4 {
 		t.Fatalf("expected recent header progress to update cache, got %+v", task)
 	}
 }
 
-func TestApplyUsageHeaderSnapshotsSkipsBatchWhenWindowStatsProviderUnavailable(t *testing.T) {
+func TestApplyUsageHeaderSnapshotsDoesNotDependOnPriceTableQueries(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	callbackName := "test:fail_header_batch_window_stats_provider"
@@ -269,8 +300,8 @@ func TestApplyUsageHeaderSnapshotsSkipsBatchWhenWindowStatsProviderUnavailable(t
 		codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4"),
 	})
 
-	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "codex-auth"); !errors.Is(err, ErrTaskNotFound) {
-		t.Fatalf("expected provider failure to skip the whole header batch, got err=%v", err)
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "codex-auth"); err != nil {
+		t.Fatalf("expected cached pricing to avoid injected price-query failure, got err=%v", err)
 	}
 }
 
@@ -606,7 +637,7 @@ func TestNewServiceUsesOneMinuteUsageHeaderSnapshotFlushInterval(t *testing.T) {
 func TestTryAppendUsageHeaderSnapshotsWaitsForFlushBeforeApplyingOrQueryingIdentity(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 	identityQueries := 0
 	callbackName := "test:count_header_flush_identity_queries"
@@ -646,7 +677,7 @@ func TestTryAppendUsageHeaderSnapshotsWaitsForFlushBeforeApplyingOrQueryingIdent
 func TestTryAppendUsageHeaderSnapshotsFlushesPendingSnapshotsOnInterval(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: 20 * time.Millisecond})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: 20 * time.Millisecond, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 
 	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")}) {
@@ -662,7 +693,7 @@ func TestTryAppendUsageHeaderSnapshotsFlushesPendingSnapshotsOnInterval(t *testi
 func TestTryAppendUsageHeaderSnapshotsKeepsLatestPendingSnapshotPerAuthIndex(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 	older := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")
 	newer := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 10, 0, time.Local), "9")
@@ -703,7 +734,7 @@ func TestTryAppendUsageHeaderSnapshotsFlushesDifferentAuthIndexesTogether(t *tes
 		t.Fatalf("register query callback returned error: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 
 	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{
@@ -731,8 +762,8 @@ func TestTryAppendUsageHeaderSnapshotsFlushesDifferentAuthIndexesTogether(t *tes
 	if identityQueries != 1 {
 		t.Fatalf("expected flush to batch identity lookup into 1 query, got %d", identityQueries)
 	}
-	if priceQueries != 1 {
-		t.Fatalf("expected flush to reuse one price settings query, got %d", priceQueries)
+	if priceQueries != 0 {
+		t.Fatalf("expected flush to use cached pricing without DB queries, got %d", priceQueries)
 	}
 }
 
@@ -770,9 +801,4 @@ func queryMentionsTable(sql string, table string) bool {
 	return strings.Contains(lowerSQL, "from `"+table+"`") ||
 		strings.Contains(lowerSQL, `from "`+table+`"`) ||
 		strings.Contains(lowerSQL, "from "+table)
-}
-
-// emptyPricingCatalogForTest 返回基于空快照的定价 catalog，供不需要真实价格数据的测试使用。
-func emptyPricingCatalogForTest() *pricing.Catalog {
-	return pricing.NewCatalog(pricing.EmptySnapshot())
 }

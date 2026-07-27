@@ -30,7 +30,7 @@ func TestBuildAnalysisUsesLongCustomDayRollupsWithoutUsageEvents(t *testing.T) {
 
 	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "day", StartTime: &start, EndTime: &end, EndExclusive: true,
-	}, emptyPricingResolverForTest())
+	}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
 	}

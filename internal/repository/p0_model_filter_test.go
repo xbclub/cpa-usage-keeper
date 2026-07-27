@@ -128,7 +128,7 @@ func TestHealthTotalsFiltersByModelOnHourlyStats(t *testing.T) {
 		EndTime:   &end,
 		Models:    []string{"model-a"},
 		QueryNow:  &queryNow,
-	}, emptyPricingResolverForTest())
+	}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
