@@ -164,7 +164,7 @@ func TestParseUsageFilterQueryTodayRangeUsesLocalDSTBoundary(t *testing.T) {
 }
 
 func TestParseUsageFilterQueryCustomRange(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-20T00:00:00Z&end=2026-04-21T23:59:59Z", nil)
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-20T00:00:00Z&end=2026-04-21T23:00:00Z", nil)
 
 	filter, err := parseUsageFilterQuery(req, time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -176,7 +176,8 @@ func TestParseUsageFilterQueryCustomRange(t *testing.T) {
 	if !filter.StartTime.Equal(time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected custom start: %+v", filter)
 	}
-	if !filter.EndTime.Equal(time.Date(2026, 4, 21, 23, 59, 59, 0, time.UTC)) {
+	// hour 单元 custom range 的 EndTime 为 end+1h（半开区间 exclusive）。
+	if !filter.EndTime.Equal(time.Date(2026, 4, 22, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected custom end: %+v", filter)
 	}
 }
@@ -200,7 +201,7 @@ func TestParseUsageFilterQueryCustomDateRangeUsesLocalDayBoundary(t *testing.T) 
 		t.Fatalf("expected custom date range bounds, got %+v", filter)
 	}
 	expectedStart := time.Date(2026, 4, 20, 0, 0, 0, 0, location)
-	expectedEnd := time.Date(2026, 4, 22, 0, 0, 0, 0, location).Add(-time.Nanosecond)
+	expectedEnd := time.Date(2026, 4, 22, 0, 0, 0, 0, location)
 	if !filter.StartTime.Equal(expectedStart) {
 		t.Fatalf("expected custom date start %s, got %s", expectedStart, *filter.StartTime)
 	}
@@ -239,8 +240,8 @@ func TestParseUsageFilterQueryRejectsCustomRangeBeforeRetentionStart(t *testing.
 		path      string
 		wantError bool
 	}{
-		{name: "before retention", path: "/api/v1/usage/overview?range=custom&start=2026-04-30&end=2026-05-01", wantError: true},
-		{name: "at retention boundary", path: "/api/v1/usage/overview?range=custom&start=2026-05-01&end=2026-05-01"},
+		{name: "before retention", path: "/api/v1/usage/overview?range=custom&start=2026-05-17&end=2026-05-18", wantError: true},
+		{name: "at retention boundary", path: "/api/v1/usage/overview?range=custom&start=2026-05-18&end=2026-05-18"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tc.path, nil)
