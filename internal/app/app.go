@@ -227,6 +227,21 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	}
 	authHandler := api.NewAuthHandler(authCfg, sessionManager)
 
+	// 启动时同步追平历史聚合（Overview/Activity/Identity），避免首次页面加载触发全表扫描。
+	// 单 writer runner 复用同一个 DB；循环到无更多有界 batch 为止，inbox backlog 时让路给前台。
+	logrus.Info("starting usage overview aggregation catch-up")
+	for {
+		result, err := usageAggregationRunner.RunOnce(context.Background())
+		if err != nil {
+			logrus.WithError(err).Warn("usage overview aggregation catch-up step failed; background runner will continue")
+			break
+		}
+		if !result.Processed {
+			break
+		}
+	}
+	logrus.Info("completed usage overview aggregation catch-up")
+
 	return &App{
 		Config: &cfg,
 		DB:     db,
