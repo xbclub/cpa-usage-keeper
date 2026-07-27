@@ -192,6 +192,7 @@ func TestUpdateCPAAPIKeyAliasUpdatesAndClearsAlias(t *testing.T) {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/usage/api-keys/1", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		router.ServeHTTP(resp, req)
 		if resp.Code != http.StatusOK {
 			t.Fatalf("expected status 200, got %d body=%s", resp.Code, resp.Body.String())
@@ -231,6 +232,7 @@ func TestUpdateCPAAPIKeyAliasRejectsInvalidInputAndDeletedRows(t *testing.T) {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPatch, tc.path, bytes.NewBufferString(tc.body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		router.ServeHTTP(resp, req)
 		if resp.Code != tc.want {
 			t.Fatalf("%s: expected status %d, got %d body=%s", tc.name, tc.want, resp.Code, resp.Body.String())

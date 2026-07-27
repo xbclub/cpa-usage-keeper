@@ -11,12 +11,16 @@ func TestAllIncludesCoreModels(t *testing.T) {
 		&UsageEvent{},
 		&RedisUsageInbox{},
 		&ModelPriceSetting{},
+		&ModelPriceRule{},
 		&UsageIdentity{},
 		&CPAAPIKey{},
 		&UsageOverviewHourlyStat{},
 		&UsageOverviewDailyStat{},
 		&UsageOverviewAggregationCheckpoint{},
+		&UsageActivityStat{},
+		&UsageActivityAggregationCheckpoint{},
 		&AuthSession{},
+		&AppSetting{},
 	}
 	if len(items) != len(expected) {
 		t.Fatalf("expected %d registered models, got %d", len(expected), len(items))

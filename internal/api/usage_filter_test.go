@@ -166,7 +166,7 @@ func TestParseUsageFilterQueryTodayRangeUsesLocalDSTBoundary(t *testing.T) {
 func TestParseUsageFilterQueryCustomRange(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-20T00:00:00Z&end=2026-04-21T23:59:59Z", nil)
 
-	filter, err := parseUsageFilterQuery(req, time.Time{})
+	filter, err := parseUsageFilterQuery(req, time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestParseUsageFilterQueryCustomDateRangeUsesLocalDayBoundary(t *testing.T) 
 
 	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-20&end=2026-04-21", nil)
 
-	filter, err := parseUsageFilterQuery(req, time.Time{})
+	filter, err := parseUsageFilterQuery(req, time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
 	}

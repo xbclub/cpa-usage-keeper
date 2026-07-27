@@ -17,7 +17,6 @@ import (
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/service"
-	"cpa-usage-keeper/internal/timeutil"
 	"cpa-usage-keeper/internal/updatecheck"
 	"cpa-usage-keeper/internal/version"
 	"github.com/gin-gonic/gin"
@@ -353,9 +352,6 @@ func buildStatusResponse(status poller.Status, config StatusRouteConfig) statusR
 		LastWarning:                status.LastWarning,
 		LastStatus:                 status.LastStatus,
 	}
-	if !status.LastRunAt.IsZero() {
-		lastRunAt := timeutil.NormalizeStorageTime(status.LastRunAt)
-		response.LastRunAt = &lastRunAt
-	}
+	// fork 不向 /status 响应暴露 last_run_at（前端 Status 类型也刻意不含该字段）。
 	return response
 }
