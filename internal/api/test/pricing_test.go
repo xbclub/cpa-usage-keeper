@@ -10,6 +10,7 @@ import (
 
 	. "cpa-usage-keeper/internal/api"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
@@ -248,7 +249,7 @@ func TestUpdatePricingRouteAllowsZeroPriceMultiplier(t *testing.T) {
 }
 
 func TestUpdatePricingRouteMapsPriceMultiplierValidationToBadRequest(t *testing.T) {
-	provider := &pricingStub{err: errors.New("price_multiplier must be non-negative")}
+	provider := &pricingStub{err: errors.Join(service.ErrInvalidPricingInput, errors.New("price_multiplier must be non-negative"))}
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/free-model", strings.NewReader(`{"prompt_price_per_1m":3,"completion_price_per_1m":15,"cache_read_price_per_1m":0.3,"price_multiplier":-1}`))
