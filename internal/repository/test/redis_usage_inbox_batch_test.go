@@ -67,7 +67,7 @@ func TestMarkRedisUsageInboxProcessedBatchMapsKeysAcrossChunks(t *testing.T) {
 		if row.Status != repository.RedisUsageInboxStatusProcessed || row.UsageEventKey != fmt.Sprintf("event-key-%d", i) {
 			t.Fatalf("unexpected processed mapping at index %d: %+v", i, row)
 		}
-		if row.ProcessedAt == nil || !row.ProcessedAt.Equal(processedAt) {
+		if row.ProcessedAt == nil || row.ProcessedAt.Sub(processedAt).Abs() > time.Millisecond {
 			t.Fatalf("unexpected processed_at at index %d: %+v", i, row.ProcessedAt)
 		}
 		if row.LastError != "" {
@@ -83,8 +83,15 @@ func TestMarkRedisUsageInboxProcessedBatchMapsKeysAcrossChunks(t *testing.T) {
 	for _, field := range []string{"processed_at", "updated_at"} {
 		rawValue := rawTimeValue(t, db, "redis_usage_inboxes", field, fmt.Sprintf("id = %d", rows[0].ID))
 		assertProjectTimezoneStorageValue(t, rawValue, "redis_usage_inboxes."+field)
-		if field == "processed_at" && rawValue != timeutil.FormatStorageTime(processedAt) {
-			t.Fatalf("expected processed_at %q, got %q", timeutil.FormatStorageTime(processedAt), rawValue)
+		if field == "processed_at" {
+			// PG timestamptz 微秒精度，FormatStorageTime 是纳秒；解析后用毫秒容差比较（吸收微秒四舍五入差异）。
+			parsed, err := time.Parse(time.RFC3339Nano, rawValue)
+			if err != nil {
+				t.Fatalf("parse processed_at %q: %v", rawValue, err)
+			}
+			if parsed.Sub(processedAt).Abs() > time.Millisecond {
+				t.Fatalf("expected processed_at %v, got %v (%q)", processedAt, parsed, rawValue)
+			}
 		}
 	}
 }
