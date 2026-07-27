@@ -526,11 +526,17 @@ func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usag
 }
 
 func usageEventSpeedTPS(row servicedto.UsageEventRecord) *float64 {
-	if row.TTFTMS == nil || *row.TTFTMS <= 0 || row.LatencyMS <= *row.TTFTMS || row.OutputTokens <= 0 {
+	if row.TTFTMS == nil || *row.TTFTMS <= 0 || row.LatencyMS <= *row.TTFTMS {
 		return nil
 	}
-	// Speed 使用完整 output_tokens 除以首字后的耗时，保持请求事件口径简单一致。
-	speed := float64(row.OutputTokens) / (float64(row.LatencyMS-*row.TTFTMS) / 1000)
+	// Speed 使用"可见 output_tokens"（扣除 reasoning_tokens）除以首字后的耗时，
+	// 避免 reasoning token 膨胀 speed（#272/#273 token 归一化口径）。
+	// 仅首 token（visible <= 1）时无生成耗时可言，省略 speed。
+	visibleOutput := row.OutputTokens - row.ReasoningTokens
+	if visibleOutput <= 1 {
+		return nil
+	}
+	speed := float64(visibleOutput) / (float64(row.LatencyMS-*row.TTFTMS) / 1000)
 	return &speed
 }
 

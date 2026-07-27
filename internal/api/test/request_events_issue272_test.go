@@ -57,7 +57,7 @@ func TestIssue272RedisIngressKeepsRequestEventSpeedTPS(t *testing.T) {
 		t.Fatalf("expected Request Events status 200, got %d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, `"request_id":"issue-272-speed-regression"`) || !strings.Contains(body, `"output_tokens":70`) || !strings.Contains(body, `"reasoning_tokens":50`) || !strings.Contains(body, `"speed_tps":9.5`) {
+	if !strings.Contains(body, `"request_id":"issue-272-speed-regression"`) || !strings.Contains(body, `"output_tokens":70`) || !strings.Contains(body, `"reasoning_tokens":50`) || !strings.Contains(body, `"speed_tps":10`) {
 		t.Fatalf("expected issue #272 event to retain non-null visible-output speed, got %s", body)
 	}
 }

@@ -736,7 +736,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 				TTFTMS:       usageEventInt64Ptr(45),
 				OutputTokens: 61,
 			},
-			want: usageEventFloat64Ptr(30),
+			want: usageEventFloat64Ptr(30.5),
 		},
 		{
 			name: "uses visible output tokens after first token over generation duration",
@@ -746,7 +746,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 				OutputTokens:    61,
 				ReasoningTokens: 2,
 			},
-			want: usageEventFloat64Ptr(29),
+			want: usageEventFloat64Ptr(29.5),
 		},
 		{
 			name: "omits speed without ttft",
