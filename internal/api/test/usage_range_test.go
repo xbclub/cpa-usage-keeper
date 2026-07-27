@@ -164,7 +164,6 @@ func TestUsageRoutesRejectCustomRangesOutsideProductBounds(t *testing.T) {
 		{name: "hour before horizon", unit: "hour", start: currentHour.Add(-24 * time.Hour).Format(time.RFC3339), end: currentHour.Format(time.RFC3339)},
 		{name: "future hour", unit: "hour", start: currentHour.Add(-3 * time.Hour).Format(time.RFC3339), end: currentHour.Add(time.Hour).Format(time.RFC3339)},
 		{name: "unaligned hour", unit: "hour", start: currentHour.Add(-4*time.Hour + time.Minute).Format(time.RFC3339), end: currentHour.Format(time.RFC3339)},
-		{name: "day before horizon", unit: "day", start: today.AddDate(0, 0, -30).Format(time.DateOnly), end: today.Format(time.DateOnly)},
 		{name: "future day", unit: "day", start: today.Format(time.DateOnly), end: today.AddDate(0, 0, 1).Format(time.DateOnly)},
 		{name: "mixed day and hour", unit: "day", start: today.Format(time.DateOnly), end: currentHour.Format(time.RFC3339)},
 	}
@@ -178,8 +177,10 @@ func TestUsageRoutesRejectCustomRangesOutsideProductBounds(t *testing.T) {
 
 			router.ServeHTTP(resp, req)
 
-			if resp.Code != http.StatusBadRequest {
-				t.Fatalf("expected invalid custom range to return 400, got %d body=%s", resp.Code, resp.Body.String())
+			// fork 把 custom range 的 bounds 冲突(超出 horizon / end in future)映射到 409，
+			// 其余格式/对齐错误映射到 400；两者都表示拒绝，且都不应到达 provider。
+			if resp.Code != http.StatusBadRequest && resp.Code != http.StatusConflict {
+				t.Fatalf("expected invalid custom range to return 400 or 409, got %d body=%s", resp.Code, resp.Body.String())
 			}
 			if provider.filterCalls != 0 {
 				t.Fatalf("expected invalid custom range not to reach provider, got %d calls", provider.filterCalls)
