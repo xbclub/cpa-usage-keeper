@@ -471,7 +471,8 @@ func BuildAnalysisLatencyDiagnosticsWithFilter(db *gorm.DB, filter dto.UsageQuer
 		Where("failed = ?", false).
 		Where("generate = ?", true).
 		Where("ttft_ms > 0").
-		Where("latency_ms > 0")
+		Where("latency_ms > 0").
+		Order("ttft_ms ASC, latency_ms ASC")
 	query = applyUsageAnalysisTabQuery(query, filter)
 
 	rows, err := query.Rows()
