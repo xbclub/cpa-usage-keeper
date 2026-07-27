@@ -516,6 +516,8 @@ func TestUsageAggregationRunnerCancellationDoesNotLogBatchFailureWhileWaitingFor
 	if err != nil {
 		t.Fatalf("load sql db: %v", err)
 	}
+	// 限制连接池为 1，持有后 runner 必须停在可取消的连接池等待（PG 默认池远大于 1）。
+	sqlDB.SetMaxOpenConns(1)
 	heldConnection, err := sqlDB.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("hold database connection: %v", err)
@@ -600,6 +602,8 @@ func TestUsageAggregationRunnerShutdownCancelsPostTransactionHeaderDatabaseWait(
 	if err != nil {
 		t.Fatalf("load sql db: %v", err)
 	}
+	// 限制连接池为 1，Overview checkpoint 提交后 header flush 才会停在连接池等待（PG 默认池远大于 1）。
+	sqlDB.SetMaxOpenConns(1)
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "runner-post-transaction-header", APIGroupKey: "provider-a", Model: "model-a", AuthIndex: "auth-header-wait", Timestamp: now, TotalTokens: 1}}); err != nil {
 		t.Fatalf("insert post-transaction header event: %v", err)
@@ -760,13 +764,7 @@ func TestUsageAggregationRunnerRunKeepsActivityAndIdentityMovingAfterOverviewFai
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("insert overview failure event: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_background_overview
-		BEFORE INSERT ON usage_overview_hourly_stats
-		BEGIN
-			SELECT RAISE(ABORT, 'forced background overview failure');
-		END`).Error; err != nil {
-		t.Fatalf("create overview failure trigger: %v", err)
-	}
+	forceFailInsertTrigger(t, db, "fail_background_overview", "usage_overview_hourly_stats", "forced background overview failure")
 	runner := poller.NewUsageAggregationRunner(db, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -810,12 +808,11 @@ func TestUsageAggregationRunnerRunKeepsOverviewAndActivityMovingAfterIdentityFai
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("insert identity failure event: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_background_identity
-		BEFORE UPDATE ON usage_identities
-		WHEN NEW.total_requests > OLD.total_requests
-		BEGIN
-			SELECT RAISE(ABORT, 'forced background identity failure');
-		END`).Error; err != nil {
+	// BEFORE UPDATE + WHEN 条件的 SQLite 触发器，PG 需转 plpgsql 函数，WHEN 转为 IF。
+	if err := db.Exec(`CREATE OR REPLACE FUNCTION fail_background_identity_fn() RETURNS TRIGGER AS 'BEGIN IF NEW.total_requests > OLD.total_requests THEN RAISE EXCEPTION ''forced background identity failure''; END IF; RETURN NEW; END' LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatalf("create identity failure function: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_background_identity BEFORE UPDATE ON usage_identities FOR EACH ROW EXECUTE FUNCTION fail_background_identity_fn()`).Error; err != nil {
 		t.Fatalf("create identity failure trigger: %v", err)
 	}
 	runner := poller.NewUsageAggregationRunner(db, nil)
@@ -885,8 +882,11 @@ func TestUsageAggregationRunnerRunWakesAfterIdleNotification(t *testing.T) {
 		runner.NotifyUsageEventsCommitted(storedEvents, nil)
 	}
 	waitForUsageAggregationRunnerCondition(t, func() bool {
-		var checkpoint entities.UsageActivityAggregationCheckpoint
-		return db.Where("name = ?", "activity").Take(&checkpoint).Error == nil && checkpoint.LastAggregatedUsageEventID == 1
+		// 轮转顺序为 overview→activity，必须等两者都追平到 event 1，避免 activity 先到位时 overview 仍滞后一轮。
+		var overview, activity int64
+		_ = db.Table("usage_overview_aggregation_checkpoints").Where("name = ?", "overview").Pluck("last_aggregated_usage_event_id", &overview).Error
+		_ = db.Table("usage_activity_aggregation_checkpoints").Where("name = ?", "activity").Pluck("last_aggregated_usage_event_id", &activity).Error
+		return overview == 1 && activity == 1
 	})
 
 	// 断言：一次合并 wake 最终追平 Overview 和 Activity 两个独立 checkpoint。
@@ -934,8 +934,9 @@ func (a *recordingUsageAggregationHeaderAppender) TryAppendUsageHeaderSnapshots(
 
 func waitForUsageAggregationRunnerCondition(t *testing.T, condition func() bool) {
 	// 准备：统一设置小型集成测试的最长等待时间和轮询间隔。
+	// PG 远程连接延迟高于本地 SQLite，留足 10s 避免 async runner 测试 flaky。
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	// 执行：只轮询少量 SQLite 行，不运行任何性能压测。
 	for time.Now().Before(deadline) {
 		if condition() {
