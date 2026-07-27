@@ -908,7 +908,8 @@ export async function fetchOverviewModels(request: UsageRangeRequest, signal?: A
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
   }
-  const response = await apiFetch(apiPath('/usage/models'), { signal })
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/models')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load overview models: ${response.status}`)
   }
