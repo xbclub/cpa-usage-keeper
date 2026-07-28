@@ -43,17 +43,14 @@ func applyHourlyRow(tx *gorm.DB, row entities.UsageOverviewHourlyStat, now time.
 
 	row.CreatedAt = timeutil.NormalizeStorageTime(now)
 	row.UpdatedAt = timeutil.NormalizeStorageTime(now)
-	if insertErr := tx.Create(&row).Error; insertErr != nil {
-		// 并发创建相同 key 时只重试一次完整五维 UPDATE。
-		retryResult := tx.Model(&entities.UsageOverviewHourlyStat{}).Where(overviewDimensionsPredicate, args...).Updates(updates)
-		if retryResult.Error != nil {
-			return fmt.Errorf("insert usage overview hourly stat: %w; retry update: %v", insertErr, retryResult.Error)
-		}
-		if retryResult.RowsAffected == 0 {
-			return fmt.Errorf("insert usage overview hourly stat: %w; retry update matched no existing row", insertErr)
-		}
-	}
-	return nil
+	// 并发创建相同 key 时 INSERT 撞唯一索引；PG 在事务内任何错误后中止整事务（SQLSTATE 25P02），
+	// 直接重试 UPDATE 会失败。SAVEPOINT 隔离失败 INSERT，ROLLBACK 后事务恢复可重试（SQLite 同样支持）。
+	return applyRowWithInsertRetry(tx, "sp_overview_hourly_insert",
+		func() error { return tx.Create(&row).Error },
+		func() (int64, error) {
+			retry := tx.Model(&entities.UsageOverviewHourlyStat{}).Where(overviewDimensionsPredicate, args...).Updates(updates)
+			return retry.RowsAffected, retry.Error
+		})
 }
 
 func applyDailyRow(tx *gorm.DB, row entities.UsageOverviewDailyStat, now time.Time) error {
@@ -70,14 +67,38 @@ func applyDailyRow(tx *gorm.DB, row entities.UsageOverviewDailyStat, now time.Ti
 
 	row.CreatedAt = timeutil.NormalizeStorageTime(now)
 	row.UpdatedAt = timeutil.NormalizeStorageTime(now)
-	if insertErr := tx.Create(&row).Error; insertErr != nil {
-		retryResult := tx.Model(&entities.UsageOverviewDailyStat{}).Where(overviewDimensionsPredicate, args...).Updates(updates)
-		if retryResult.Error != nil {
-			return fmt.Errorf("insert usage overview daily stat: %w; retry update: %v", insertErr, retryResult.Error)
-		}
-		if retryResult.RowsAffected == 0 {
-			return fmt.Errorf("insert usage overview daily stat: %w; retry update matched no existing row", insertErr)
-		}
+	return applyRowWithInsertRetry(tx, "sp_overview_daily_insert",
+		func() error { return tx.Create(&row).Error },
+		func() (int64, error) {
+			retry := tx.Model(&entities.UsageOverviewDailyStat{}).Where(overviewDimensionsPredicate, args...).Updates(updates)
+			return retry.RowsAffected, retry.Error
+		})
+}
+
+// applyRowWithInsertRetry 在 update-first 找不到行时 INSERT；并发冲突用 SAVEPOINT 隔离失败 INSERT 后重试 UPDATE。
+// PG 在事务内任何错误后中止整事务（SQLSTATE 25P02），直接重试 UPDATE 会失败；
+// ROLLBACK TO SAVEPOINT 清除中止状态使重试可行（SQLite 也支持 SAVEPOINT，行为一致）。
+// savepoint 名调用方保证在当前事务内不与并发活跃的同名 savepoint 冲突（ApplyRows 顺序执行，每行 RELEASE 后才进入下一行）。
+func applyRowWithInsertRetry(tx *gorm.DB, savepoint string, insert func() error, retryUpdate func() (int64, error)) error {
+	if err := tx.Exec("SAVEPOINT " + savepoint).Error; err != nil {
+		return fmt.Errorf("savepoint %s: %w", savepoint, err)
+	}
+	insertErr := insert()
+	if insertErr == nil {
+		_ = tx.Exec("RELEASE SAVEPOINT " + savepoint).Error
+		return nil
+	}
+	// INSERT 冲突（并发）：回滚到 savepoint 清除事务中止状态，再重试一次完整五维 UPDATE。
+	if rbErr := tx.Exec("ROLLBACK TO SAVEPOINT " + savepoint).Error; rbErr != nil {
+		return fmt.Errorf("insert usage stat: %w; rollback to savepoint %s: %v", insertErr, savepoint, rbErr)
+	}
+	affected, retryErr := retryUpdate()
+	_ = tx.Exec("RELEASE SAVEPOINT " + savepoint).Error
+	if retryErr != nil {
+		return fmt.Errorf("insert usage stat: %w; retry update: %v", insertErr, retryErr)
+	}
+	if affected == 0 {
+		return fmt.Errorf("insert usage stat: %w; retry update matched no existing row", insertErr)
 	}
 	return nil
 }
