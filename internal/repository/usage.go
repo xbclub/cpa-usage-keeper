@@ -336,7 +336,10 @@ func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if model := strings.TrimSpace(filter.Model); model != "" {
+	if len(filter.Models) > 0 {
+		// multi-select 下拉用 IN 过滤(Step 4.17 #4)。
+		query = query.Where("model IN ?", filter.Models)
+	} else if model := strings.TrimSpace(filter.Model); model != "" {
 		query = query.Where("model = ?", model)
 	}
 	if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" {
@@ -1285,6 +1288,23 @@ func loadUsageOverviewDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start
 	return rows, nil
 }
 
+// usageOverviewRecentCacheEventMatchesModel 在 recent-cache 内存路径补做 model 过滤，
+// 与 DB 边界查询的 model IN ?/model = ? 口径一致（支持 multi-select Models 与单数 Model）。
+func usageOverviewRecentCacheEventMatchesModel(model string, filter dto.UsageQueryFilter) bool {
+	if len(filter.Models) > 0 {
+		for _, m := range filter.Models {
+			if model == m {
+				return true
+			}
+		}
+		return false
+	}
+	if m := strings.TrimSpace(filter.Model); m != "" {
+		return model == m
+	}
+	return true
+}
+
 func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, windows []usageOverviewRawEventWindow, recentCache *UsageRecentEventCache, activeFields pricing.ActiveFields) ([]entities.UsageEvent, error) {
 	// 所有边界事件先汇总到一个切片，后续统一补入 Overview 的 usage、summary 和 series。
 	events := make([]entities.UsageEvent, 0)
@@ -1305,8 +1325,12 @@ func loadUsageOverviewRawEventWindowsWithFilter(db *gorm.DB, filter dto.UsageQue
 			// ok=false 只表示缓存对象不可用；缓存为空也会 ok=true 并返回空切片。
 			if ok {
 				for _, cachedEvent := range cachedEvents {
-					// 下游聚合函数使用 entities.UsageEvent，这里把缓存投影转回最小实体。
-					events = append(events, recentUsageEventToEntity(cachedEvent))
+					event := recentUsageEventToEntity(cachedEvent)
+					// recent-cache 路径在内存里补做 model 过滤，与 DB 边界查询口径一致。
+					if !usageOverviewRecentCacheEventMatchesModel(event.Model, filter) {
+						continue
+					}
+					events = append(events, event)
 				}
 				// 当前窗口已由缓存承接，不再访问 DB。
 				continue
