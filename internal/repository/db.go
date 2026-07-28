@@ -42,6 +42,13 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	if err := migrateRedisInboxQueueKeyToSource(db); err != nil {
 		return nil, fmt.Errorf("migrate redis_usage_inboxes queue_key to source: %w", err)
 	}
+	// v1.13.6 activity 子系统给 overview stats 加了 5 维字段(service_tier 等)，唯一索引
+	// 从 5 列(bucket/api/model/auth/alias)扩到 10 列(dimensions)。AutoMigrate 创建了新索引
+	// 但不删旧的 → 旧 5 列索引仍在，INSERT 撞旧索引(5 列相同即冲突)，而 update-first/重试
+	// UPDATE 用 10 列谓词不匹配 → 聚合 "matched no existing row"。必须先删旧索引再 AutoMigrate。
+	if err := dropLegacyOverviewStatUniqueIndexes(db); err != nil {
+		return nil, fmt.Errorf("drop legacy overview stat unique indexes: %w", err)
+	}
 
 	if err := db.AutoMigrate(entities.All()...); err != nil {
 		return nil, fmt.Errorf("auto migrate database: %w", err)
@@ -121,6 +128,24 @@ func migrateRedisInboxQueueKeyToSource(db *gorm.DB) error {
 	if db.Migrator().HasColumn("redis_usage_inboxes", "queue_key") {
 		if err := db.Exec("ALTER TABLE redis_usage_inboxes DROP COLUMN queue_key").Error; err != nil {
 			return fmt.Errorf("drop redis_usage_inboxes.queue_key column: %w", err)
+		}
+	}
+	return nil
+}
+
+// dropLegacyOverviewStatUniqueIndexes 删除 v1.13.6 activity 子系统之前遗留的 5 列唯一索引。
+// 旧索引建在 (bucket_start, api_group_key, model, auth_index, model_alias) 上（GORM 按列名自动命名为
+// ..._bucket_api_model_auth_alias）；加 5 维字段后 entity 改用 10 列 ..._dimensions 索引，AutoMigrate
+// 只新增不删除 → 两个索引共存。旧索引会让 INSERT 撞 5 列（5 维不同也冲突），而 update-first/重试 UPDATE
+// 用 10 列谓词不匹配，导致聚合 "matched no existing row"。这里在 AutoMigrate 前删掉旧索引。
+func dropLegacyOverviewStatUniqueIndexes(db *gorm.DB) error {
+	legacyIndexes := []string{
+		"uniq_usage_overview_hourly_stats_bucket_api_model_auth_alias",
+		"uniq_usage_overview_daily_stats_bucket_api_model_auth_alias",
+	}
+	for _, name := range legacyIndexes {
+		if err := db.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %s", name)).Error; err != nil {
+			return fmt.Errorf("drop legacy index %s: %w", name, err)
 		}
 	}
 	return nil

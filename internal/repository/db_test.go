@@ -491,3 +491,39 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	}
 }
 
+
+func TestDropLegacyOverviewStatUniqueIndexes(t *testing.T) {
+	db := openTestDatabase(t)
+	// 模拟 v1.13.6 前的 legacy DB：在 hourly/daily stats 上建旧 5 列唯一索引。
+	legacy := []struct {
+		table string
+		name  string
+	}{
+		{"usage_overview_hourly_stats", "uniq_usage_overview_hourly_stats_bucket_api_model_auth_alias"},
+		{"usage_overview_daily_stats", "uniq_usage_overview_daily_stats_bucket_api_model_auth_alias"},
+	}
+	for _, l := range legacy {
+		if err := db.Exec(fmt.Sprintf(
+			"CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (bucket_start, api_group_key, model, auth_index, model_alias)",
+			l.name, l.table)).Error; err != nil {
+			t.Fatalf("create legacy index %s: %v", l.name, err)
+		}
+		if !db.Migrator().HasIndex(l.table, l.name) {
+			t.Fatalf("legacy index %s should exist before migration", l.name)
+		}
+	}
+
+	if err := dropLegacyOverviewStatUniqueIndexes(db); err != nil {
+		t.Fatalf("dropLegacyOverviewStatUniqueIndexes: %v", err)
+	}
+
+	for _, l := range legacy {
+		if db.Migrator().HasIndex(l.table, l.name) {
+			t.Fatalf("legacy index %s should be dropped after migration", l.name)
+		}
+	}
+	// 新 10 列 dimensions 索引应保留（AutoMigrate 在 openTestDatabase 时已建）。
+	if !db.Migrator().HasIndex("usage_overview_hourly_stats", "uniq_usage_overview_hourly_stats_dimensions") {
+		t.Fatalf("new 10-col dimensions index should remain")
+	}
+}
