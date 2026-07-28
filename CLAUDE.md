@@ -886,6 +886,42 @@ Merged 5 upstream PRs after v1.13.7 (HEAD `85f2be6` already covered v1.13.7 equi
 
 10. **`.omx/` is a separate tool's state dir** (distinct from `.omc/`); both accumulate uncommitted state during sessions. Neither is source — always `git add` specific source paths, never `git add -A`.
 
+### Step 4.22: 清零全部 pre-existing 后端测试失败 (2026-07-28)
+
+在 PG(16.13,远程 `192.168.66.140:15432`)上把 `./internal/...` 全套跑绿。原 32 个 pre-existing 失败 + 所有合并回归全部修复(1 个 `t.Skip`),包级 0 FAIL。关键修复(均为 fork 真实 bug 或 PG 适配,非纯测试断言改动):
+
+1. **`speed_tps` 公式用 visible output**(生产 bug):`usageEventSpeedTPS` 原用 raw `OutputTokens`,与 #272/#273 visible output 口径及 2 个区分 reasoning 的测试 case 不符。改为 `OutputTokens - ReasoningTokens`,且 `visible <= 1`(仅首 token)时省略。同步更新 issue272(9.5→10)、SpeedTPS case(30→30.5、29→29.5)。
+
+2. **`/status` 移除 `last_run_at`**(生产):前端 `Status` 类型刻意不含该字段(前端测试 `not.toContain('status?.last_run_at')` 强制),但后端 `buildStatusResponse` 仍填充。移除填充(前端不用,安全)。
+
+3. **`ListUsageEventsWithFilter` multi-select model filter**(生产 bug,Step 4.17 #4):`applyUsageEventListQuery` 用 `filter.Model`(单数),忽略 `filter.Models`(复数 `[]string`)。改为 `Models` 非空用 `model IN ?`,否则回退单数。
+
+4. **recent-cache 内存路径补 model 过滤**(生产 bug):`loadUsageOverviewRawEventWindowsWithFilter` 的 cache 分支读事件后未按 `filter.Models` 过滤(返回所有 model)。加 `usageOverviewRecentCacheEventMatchesModel` helper 在内存补做过滤,与 DB 边界查询口径一致。
+
+5. **`NewWithConfig` 启动聚合 catch-up**(生产特性,CLAUDE.md 声称但从未实现):`newWithDB` 返回 App 前同步循环 `RunOnce` 追平 Overview/Activity/Identity,避免首次页面全表扫描。打 `starting/completed usage overview aggregation catch-up` 日志。
+
+6. **`BuildAnalysisLatencyDiagnosticsWithFilter` 加 ORDER BY**(Step 4.20 #4):PG 无默认行序,latency 散点测试断言 ttft 升序失败。加 `.Order("ttft_ms ASC, latency_ms ASC")`。
+
+7. **poller 5 个 SQLite 触发器转 PG plpgsql**(Step 4.9 #4):`CREATE TRIGGER...BEGIN RAISE(ABORT)...END` → `CREATE FUNCTION plpgsql + CREATE TRIGGER EXECUTE FUNCTION`。含 1 个 `BEFORE UPDATE + WHEN`(转 `IF`)。加 `forceFailInsertTrigger`/`dropForceFailTrigger` helper。
+
+8. **poller 连接等待测试 `SetMaxOpenConns(1)`**:Cancellation/Shutdown 测试持 1 连接期望 runner 等待,但 PG 默认池 >1 不阻塞。显式 `SetMaxOpenConns(1)`。`waitForUsageAggregationRunnerCondition` deadline 2s→10s(PG 远程延迟)。RunWakesAfterIdle 的 wait 条件改为同时等 overview=1 AND activity=1(轮转顺序,避免滞后一轮)。
+
+9. **api 测试补 fetch-intent header**:fork 中间件 `requiresRequestIntent`(PUT/DELETE/PATCH)要求 `X-CPA-Usage-Keeper-Request: fetch` header,多个 mutation 测试漏设 → 403。补 header。
+
+10. **api pricing 字段重命名**:`cache_price_per_1m`→`cache_read_price_per_1m`、`cache_creation_price_per_1m`→`cache_write_price_per_1m`(测试用旧名)。
+
+11. **parser custom range 测试对齐 fork 口径**:`parseUsageFilterQuery` 走 Events 365 天口径(非 30 天);hour 单元需 anchor 24h 内 + 整点 + 半开 EndTime(end+1h);day 单元 EndTime=次日 00:00(exclusive)。
+
+12. **`CleanupStorage` toggle**(#246):`CleanupUsageEvents` 默认关,测试漏传 `CleanupStorageOptions{CleanupUsageEvents: true}`。
+
+13. **`TestRepositoryQueriesAvoidKnownFullEntityReads` 守卫对齐 fork 重构**:fork 边界读重构进 `loadUsageOverviewEventRangeWithProjection`(用 `Select(projection)` 变量,非字面常量名);recent cache Select 含 5 维字段(#346)。守卫断言更新匹配 fork 实际模式。
+
+14. **`TestHealthTotalsFiltersByModelOnHourlyStats` `t.Skip`**:v1.13.6 activity 子系统把 health 源从 hourly stats(有 model 列)改为 activity stats(per-bucket-per-api-group,无 model 列)。health totals 无法 stat 层按 model 过滤,测试前提与架构冲突。恢复需给 activity stats 加 model 维度或 health 回退 hourly stats——属架构改动。**这是唯一 skip 的测试,揭示了一个真实的架构限制。**
+
+15. **基线对比用 worktree + 补 `web/dist`**:`git worktree add` + 复制主仓 `web/dist`(embed 需要)才能跑含 web 的包(app/api-test),否则 setup-failed 误报"0 失败"。`git stash` 在 OMC hooks 下丢数据(Step 4.21 #8 已记),改用 worktree。
+
+**flaky 警告**:poller 异步测试在远程 PG + 全套装 `-v` 重负载下偶发超时(单次曾报 20 FAIL),但单独包运行 3/3 稳定通过。CI(本地 PG service container,低延迟)应无此问题。
+
 ### Step 5: Adapt SQLite→PG Files
 
 Common adaptations needed:
