@@ -16,6 +16,7 @@ import styles from './Select.module.scss';
 export interface SelectOption {
   value: string;
   label: string;
+  triggerLabel?: string;
   suffix?: ReactNode;
   suffixAriaLabel?: string;
   disabled?: boolean;
@@ -198,7 +199,7 @@ export function Select({
         ? selectedIndex
         : firstEnabledIndex;
   const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
-  const displayText = selected?.label ?? placeholder ?? '';
+  const displayText = selected?.triggerLabel ?? selected?.label ?? placeholder ?? '';
   const isPlaceholder = !selected && placeholder;
 
   const commitSelection = useCallback(
@@ -319,7 +320,7 @@ export function Select({
                   onKeyDown={handleKeyDown}
                   onClick={opt.disabled ? undefined : () => commitSelection(index)}
                 >
-                  <span className={styles.optionLabel} title={opt.label}>{opt.label}</span>
+                  <span className={styles.optionLabel}>{opt.label}</span>
                   {opt.suffix ? (
                     <span className={styles.optionSuffix} aria-label={opt.suffixAriaLabel}>
                       {opt.suffix}
