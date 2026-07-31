@@ -26,13 +26,13 @@ type recordingUsageAggregationNotifier struct {
 	snapshots []quota.UsageHeaderSnapshot
 }
 
-func (n *recordingUsageAggregationNotifier) NotifyUsageEventsCommitted(events []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot) {
+func (n *recordingUsageAggregationNotifier) NotifyUsageEventsCommitted(events []entities.UsageEvent) {
 	// 测试 recorder 复制输入，避免 service 后续复用切片影响断言。
 	n.usageCalls++
 	// events 必须已经带有数据库分配的自增 ID。
 	n.events = append(n.events, events...)
 	// snapshots 只包含本批真正提交事件对应的值。
-	n.snapshots = append(n.snapshots, snapshots...)
+	
 }
 
 func (n *recordingUsageAggregationNotifier) NotifyUsageIdentitiesChanged() {

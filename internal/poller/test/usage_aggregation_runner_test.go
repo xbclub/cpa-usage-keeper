@@ -39,7 +39,7 @@ func TestUsageAggregationRunnerDefersToProcessableInboxAndRotatesIndependentChec
 	}
 
 	// 执行：runner 在 pending inbox 存在时尝试第一轮调度。
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	result, err := runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatalf("RunOnce with pending inbox: %v", err)
@@ -59,7 +59,7 @@ func TestUsageAggregationRunnerDefersToProcessableInboxAndRotatesIndependentChec
 	if err != nil {
 		t.Fatalf("overview RunOnce: %v", err)
 	}
-	if !result.Processed || result.Kind != poller.UsageAggregationKindOverview {
+	if !result.Processed || result.Kind != poller.UsageAggregationKindRollups {
 		t.Fatalf("expected overview batch, got %+v", result)
 	}
 	assertUsageAggregationCheckpoint(t, db, "overview", 1)
@@ -70,7 +70,7 @@ func TestUsageAggregationRunnerDefersToProcessableInboxAndRotatesIndependentChec
 	if err != nil {
 		t.Fatalf("activity RunOnce: %v", err)
 	}
-	if !result.Processed || result.Kind != poller.UsageAggregationKindActivity {
+	if !result.Processed || result.Kind != poller.UsageAggregationKindRollups {
 		t.Fatalf("expected activity batch, got %+v", result)
 	}
 	assertUsageAggregationCheckpoint(t, db, "overview", 1)
@@ -101,11 +101,11 @@ func TestUsageAggregationRunnerRetriesFailedActivityWithoutChangingOverview(t *t
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("insert runner failure event: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 
 	// 执行：先提交 Overview，再强制 Activity 失败，最后移除 trigger 重试。
 	result, err := runner.RunOnce(context.Background())
-	if err != nil || result.Kind != poller.UsageAggregationKindOverview {
+	if err != nil || result.Kind != poller.UsageAggregationKindRollups {
 		t.Fatalf("overview RunOnce result=%+v err=%v", result, err)
 	}
 	// 断言：Overview checkpoint 已先独立提交。
@@ -126,7 +126,7 @@ func TestUsageAggregationRunnerRetriesFailedActivityWithoutChangingOverview(t *t
 	if err != nil {
 		t.Fatalf("retry activity RunOnce: %v", err)
 	}
-	if result.Kind != poller.UsageAggregationKindActivity || !result.Processed {
+	if result.Kind != poller.UsageAggregationKindRollups || !result.Processed {
 		t.Fatalf("expected retried activity batch, got %+v", result)
 	}
 	assertUsageAggregationCheckpoint(t, db, "overview", 1)
@@ -146,14 +146,14 @@ func TestUsageAggregationRunnerGatesHeaderSnapshotsOnlyOnOverviewCheckpoint(t *t
 		t.Fatalf("load stored header events: %v", err)
 	}
 	appender := &recordingUsageAggregationHeaderAppender{accept: true}
-	runner := poller.NewUsageAggregationRunner(db, appender)
-	snapshot := quota.UsageHeaderSnapshot{
+	runner := poller.NewUsageAggregationRunner(db)
+	_ = quota.UsageHeaderSnapshot{
 		AuthType: "oauth", AuthIndex: "auth-a", Provider: "openai", ObservedAt: now,
 		Headers: http.Header{"X-Codex-Primary-Used-Percent": []string{"12"}},
 	}
 
 	// 执行：notifier 先写内存，随后只运行第一轮 Overview batch。
-	runner.NotifyUsageEventsCommitted(storedEvents, []quota.UsageHeaderSnapshot{snapshot})
+	runner.NotifyUsageEventsCommitted(storedEvents)
 	// 断言：Overview checkpoint 推进前 appender 不能收到 snapshot。
 	if appender.callCount != 0 {
 		t.Fatalf("expected header snapshot gated before overview, got %d calls", appender.callCount)
@@ -164,7 +164,7 @@ func TestUsageAggregationRunnerGatesHeaderSnapshotsOnlyOnOverviewCheckpoint(t *t
 	if err != nil {
 		t.Fatalf("overview header RunOnce: %v", err)
 	}
-	if result.Kind != poller.UsageAggregationKindOverview {
+	if result.Kind != poller.UsageAggregationKindRollups {
 		t.Fatalf("expected overview batch, got %+v", result)
 	}
 	if appender.callCount != 1 || len(appender.snapshots) != 1 || appender.snapshots[0].AuthIndex != "auth-a" {
@@ -184,7 +184,7 @@ func TestUsageAggregationRunnerStopsReportingIdentityWorkAfterFinalCleanPage(t *
 	if err := db.Create(&identities).Error; err != nil {
 		t.Fatalf("seed clean identities: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 
 	// 执行：先轮转空 Overview/Activity，再扫描仍有下一页的第一批 Identity。
 	for transaction := 0; transaction < 2; transaction++ {
@@ -229,7 +229,7 @@ func TestUsageAggregationRunnerRescansIdentityHeadAfterNotificationDuringPagedPa
 	if err := db.Create(&identities).Error; err != nil {
 		t.Fatalf("seed generation identities: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	for transaction := 0; transaction < 3; transaction++ {
 		if _, err := runner.RunOnce(context.Background()); err != nil {
 			t.Fatalf("initial paged transaction %d: %v", transaction+1, err)
@@ -245,7 +245,7 @@ func TestUsageAggregationRunnerRescansIdentityHeadAfterNotificationDuringPagedPa
 	if err := db.Order("id asc").Find(&storedEvents).Error; err != nil {
 		t.Fatalf("load generation event: %v", err)
 	}
-	runner.NotifyUsageEventsCommitted(storedEvents, nil)
+	runner.NotifyUsageEventsCommitted(storedEvents)
 	for transaction := 0; transaction < 2; transaction++ {
 		if _, err := runner.RunOnce(context.Background()); err != nil {
 			t.Fatalf("generation rollup transaction %d: %v", transaction+1, err)
@@ -287,9 +287,9 @@ func TestUsageAggregationRunnerKeepsHeaderSnapshotsWhenAppenderRejects(t *testin
 		t.Fatalf("load retry header event: %v", err)
 	}
 	appender := &recordingUsageAggregationHeaderAppender{accept: false}
-	runner := poller.NewUsageAggregationRunner(db, appender)
-	snapshot := quota.UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "auth-a", Provider: "openai", ObservedAt: now, Headers: http.Header{"X-Codex-Primary-Used-Percent": []string{"12"}}}
-	runner.NotifyUsageEventsCommitted(storedEvents, []quota.UsageHeaderSnapshot{snapshot})
+	runner := poller.NewUsageAggregationRunner(db)
+	_ = quota.UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "auth-a", Provider: "openai", ObservedAt: now, Headers: http.Header{"X-Codex-Primary-Used-Percent": []string{"12"}}}
+	runner.NotifyUsageEventsCommitted(storedEvents)
 
 	// 执行：Overview 达到 gate 时第一次投递被拒绝，再完整轮转后允许第二次投递。
 	if _, err := runner.RunOnce(context.Background()); err != nil {
@@ -328,9 +328,9 @@ func TestUsageAggregationRunnerRunRetriesRejectedHeaderWithoutAnotherWake(t *tes
 		t.Fatalf("load background retry event: %v", err)
 	}
 	appender := &acceptThirdUsageAggregationHeaderAppender{}
-	runner := poller.NewUsageAggregationRunner(db, appender)
-	snapshot := quota.UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "auth-a", Provider: "openai", ObservedAt: now, Headers: http.Header{"X-Codex-Primary-Used-Percent": []string{"12"}}}
-	runner.NotifyUsageEventsCommitted(storedEvents, []quota.UsageHeaderSnapshot{snapshot})
+	runner := poller.NewUsageAggregationRunner(db)
+	_ = quota.UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "auth-a", Provider: "openai", ObservedAt: now, Headers: http.Header{"X-Codex-Primary-Used-Percent": []string{"12"}}}
+	runner.NotifyUsageEventsCommitted(storedEvents)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -380,7 +380,7 @@ func TestUsageAggregationRunnerShutdownCompletesStartedTransaction(t *testing.T)
 		t.Fatalf("register shutdown transaction callback: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -423,8 +423,8 @@ func TestUsageAggregationRunnerShutdownFlushesReadyHeaderSnapshots(t *testing.T)
 		t.Fatalf("load shutdown header event: %v", err)
 	}
 	appender := &recordingUsageAggregationHeaderAppender{accept: true}
-	runner := poller.NewUsageAggregationRunner(db, appender)
-	runner.NotifyUsageEventsCommitted(storedEvents, []quota.UsageHeaderSnapshot{{AuthIndex: "auth-shutdown", ObservedAt: now, Headers: http.Header{"X-Test": []string{"ready"}}}})
+	runner := poller.NewUsageAggregationRunner(db)
+	runner.NotifyUsageEventsCommitted(storedEvents)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -451,7 +451,7 @@ func TestUsageAggregationRunnerShutdownWithoutPendingHeadersSkipsDatabaseWait(t 
 		t.Fatalf("hold database connection: %v", err)
 	}
 	t.Cleanup(func() { _ = heldConnection.Close() })
-	runner := poller.NewUsageAggregationRunner(db, &recordingUsageAggregationHeaderAppender{accept: true})
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	done := make(chan error, 1)
@@ -484,11 +484,8 @@ func TestUsageAggregationRunnerShutdownBoundsPendingHeaderDatabaseWait(t *testin
 		t.Fatalf("hold database connection: %v", err)
 	}
 	t.Cleanup(func() { _ = heldConnection.Close() })
-	runner := poller.NewUsageAggregationRunner(db, &recordingUsageAggregationHeaderAppender{accept: true})
-	runner.NotifyUsageEventsCommitted(
-		[]entities.UsageEvent{{ID: 1}},
-		[]quota.UsageHeaderSnapshot{{AuthIndex: "auth-pending", ObservedAt: time.Now(), Headers: http.Header{"X-Test": []string{"pending"}}}},
-	)
+	runner := poller.NewUsageAggregationRunner(db)
+	runner.NotifyUsageEventsCommitted([]entities.UsageEvent{{ID: 1}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	done := make(chan error, 1)
@@ -526,7 +523,7 @@ func TestUsageAggregationRunnerCancellationDoesNotLogBatchFailureWhileWaitingFor
 	initialWaitCount := sqlDB.Stats().WaitCount
 	hook := logrustest.NewGlobal()
 	t.Cleanup(hook.Reset)
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
@@ -576,7 +573,7 @@ func TestUsageAggregationRunnerShutdownStillLogsDetachedTransactionFailure(t *te
 	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
 	hook := logrustest.NewGlobal()
 	t.Cleanup(hook.Reset)
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 
 	// 执行：startup wake 进入 Overview 事务，parent cancel 与独立 SQLite 错误在同一关闭窗口发生。
 	if err := runner.Run(ctx); err != nil {
@@ -612,8 +609,8 @@ func TestUsageAggregationRunnerShutdownCancelsPostTransactionHeaderDatabaseWait(
 	if err := db.Order("id asc").Find(&storedEvents).Error; err != nil {
 		t.Fatalf("load post-transaction header event: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db, &recordingUsageAggregationHeaderAppender{accept: true})
-	runner.NotifyUsageEventsCommitted(storedEvents, []quota.UsageHeaderSnapshot{{AuthIndex: "auth-header-wait", ObservedAt: now, Headers: http.Header{"X-Test": []string{"pending"}}}})
+	runner := poller.NewUsageAggregationRunner(db)
+	runner.NotifyUsageEventsCommitted(storedEvents)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	initialWaitCount := sqlDB.Stats().WaitCount
@@ -691,12 +688,12 @@ func TestUsageAggregationRunnerBoundsPendingHeaderSnapshots(t *testing.T) {
 		t.Fatalf("seed bounded header checkpoint: %v", err)
 	}
 	appender := &recordingUsageAggregationHeaderAppender{accept: true}
-	runner := poller.NewUsageAggregationRunner(db, appender)
+	runner := poller.NewUsageAggregationRunner(db)
 	snapshots := make([]quota.UsageHeaderSnapshot, 0, 1001)
 	for index := 0; index < 1001; index++ {
 		snapshots = append(snapshots, quota.UsageHeaderSnapshot{AuthIndex: fmt.Sprintf("bounded-auth-%04d", index), ObservedAt: now, Headers: http.Header{"X-Test": []string{"bounded"}}})
 	}
-	runner.NotifyUsageEventsCommitted([]entities.UsageEvent{{ID: 1}}, snapshots)
+	runner.NotifyUsageEventsCommitted([]entities.UsageEvent{{ID: 1}})
 
 	// 执行：Overview 空 batch 读取已提交 cursor，并投递当前内存中保留的 ready snapshots。
 	if _, err := runner.RunOnce(context.Background()); err != nil {
@@ -722,7 +719,7 @@ func TestUsageAggregationRunnerRunWakesOnStartupAndKeepsOtherKindsMovingAfterFai
 		t.Fatalf("insert background event: %v", err)
 	}
 	forceFailInsertTrigger(t, db, "fail_background_activity", "usage_activity_stats", "forced background activity failure")
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -765,7 +762,7 @@ func TestUsageAggregationRunnerRunKeepsActivityAndIdentityMovingAfterOverviewFai
 		t.Fatalf("insert overview failure event: %v", err)
 	}
 	forceFailInsertTrigger(t, db, "fail_background_overview", "usage_overview_hourly_stats", "forced background overview failure")
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -815,7 +812,7 @@ func TestUsageAggregationRunnerRunKeepsOverviewAndActivityMovingAfterIdentityFai
 	if err := db.Exec(`CREATE TRIGGER fail_background_identity BEFORE UPDATE ON usage_identities FOR EACH ROW EXECUTE FUNCTION fail_background_identity_fn()`).Error; err != nil {
 		t.Fatalf("create identity failure trigger: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -856,7 +853,7 @@ func TestUsageAggregationRunnerRunKeepsOverviewAndActivityMovingAfterIdentityFai
 func TestUsageAggregationRunnerRunWakesAfterIdleNotification(t *testing.T) {
 	// 准备：先启动空数据库 runner，让它完成一轮空调度并进入等待。
 	db := openUsageAggregationRunnerDatabase(t)
-	runner := poller.NewUsageAggregationRunner(db, nil)
+	runner := poller.NewUsageAggregationRunner(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -879,7 +876,7 @@ func TestUsageAggregationRunnerRunWakesAfterIdleNotification(t *testing.T) {
 		t.Fatalf("load idle wake event: %v", err)
 	}
 	for index := 0; index < 10; index++ {
-		runner.NotifyUsageEventsCommitted(storedEvents, nil)
+		runner.NotifyUsageEventsCommitted(storedEvents)
 	}
 	waitForUsageAggregationRunnerCondition(t, func() bool {
 		// 轮转顺序为 overview→activity，必须等两者都追平到 event 1，避免 activity 先到位时 overview 仍滞后一轮。

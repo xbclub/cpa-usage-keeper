@@ -40,7 +40,6 @@ func TestSyncServiceCleanupStorageDeletesUsageEventsWhenEnabled(t *testing.T) {
 	seedSyncCleanupUsageEvents(t, db)
 	syncer := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		Now:                       func() time.Time { return now },
-		CleanupUsageEventsEnabled: true,
 	})
 
 	if err := syncer.CleanupStorage(context.Background()); err != nil {
@@ -64,7 +63,6 @@ func TestNewSyncServiceCleanupStorageReadsCleanupFlagFromConfig(t *testing.T) {
 		CPABaseURL:                "https://cpa.example.com",
 		CPAManagementKey:          "secret",
 		RequestTimeout:            time.Second,
-		CleanupUsageEventsEnabled: true,
 	})
 
 	if err := syncer.CleanupStorage(context.Background()); err != nil {

@@ -397,7 +397,7 @@ func TestCleanupStorageCleansUsageEventsBeforePreviousMonthStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 1 {
+	if result.UsageEventsArchived != 1 {
 		t.Fatalf("expected one old usage event to be deleted, got %+v", result)
 	}
 
@@ -433,7 +433,7 @@ func TestCleanupStorageCleansUsageEventsWithoutOverviewCheckpointGuard(t *testin
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 2 {
+	if result.UsageEventsArchived != 2 {
 		t.Fatalf("expected all expired usage events to be deleted, got %+v", result)
 	}
 
@@ -478,7 +478,7 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 2 {
+	if result.UsageEventsArchived != 2 {
 		t.Fatalf("expected all expired usage events to be deleted, got %+v", result)
 	}
 

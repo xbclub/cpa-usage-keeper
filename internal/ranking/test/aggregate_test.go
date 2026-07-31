@@ -212,7 +212,7 @@ func TestAggregatorRejectsRangeOutsideOneCenterDay(t *testing.T) {
 }
 
 func TestAggregatorBypassesOccupiedSQLiteWriter(t *testing.T) {
-	db, reader, err := repository.OpenDatabasePools(config.Config{SQLitePath: filepath.Join(t.TempDir(), "ranking-reader.db")})
+	db, reader, err := testutil.OpenTestDatabase(t), "ranking-reader.db")})
 	if err != nil {
 		t.Fatalf("OpenDatabasePools returned error: %v", err)
 	}

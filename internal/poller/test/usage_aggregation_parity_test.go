@@ -32,7 +32,7 @@ func TestUsageAggregationRunnerPreservesExistingOverviewAndIdentityFinalSnapshot
 	if err := repository.AggregateUsageIdentityStats(context.Background(), baselineDB, now); err != nil {
 		t.Fatalf("aggregate baseline identities: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(runnerDB, nil)
+	runner := poller.NewUsageAggregationRunner(runnerDB)
 	for transaction := 0; transaction < 6; transaction++ {
 		if _, err := runner.RunOnce(context.Background()); err != nil {
 			t.Fatalf("runner transaction %d: %v", transaction+1, err)

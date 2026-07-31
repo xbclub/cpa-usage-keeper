@@ -121,7 +121,7 @@ func TestRankingStoreRejectsUnsupportedPersistedProfile(t *testing.T) {
 }
 
 func TestRankingStoreLoadBypassesBlockedUpdate(t *testing.T) {
-	db, reader, err := repository.OpenDatabasePools(config.Config{SQLitePath: filepath.Join(t.TempDir(), "ranking-store.db")})
+	db, reader, err := testutil.OpenTestDatabase(t), "ranking-store.db")})
 	if err != nil {
 		t.Fatalf("OpenDatabasePools returned error: %v", err)
 	}
