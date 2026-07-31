@@ -151,53 +151,69 @@ func dropLegacyOverviewStatUniqueIndexes(db *gorm.DB) error {
 	return nil
 }
 
-// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox 和过期 usage_events，再清 Overview health 细粒度统计。
-// CleanupStorageOptions 控制每日维护任务的清理范围。
-type CleanupStorageOptions struct {
-	CleanupUsageEvents bool
-}
-
-func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions) (dto.StorageCleanupResult, error) {
-	opts := CleanupStorageOptions{}
-	if len(options) > 0 {
-		opts = options[0]
-	}
+// CleanupStorage 是每日维护任务的统一仓储入口：先清 inbox、归档 raw events。
+// PostgreSQL 不需要 VACUUM（由 autovacuum 自动维护）。
+func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	var usageEventsDeleted int64
-	if opts.CleanupUsageEvents {
-		usageEventsDeleted, err = CleanupUsageEvents(db, now)
-		if err != nil {
-			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsArchived: usageEventsDeleted}, err
-		}
+	usageEventsArchive, err := ArchiveExpiredUsageEvents(databaseContext(db), db, now)
+	if err != nil {
+		return dto.StorageCleanupResult{
+			RedisInbox:               redisResult,
+			UsageEventsArchived:      usageEventsArchive.Archived,
+			UsageEventsArchiveStatus: usageEventsArchive.Status,
+		}, err
 	}
-	// PostgreSQL 不需要 VACUUM（由 autovacuum 自动维护）。
-	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsArchived: usageEventsDeleted}, nil
+	return dto.StorageCleanupResult{
+		RedisInbox:               redisResult,
+		UsageEventsArchived:      usageEventsArchive.Archived,
+		UsageEventsArchiveStatus: usageEventsArchive.Status,
+	}, nil
 }
 
-// CleanupUsageEvents 删除当前页面查询窗口外的原始 usage_events，保留从上个月 1 日本地零点开始的数据。
-func usageEventsCleanupCutoff(now time.Time) time.Time {
-	localNow := now.In(time.Local)
-	currentMonthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
-	return currentMonthStart.AddDate(0, -1, 0)
-}
-
-func CleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
-	if db == nil {
-		return 0, fmt.Errorf("database is nil")
-	}
-	cutoff := usageEventsCleanupCutoff(now)
-	result := db.Unscoped().Where("timestamp < ?", timeutil.FormatStorageTime(cutoff)).Delete(&entities.UsageEvent{})
-	if result.Error != nil {
-		return result.RowsAffected, fmt.Errorf("cleanup usage events: %w", result.Error)
-	}
-	return result.RowsAffected, nil
-}
+const usageEventsRetentionDays = 90
 
 func usageEventsArchiveCutoff(now time.Time) time.Time {
 	localNow := now.In(time.Local)
-	currentMonthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
-	return currentMonthStart.AddDate(0, -1, 0)
+	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
+	return localDayStart.AddDate(0, 0, -usageEventsRetentionDays)
+}
+
+// usageEventAggregationsCaughtUp 检查三类全局 checkpoint + Identity cursor 是否都追平到当前最大 event ID。
+// 只有聚合全部追上后才允许把原始事件归档移出 hot 表。
+func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
+	var maxEventID int64
+	if err := tx.Model(&entities.UsageEvent{}).Select("COALESCE(MAX(id), 0)").Scan(&maxEventID).Error; err != nil {
+		return false, fmt.Errorf("load usage event archive watermark: %w", err)
+	}
+	if maxEventID == 0 {
+		return true, nil
+	}
+
+	var checkpoints []entities.UsageAggregationCheckpoint
+	names := []entities.UsageAggregationCheckpointName{
+		entities.UsageAggregationCheckpointOverview,
+		entities.UsageAggregationCheckpointActivity,
+		entities.UsageAggregationCheckpointLatency,
+	}
+	if err := tx.Where("name IN ?", names).Find(&checkpoints).Error; err != nil {
+		return false, fmt.Errorf("load usage aggregation archive watermarks: %w", err)
+	}
+	ready := make(map[entities.UsageAggregationCheckpointName]bool, len(names))
+	for _, checkpoint := range checkpoints {
+		ready[checkpoint.Name] = checkpoint.LastAggregatedUsageEventID >= maxEventID
+	}
+	for _, name := range names {
+		if !ready[name] {
+			return false, nil
+		}
+	}
+
+	pendingIdentity, err := hasPendingUsageIdentityAggregation(tx)
+	if err != nil {
+		return false, fmt.Errorf("check identity archive watermark: %w", err)
+	}
+	return !pendingIdentity, nil
 }

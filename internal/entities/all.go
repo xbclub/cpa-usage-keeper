@@ -4,6 +4,7 @@ package entities
 func All() []any {
 	return []any{
 		&UsageEvent{},
+		&UsageEventArchive{},
 		&RedisUsageInbox{},
 		&ModelPriceSetting{},
 		&ModelPriceRule{},
