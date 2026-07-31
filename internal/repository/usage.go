@@ -780,6 +780,12 @@ func BuildUsageOverviewWithFilterAndRecentCache(db *gorm.DB, filter dto.UsageQue
 	if err != nil {
 		return nil, err
 	}
+	// API Key 汇总独立于主聚合（fork-unique）。
+	summaryAcc := newAPIKeySummaryAccumulator()
+	if err := accumulateAPIKeySummaryFromOverview(db, filter, costResolver, recentCache, &summaryAcc); err != nil {
+		return nil, err
+	}
+	overview.APIKeySummary = summaryAcc.toSlice()
 	return overview, nil
 }
 
