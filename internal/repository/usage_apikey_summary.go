@@ -9,6 +9,7 @@ import (
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
 
@@ -133,7 +134,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilte
 		bucketByDay := shouldBucketUsageOverviewByDay(effectiveFilter, windowMinutes)
 		fullDayStart, fullDayEnd := usageOverviewFullDayWindow(fullStart, fullEnd)
 		if !bucketByDay || !fullDayEnd.After(fullDayStart) {
-			rows, err := loadUsageOverviewHourlyStats(db, effectiveFilter, fullStart, fullEnd, false)
+			rows, err := loadAPIKeySummaryHourlyStats(db, effectiveFilter, fullStart, fullEnd)
 			if err != nil {
 				return err
 			}
@@ -141,7 +142,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilte
 				acc.accumulateHourlyStat(row, costResolver)
 			}
 		} else {
-			rows, err := loadUsageOverviewDailyStats(db, effectiveFilter, fullDayStart, fullDayEnd, false)
+			rows, err := loadAPIKeySummaryDailyStats(db, effectiveFilter, fullDayStart, fullDayEnd)
 			if err != nil {
 				return err
 			}
@@ -152,7 +153,7 @@ func accumulateAPIKeySummaryFromOverview(db *gorm.DB, filter dto.UsageQueryFilte
 				if !window.end.After(window.start) {
 					continue
 				}
-				hourlyRows, err := loadUsageOverviewHourlyStats(db, effectiveFilter, window.start, window.end, false)
+				hourlyRows, err := loadAPIKeySummaryHourlyStats(db, effectiveFilter, window.start, window.end)
 				if err != nil {
 					return err
 				}
@@ -179,4 +180,29 @@ func ListOverviewModelNamesWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) 
 		return nil, fmt.Errorf("load overview model names: %w", err)
 	}
 	return values, nil
+}
+
+// loadAPIKeySummaryHourlyStats 直接查 entity 级小时 stats(含 api_group_key),
+// 不用上游的 loadUsageOverviewHourlyStatsWithFilter(返回 projection,不含 api_group_key)。
+func loadAPIKeySummaryHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewHourlyStat, error) {
+	var rows []entities.UsageOverviewHourlyStat
+	query := db.Model(&entities.UsageOverviewHourlyStat{}).
+		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end))
+	query = applyUsageQueryWindow(query, filter)
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load api key summary hourly stats: %w", err)
+	}
+	return rows, nil
+}
+
+// loadAPIKeySummaryDailyStats 直接查 entity 级天 stats(含 api_group_key)。
+func loadAPIKeySummaryDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewDailyStat, error) {
+	var rows []entities.UsageOverviewDailyStat
+	query := db.Model(&entities.UsageOverviewDailyStat{}).
+		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end))
+	query = applyUsageQueryWindow(query, filter)
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load api key summary daily stats: %w", err)
+	}
+	return rows, nil
 }

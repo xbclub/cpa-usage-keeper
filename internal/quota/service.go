@@ -22,8 +22,6 @@ type ServiceOptions struct {
 	PricingCatalog                   *pricing.Catalog
 }
 
-const usageHeaderSnapshotQueueSize = 100
-
 type Service struct {
 	db       *gorm.DB
 	registry ProviderRegistry
@@ -63,11 +61,12 @@ type Service struct {
 	// refreshWG 跟踪 service 派生的 dispatcher/worker/scheduler goroutine，App 关闭 DB 前会等待它们退出。
 	refreshWG sync.WaitGroup
 
-	usageHeaderCh            chan []UsageHeaderSnapshot
-	usageHeaderSlots         chan struct{}
+	usageHeaderPending       map[string]UsageHeaderSnapshot
+	usageHeaderWake          chan struct{}
 	usageHeaderStopCh        chan struct{}
 	usageHeaderDoneCh        chan struct{}
 	usageHeaderFlushInterval time.Duration
+	usageHeaderNewTimer      func(time.Duration) (<-chan time.Time, func())
 	usageHeaderMu            sync.Mutex
 	usageHeaderClosing       bool
 	usageHeaderCloseOnce     sync.Once
@@ -124,14 +123,12 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		refreshContext:             refreshContext,
 		refreshCancel:              refreshCancel,
 		autoRefreshSettingsChanged: make(chan struct{}, 1),
-		usageHeaderCh:              make(chan []UsageHeaderSnapshot, usageHeaderSnapshotQueueSize),
-		usageHeaderSlots:           make(chan struct{}, usageHeaderSnapshotQueueSize),
+		usageHeaderPending:         make(map[string]UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
+		usageHeaderWake:            make(chan struct{}, 1),
 		usageHeaderStopCh:          make(chan struct{}),
 		usageHeaderDoneCh:          make(chan struct{}),
 		usageHeaderFlushInterval:   usageHeaderFlushInterval,
-	}
-	for i := 0; i < usageHeaderSnapshotQueueSize; i++ {
-		service.usageHeaderSlots <- struct{}{}
+		usageHeaderNewTimer:        newUsageHeaderTimer,
 	}
 	go service.runUsageHeaderSnapshotWorker()
 	return service

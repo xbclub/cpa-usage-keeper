@@ -170,14 +170,20 @@ func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions
 	if opts.CleanupUsageEvents {
 		usageEventsDeleted, err = CleanupUsageEvents(db, now)
 		if err != nil {
-			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsArchived: usageEventsDeleted}, err
 		}
 	}
 	// PostgreSQL 不需要 VACUUM（由 autovacuum 自动维护）。
-	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
+	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsArchived: usageEventsDeleted}, nil
 }
 
 // CleanupUsageEvents 删除当前页面查询窗口外的原始 usage_events，保留从上个月 1 日本地零点开始的数据。
+func usageEventsCleanupCutoff(now time.Time) time.Time {
+	localNow := now.In(time.Local)
+	currentMonthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
+	return currentMonthStart.AddDate(0, -1, 0)
+}
+
 func CleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("database is nil")
@@ -190,7 +196,7 @@ func CleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
 	return result.RowsAffected, nil
 }
 
-func usageEventsCleanupCutoff(now time.Time) time.Time {
+func usageEventsArchiveCutoff(now time.Time) time.Time {
 	localNow := now.In(time.Local)
 	currentMonthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
 	return currentMonthStart.AddDate(0, -1, 0)

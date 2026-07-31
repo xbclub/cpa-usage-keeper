@@ -22,6 +22,7 @@ import (
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
+	"cpa-usage-keeper/internal/ranking"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
 	webui "cpa-usage-keeper/web"
@@ -42,6 +43,7 @@ type StatusProvider interface {
 
 type Options struct {
 	EnvFile string
+	AppHost string
 }
 
 type QuotaRunner interface {
@@ -64,6 +66,7 @@ type App struct {
 	QuotaAutoRefresh QuotaRunner
 	// UsageAggregation 是唯一串行调度三类派生聚合事务的后台 runner。
 	UsageAggregation Runner
+	Ranking           Runner
 	RecentUsageCache *repository.UsageRecentEventCache
 	PricingCatalog   *pricing.Catalog
 	LogCloser        io.Closer
@@ -81,12 +84,41 @@ type App struct {
 // newUsageRecentEventCache 是最近事件缓存构造入口，测试可替换它来覆盖缓存初始化失败路径。
 var newUsageRecentEventCache = repository.NewUsageRecentEventCache
 
+type loggedInitializationError struct {
+	err error
+}
+
+func (e *loggedInitializationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *loggedInitializationError) Unwrap() error {
+	return e.err
+}
+
+// IsInitializationErrorLogged 判断构造阶段是否已在释放日志资源前写入终止错误。
+func IsInitializationErrorLogged(err error) bool {
+	var logged *loggedInitializationError
+	return errors.As(err, &logged)
+}
+
+func failInitialization(logCloser io.Closer, err error) error {
+	logging.LogTerminalFatal("initialize app", err)
+	if closeErr := logCloser.Close(); closeErr != nil {
+		wrappedCloseErr := fmt.Errorf("close logging: %w", closeErr)
+		err = errors.Join(err, wrappedCloseErr)
+		// 文件日志已经进入关闭流程，额外将关闭失败写到恢复后的控制台输出，避免错误只留在返回值里。
+		logging.LogTerminalError("close logging after initialization failure", wrappedCloseErr)
+	}
+	return &loggedInitializationError{err: err}
+}
+
 func New() (*App, error) {
 	return NewWithOptions(Options{})
 }
 
 func NewWithOptions(options Options) (*App, error) {
-	cfg, err := config.Load(config.LoadOptions{EnvFile: options.EnvFile})
+	cfg, err := config.Load(config.LoadOptions{EnvFile: options.EnvFile, AppHost: options.AppHost})
 	if err != nil {
 		return nil, err
 	}
@@ -102,10 +134,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 
 	db, err := repository.OpenDatabase(cfg)
 	if err != nil {
-		_ = logCloser.Close()
-		return nil, err
+		return nil, failInitialization(logCloser, err)
 	}
-
 	app, err := newWithDB(cfg, db, logCloser)
 	if err != nil {
 		_ = closeGormDB(db)
@@ -147,7 +177,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	})
 
 	// 单 writer aggregation runner 复用同一个数据库和 quota appender，并在 App.Run 时主动追平。
-	usageAggregationRunner := poller.NewUsageAggregationRunner(db, quotaService)
+	usageAggregationRunner := poller.NewUsageAggregationRunner(db)
 
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
@@ -156,7 +186,6 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		RecentUsageEvents: recentUsageCache,
 		// usage 与 metadata 提交后只唤醒单 writer runner，不在前台链路执行派生聚合。
 		UsageAggregationNotifier: usageAggregationRunner,
-		CleanupUsageEventsEnabled: cfg.CleanupUsageEventsEnabled,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
@@ -227,6 +256,16 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	}
 	authHandler := api.NewAuthHandler(authCfg, sessionManager)
 
+	// Ranking 默认 disabled（构造阶段不访问中心，无外部请求）。
+	rankingService, err := ranking.NewService(ranking.NewStore(db), ranking.NewAggregator(db), ranking.NewClient())
+	if err != nil {
+		return nil, fmt.Errorf("create ranking service: %w", err)
+	}
+	rankingRunner, err := ranking.NewRunner(rankingService)
+	if err != nil {
+		return nil, fmt.Errorf("create ranking runner: %w", err)
+	}
+
 	// 启动时同步追平历史聚合（Overview/Activity/Identity），避免首次页面加载触发全表扫描。
 	// 单 writer runner 复用同一个 DB；循环到无更多有界 batch 为止，inbox backlog 时让路给前台。
 	logrus.Info("starting usage overview aggregation catch-up")
@@ -254,6 +293,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		QuotaService:     quotaService,
 		QuotaAutoRefresh: quotaAutoRefreshService(cfg, quotaService),
 		UsageAggregation: usageAggregationRunner,
+		Ranking:           rankingRunner,
 		RecentUsageCache: recentUsageCache,
 		PricingCatalog:   pricingCatalog,
 		LogCloser:        logCloser,
