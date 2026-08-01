@@ -2,14 +2,15 @@ package test
 
 import (
 	"context"
-	"path/filepath"
+	
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
+	
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/ranking"
-	"cpa-usage-keeper/internal/repository"
+	
 )
 
 func TestAggregatorBuildsOneUTCDayFromUsageEvents(t *testing.T) {
@@ -212,18 +213,7 @@ func TestAggregatorRejectsRangeOutsideOneCenterDay(t *testing.T) {
 }
 
 func TestAggregatorBypassesOccupiedSQLiteWriter(t *testing.T) {
-	db, reader, err := testutil.OpenTestDatabase(t), "ranking-reader.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabasePools returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-		if sqlDB, err := reader.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
+	db := testutil.OpenTestDatabase(t)
 	start := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	if err := db.Create(&entities.UsageEvent{EventKey: "reader-route", Timestamp: start.Add(time.Minute), TotalTokens: 12}).Error; err != nil {
 		t.Fatalf("seed usage event: %v", err)

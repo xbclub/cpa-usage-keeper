@@ -199,8 +199,8 @@ func loadUsageAggregationParitySnapshot(t *testing.T, db *gorm.DB) usageAggregat
 	if err := db.Order("bucket_start asc, api_group_key asc, model asc, auth_index asc, model_alias asc").Find(&daily).Error; err != nil {
 		t.Fatalf("load parity daily rows: %v", err)
 	}
-	// 执行：读取唯一 Overview checkpoint。
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
+	// 执行：读取统一 Overview checkpoint（v1.14 起写入 usage_aggregation_checkpoints）。
+	var checkpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "overview").Take(&checkpoint).Error; err != nil {
 		t.Fatalf("load parity overview checkpoint: %v", err)
 	}

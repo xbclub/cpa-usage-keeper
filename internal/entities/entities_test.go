@@ -9,6 +9,7 @@ func TestAllIncludesCoreModels(t *testing.T) {
 	items := All()
 	expected := []any{
 		&UsageEvent{},
+		&UsageEventArchive{},
 		&RedisUsageInbox{},
 		&ModelPriceSetting{},
 		&ModelPriceRule{},
@@ -16,9 +17,11 @@ func TestAllIncludesCoreModels(t *testing.T) {
 		&CPAAPIKey{},
 		&UsageOverviewHourlyStat{},
 		&UsageOverviewDailyStat{},
-		&UsageOverviewAggregationCheckpoint{},
+		// v1.14 起三类聚合用统一 checkpoint 表。
+		&UsageAggregationCheckpoint{},
 		&UsageActivityStat{},
-		&UsageActivityAggregationCheckpoint{},
+		// Latency hour/day 共用一张可合并聚合表。
+		&UsageLatencyStat{},
 		&AuthSession{},
 		&AppSetting{},
 	}

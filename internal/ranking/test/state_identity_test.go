@@ -7,16 +7,18 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"path/filepath"
+	
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/config"
+	
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/ranking"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
+	"cpa-usage-keeper/internal/ranking"
+	
 	"gorm.io/gorm"
 )
 
@@ -121,18 +123,7 @@ func TestRankingStoreRejectsUnsupportedPersistedProfile(t *testing.T) {
 }
 
 func TestRankingStoreLoadBypassesBlockedUpdate(t *testing.T) {
-	db, reader, err := testutil.OpenTestDatabase(t), "ranking-store.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabasePools returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-		if sqlDB, err := reader.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
+	db := testutil.OpenTestDatabase(t)
 
 	identity, err := ranking.GenerateIdentity(rand.Reader)
 	if err != nil {
@@ -283,14 +274,5 @@ func TestRankingCanonicalPayloadMatchesCenterContract(t *testing.T) {
 
 func openRankingDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "ranking.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
-	return db
+	return testutil.OpenTestDatabase(t)
 }
