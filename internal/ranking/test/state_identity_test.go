@@ -123,6 +123,9 @@ func TestRankingStoreRejectsUnsupportedPersistedProfile(t *testing.T) {
 }
 
 func TestRankingStoreLoadBypassesBlockedUpdate(t *testing.T) {
+	// SQLite 的读写分离连接池(OpenDatabasePools)让 Load 能用 reader 绕过被占用的 writer。
+	// fork PG 单池架构无 reader pool,持一条连接同时阻塞 Load 和 Update,此测试前提不成立。
+	t.Skip("requires SQLite read/write pool separation; fork PG single pool cannot bypass blocked writer")
 	db := testutil.OpenTestDatabase(t)
 
 	identity, err := ranking.GenerateIdentity(rand.Reader)
@@ -149,6 +152,8 @@ func TestRankingStoreLoadBypassesBlockedUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load writer pool: %v", err)
 	}
+	// PG 默认连接池 >1，持有一条连接不会阻塞 Update；限制为 1 使 waitCount 能检测到排队。
+	writeSQL.SetMaxOpenConns(1)
 	heldWriter, err := writeSQL.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("occupy writer connection: %v", err)

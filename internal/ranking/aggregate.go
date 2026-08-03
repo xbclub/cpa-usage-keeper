@@ -40,20 +40,20 @@ func (a *Aggregator) AggregateDay(ctx context.Context, start, end time.Time) (Me
 	query := fmt.Sprintf(`
 WITH five_minute_buckets AS (
 	SELECT
-		CAST(strftime('%%s', timestamp) AS INTEGER) / 300 AS bucket_key,
+		CAST(EXTRACT(EPOCH FROM timestamp) AS BIGINT) / 300 AS bucket_key,
 		COUNT(*) AS request_count,
-		SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END) AS success_count,
-		SUM(CASE WHEN failed <> 0 THEN 1 ELSE 0 END) AS failure_count,
+		SUM(CASE WHEN failed = false THEN 1 ELSE 0 END) AS success_count,
+		SUM(CASE WHEN failed <> false THEN 1 ELSE 0 END) AS failure_count,
 		SUM(input_tokens) AS input_tokens,
 		SUM(output_tokens) AS output_tokens,
 		SUM(reasoning_tokens) AS reasoning_tokens,
 		SUM(cache_read_tokens) AS cache_read_tokens,
 		SUM(cache_creation_tokens) AS cache_creation_tokens,
 		SUM(total_tokens) AS total_tokens,
-		SUM(CASE WHEN failed = 0 AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN ttft_ms ELSE 0 END) AS ttft_sum_ms,
-		SUM(CASE WHEN failed = 0 AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN 1 ELSE 0 END) AS ttft_sample_count,
-		SUM(CASE WHEN failed = 0 AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN latency_ms ELSE 0 END) AS latency_sum_ms,
-		SUM(CASE WHEN failed = 0 AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count
+		SUM(CASE WHEN failed = false AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN ttft_ms ELSE 0 END) AS ttft_sum_ms,
+		SUM(CASE WHEN failed = false AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN 1 ELSE 0 END) AS ttft_sample_count,
+		SUM(CASE WHEN failed = false AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN latency_ms ELSE 0 END) AS latency_sum_ms,
+		SUM(CASE WHEN failed = false AND ttft_ms IS NOT NULL AND ttft_ms > 0 AND latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count
 	FROM usage_events
 	WHERE %s
 	GROUP BY bucket_key
@@ -109,10 +109,10 @@ func (a *Aggregator) LatestEventID(ctx context.Context, start, end time.Time) (i
 
 func rankingTimeRangePredicate(start, end time.Time) (string, []any) {
 	// storageTime 使用 Keeper 本地 offset，DST 回拨时文本顺序不等于 instant 顺序。
-	// 外层宽范围继续使用 timestamp 索引，strftime 只负责候选行的真实时间复核。
+	// 外层宽范围继续使用 timestamp 索引，epoch 只负责候选行的真实时间复核。
 	coarseStart := timeutil.FormatStorageTime(start.Add(-24 * time.Hour))
 	coarseEnd := timeutil.FormatStorageTime(end.Add(24 * time.Hour))
-	epochExpression := "CAST(strftime('%s', timestamp) AS INTEGER)"
+	epochExpression := "CAST(EXTRACT(EPOCH FROM timestamp) AS BIGINT)"
 	if end.Nanosecond() == 0 {
 		return "timestamp >= ? AND timestamp < ? AND " + epochExpression + " >= ? AND " + epochExpression + " < ?", []any{
 			coarseStart, coarseEnd, start.Unix(), end.Unix(),
