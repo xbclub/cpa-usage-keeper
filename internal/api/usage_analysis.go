@@ -173,6 +173,19 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
+		// Latency 仅支持最近 30 天的自定义范围；超出范围直接返回 unsupported，不查 DB。
+		if filter.StartTime != nil && filter.EndTime != nil {
+			latencyMaxRangeDays := 30
+			if filter.EndTime.Sub(*filter.StartTime) > time.Duration(latencyMaxRangeDays)*24*time.Hour ||
+				time.Since(*filter.StartTime) > time.Duration(latencyMaxRangeDays)*24*time.Hour {
+				c.JSON(http.StatusOK, analysisLatencyDiagnostics{
+					Supported:         false,
+					UnsupportedReason: "range_outside_recent_30_days",
+				})
+				return
+			}
+		}
+
 		latency, err := usageProvider.GetAnalysisLatency(c.Request.Context(), filter)
 		if err != nil {
 			writeInternalError(c, "get analysis latency failed", err)

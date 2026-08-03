@@ -375,7 +375,24 @@ func captureRepositoryLogs(t *testing.T) *bytes.Buffer {
 	return &logs
 }
 
-func TestCleanupStorageCleansUsageEventsBeforePreviousMonthStart(t *testing.T) {
+// v1.14 起 CleanupStorage 使用 ArchiveExpiredUsageEvents 替代旧的 CleanupUsageEvents。
+// archive 要求：(1) 事件超过 90 天保留期 (2) 三类全局 checkpoint 都追平最大 event ID (3) 无 pending identity。
+// seedArchiveCheckpoints 辅助写入三类统一 checkpoint。
+
+func seedArchiveCheckpoints(t *testing.T, db *gorm.DB, maxEventID int64, now time.Time) {
+	t.Helper()
+	for _, name := range []entities.UsageAggregationCheckpointName{
+		entities.UsageAggregationCheckpointOverview,
+		entities.UsageAggregationCheckpointActivity,
+		entities.UsageAggregationCheckpointLatency,
+	} {
+		if err := db.Create(&entities.UsageAggregationCheckpoint{Name: name, LastAggregatedUsageEventID: maxEventID, StatsUpdatedAt: &now}).Error; err != nil {
+			t.Fatalf("seed %s checkpoint: %v", name, err)
+		}
+	}
+}
+
+func TestCleanupStorageArchivesExpiredEventsAfterRetentionPeriod(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -384,74 +401,72 @@ func TestCleanupStorageCleansUsageEventsBeforePreviousMonthStart(t *testing.T) {
 	time.Local = location
 	t.Cleanup(func() { time.Local = previousLocal })
 	db := openTestDatabase(t)
-	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
+	// now 远于 90 天保留期，使 2026-04 的事件可被归档。
+	now := time.Date(2026, 8, 16, 9, 0, 0, 0, time.Local)
 
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "old", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 23, 59, 59, 0, time.Local), TotalTokens: 1},
-		{EventKey: "boundary", Model: "claude-sonnet", Timestamp: time.Date(2026, 5, 1, 0, 0, 0, 0, time.Local), TotalTokens: 2},
-		{EventKey: "recent", Model: "claude-sonnet", Timestamp: time.Date(2026, 6, 16, 8, 0, 0, 0, time.Local), TotalTokens: 3},
+		{EventKey: "recent", Model: "claude-sonnet", Timestamp: time.Date(2026, 8, 16, 8, 0, 0, 0, time.Local), TotalTokens: 3},
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
+	// 所有 checkpoint 追平到最大 event ID。
+	var maxEvent entities.UsageEvent
+	if err := db.Order("id desc").First(&maxEvent).Error; err != nil {
+		t.Fatalf("load max event: %v", err)
+	}
+	seedArchiveCheckpoints(t, db, maxEvent.ID, now)
+
 	result, err := CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
 	if result.UsageEventsArchived != 1 {
-		t.Fatalf("expected one old usage event to be deleted, got %+v", result)
+		t.Fatalf("expected one old usage event to be archived, got %+v", result)
 	}
 
 	var remainingKeys []string
 	if err := db.Model(&entities.UsageEvent{}).Order("event_key asc").Pluck("event_key", &remainingKeys).Error; err != nil {
 		t.Fatalf("load remaining usage events: %v", err)
 	}
-	expectedKeys := []string{"boundary", "recent"}
+	expectedKeys := []string{"recent"}
 	if fmt.Sprint(remainingKeys) != fmt.Sprint(expectedKeys) {
 		t.Fatalf("expected remaining usage events %v, got %v", expectedKeys, remainingKeys)
 	}
 }
 
-func TestCleanupStorageCleansUsageEventsWithoutOverviewCheckpointGuard(t *testing.T) {
+func TestCleanupStorageRefusesArchiveWhenCheckpointsLagging(t *testing.T) {
 	db := openTestDatabase(t)
-	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
+	now := time.Date(2026, 8, 16, 9, 0, 0, 0, time.Local)
 
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
-		{EventKey: "old-without-checkpoint", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 29, 10, 0, 0, 0, time.Local), TotalTokens: 1},
-		{EventKey: "old-beyond-checkpoint", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 10, 0, 0, 0, time.Local), TotalTokens: 2},
+		{EventKey: "old-expired", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 29, 10, 0, 0, 0, time.Local), TotalTokens: 1},
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	var first entities.UsageEvent
-	if err := db.Where("event_key = ?", "old-without-checkpoint").First(&first).Error; err != nil {
-		t.Fatalf("load first event: %v", err)
-	}
-	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpointName, LastAggregatedUsageEventID: first.ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatalf("seed overview checkpoint: %v", err)
-	}
-
+	// 不 seed checkpoint → usageEventAggregationsCaughtUp 返回 false → 不归档。
 	result, err := CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsArchived != 2 {
-		t.Fatalf("expected all expired usage events to be deleted, got %+v", result)
+	if result.UsageEventsArchived != 0 {
+		t.Fatalf("expected no archive when checkpoints lagging, got %+v", result)
 	}
 
 	var remainingCount int64
 	if err := db.Model(&entities.UsageEvent{}).Count(&remainingCount).Error; err != nil {
 		t.Fatalf("count remaining usage events: %v", err)
 	}
-	if remainingCount != 0 {
-		t.Fatalf("expected no remaining expired usage events, got %d", remainingCount)
+	if remainingCount != 1 {
+		t.Fatalf("expected expired event preserved when checkpoints lagging, got %d", remainingCount)
 	}
 }
 
-func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testing.T) {
+func TestCleanupStorageRefusesArchiveWhenIdentityPending(t *testing.T) {
 	db := openTestDatabase(t)
-	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
+	now := time.Date(2026, 8, 16, 9, 0, 0, 0, time.Local)
 
 	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
-		{EventKey: "identity-aggregated-old", AuthType: "oauth", AuthIndex: "auth-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 29, 10, 0, 0, 0, time.Local), TotalTokens: 1},
 		{EventKey: "identity-pending-old", AuthType: "oauth", AuthIndex: "auth-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 10, 0, 0, 0, time.Local), TotalTokens: 2},
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
@@ -460,14 +475,13 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	if err := db.Order("id asc").Find(&events).Error; err != nil {
 		t.Fatalf("load usage events: %v", err)
 	}
-	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpointName, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatalf("seed overview checkpoint: %v", err)
-	}
+	seedArchiveCheckpoints(t, db, events[0].ID, now)
+	// Identity cursor 故意落后 → hasPendingUsageIdentityAggregation 返回 true → 不归档。
 	if err := db.Create(&entities.UsageIdentity{
 		Name:                       "Auth 1",
 		AuthType:                   entities.UsageIdentityAuthTypeAuthFile,
 		Identity:                   "auth-1",
-		LastAggregatedUsageEventID: events[0].ID,
+		LastAggregatedUsageEventID: events[0].ID - 1, // 故意落后
 		CreatedAt:                  now,
 		UpdatedAt:                  now,
 	}).Error; err != nil {
@@ -478,16 +492,8 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsArchived != 2 {
-		t.Fatalf("expected all expired usage events to be deleted, got %+v", result)
-	}
-
-	var remainingCount int64
-	if err := db.Model(&entities.UsageEvent{}).Count(&remainingCount).Error; err != nil {
-		t.Fatalf("count remaining usage events: %v", err)
-	}
-	if remainingCount != 0 {
-		t.Fatalf("expected no remaining expired usage events, got %d", remainingCount)
+	if result.UsageEventsArchived != 0 {
+		t.Fatalf("expected no archive when identity pending, got %+v", result)
 	}
 }
 

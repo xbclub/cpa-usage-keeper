@@ -310,6 +310,10 @@ func newDailyFileWriterWithPrefix(dir, prefix string, retentionDays int, now fun
 	if err := writer.rotateLocked(now()); err != nil {
 		return nil, err
 	}
+	// 初始化时清理超过保留期的旧日志文件（上游在 maintainLocked 里做，但 init 后第一次 rotate 不触发）。
+	if err := writer.cleanupLocked(now()); err != nil {
+		return nil, fmt.Errorf("cleanup old log files: %w", err)
+	}
 	return writer, nil
 }
 

@@ -27,7 +27,7 @@ func HasPendingUsageIdentityAggregation(ctx context.Context, db *gorm.DB) (bool,
 }
 
 func hasPendingUsageIdentityAggregation(db *gorm.DB) (bool, error) {
-	var pending int
+	var pending bool
 	err := db.Raw(`SELECT EXISTS (
 		SELECT 1
 		FROM usage_identities AS identity
@@ -40,7 +40,7 @@ func hasPendingUsageIdentityAggregation(db *gorm.DB) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return pending != 0, nil
+	return pending, nil
 }
 
 func ReplaceUsageIdentitiesForAuthType(ctx context.Context, db *gorm.DB, identities []entities.UsageIdentity, authType entities.UsageIdentityAuthType, now time.Time) error {

@@ -241,7 +241,7 @@ func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testi
 	}
 	defer app.Close()
 
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
+	var checkpoint entities.UsageAggregationCheckpoint
 	if err := app.DB.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
 		t.Fatalf("load overview checkpoint returned error: %v", err)
 	}
