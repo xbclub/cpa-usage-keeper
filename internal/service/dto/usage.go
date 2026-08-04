@@ -207,7 +207,21 @@ type UsageOverviewRealtime struct {
 
 // UsageOverviewSnapshot 是 overview 的服务层结果。
 type UsageOverviewSnapshot struct {
-	Usage   *repodto.StatisticsSnapshot
-	Summary UsageOverviewSummary
-	Series  UsageOverviewSeries
+	Usage         *repodto.StatisticsSnapshot
+	Summary       UsageOverviewSummary
+	Series        UsageOverviewSeries
+	APIKeySummary []UsageOverviewAPIKeySummary
+}
+
+// UsageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总条目（上游没有此功能）。
+type UsageOverviewAPIKeySummary struct {
+	APIGroupKey         string
+	RequestCount        int64
+	TotalTokens         int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	CostUSD             float64
+	CostAvailable       bool
 }

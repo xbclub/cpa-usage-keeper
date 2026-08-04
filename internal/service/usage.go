@@ -115,8 +115,31 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 			DailyAverageCost:      overview.Summary.DailyAverageCost,
 			DailyAverageRangeDays: overview.Summary.DailyAverageRangeDays,
 		},
-		Series: mapUsageOverviewSeries(overview.Series, filter),
+		Series:        mapUsageOverviewSeries(overview.Series, filter),
+		APIKeySummary: mapUsageOverviewAPIKeySummary(overview.APIKeySummary),
 	}, nil
+}
+
+// mapUsageOverviewAPIKeySummary 把仓储层 fork-unique 的 API Key 汇总条目映射到服务层 DTO。
+func mapUsageOverviewAPIKeySummary(items []repodto.UsageOverviewAPIKeySummary) []servicedto.UsageOverviewAPIKeySummary {
+	if len(items) == 0 {
+		return []servicedto.UsageOverviewAPIKeySummary{}
+	}
+	mapped := make([]servicedto.UsageOverviewAPIKeySummary, 0, len(items))
+	for _, item := range items {
+		mapped = append(mapped, servicedto.UsageOverviewAPIKeySummary{
+			APIGroupKey:         item.APIGroupKey,
+			RequestCount:        item.RequestCount,
+			TotalTokens:         item.TotalTokens,
+			InputTokens:         item.InputTokens,
+			OutputTokens:        item.OutputTokens,
+			CacheReadTokens:     item.CacheReadTokens,
+			CacheCreationTokens: item.CacheCreationTokens,
+			CostUSD:             item.CostUSD,
+			CostAvailable:       item.CostAvailable,
+		})
+	}
+	return mapped
 }
 
 // GetUsageActivity 用统一时间条件选择档位；today/yesterday 额外保留本地自然日边界。

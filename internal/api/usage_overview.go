@@ -17,10 +17,24 @@ import (
 )
 
 type usageOverviewResponse struct {
-	Usage    usageOverviewPayload `json:"usage"`
-	Summary  usageOverviewSummary `json:"summary"`
-	Series   usageOverviewSeries  `json:"series"`
-	Timezone string               `json:"timezone"`
+	Usage         usageOverviewPayload         `json:"usage"`
+	Summary       usageOverviewSummary         `json:"summary"`
+	Series        usageOverviewSeries          `json:"series"`
+	Timezone      string                       `json:"timezone"`
+	APIKeySummary []usageOverviewAPIKeySummary `json:"api_key_summary"`
+}
+
+// usageOverviewAPIKeySummary 是 fork-unique 的 API Key 汇总行；api_key 在序列化时脱敏。
+type usageOverviewAPIKeySummary struct {
+	APIKey              string  `json:"api_key"`
+	RequestCount        int64   `json:"request_count"`
+	TotalTokens         int64   `json:"total_tokens"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	CostAvailable       bool    `json:"cost_available"`
 }
 
 type usageOverviewPayload struct {
@@ -263,10 +277,11 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvider, filter servicedto.UsageFilter) {
 	if usageProvider == nil {
 		c.JSON(http.StatusOK, usageOverviewResponse{
-			Usage:    buildUsageOverviewPayload(nil),
-			Summary:  usageOverviewSummary{},
-			Series:   emptyUsageOverviewSeries(),
-			Timezone: time.Local.String(),
+			Usage:         buildUsageOverviewPayload(nil),
+			Summary:       usageOverviewSummary{},
+			Series:        emptyUsageOverviewSeries(),
+			Timezone:      time.Local.String(),
+			APIKeySummary: []usageOverviewAPIKeySummary{},
 		})
 		return
 	}
@@ -282,11 +297,36 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 		usage = overview.Usage
 	}
 	c.JSON(http.StatusOK, usageOverviewResponse{
-		Usage:    buildUsageOverviewPayload(usage),
-		Summary:  buildUsageOverviewSummary(overview),
-		Series:   buildUsageOverviewSeries(overview),
-		Timezone: time.Local.String(),
+		Usage:         buildUsageOverviewPayload(usage),
+		Summary:       buildUsageOverviewSummary(overview),
+		Series:        buildUsageOverviewSeries(overview),
+		Timezone:      time.Local.String(),
+		APIKeySummary: buildUsageOverviewAPIKeySummary(overview),
 	})
+}
+
+// buildUsageOverviewAPIKeySummary 把 fork-unique 的 API Key 汇总映射到响应，api_key 走统一脱敏。
+// 无数据时返回空切片（非 nil），让 JSON 永远序列化 `[]`，前端字段始终存在。
+func buildUsageOverviewAPIKeySummary(overview *servicedto.UsageOverviewSnapshot) []usageOverviewAPIKeySummary {
+	if overview == nil {
+		return []usageOverviewAPIKeySummary{}
+	}
+	items := overview.APIKeySummary
+	result := make([]usageOverviewAPIKeySummary, 0, len(items))
+	for _, item := range items {
+		result = append(result, usageOverviewAPIKeySummary{
+			APIKey:              helper.RedactSensitiveValue(item.APIGroupKey),
+			RequestCount:        item.RequestCount,
+			TotalTokens:         item.TotalTokens,
+			InputTokens:         item.InputTokens,
+			OutputTokens:        item.OutputTokens,
+			CacheReadTokens:     item.CacheReadTokens,
+			CacheCreationTokens: item.CacheCreationTokens,
+			CostUSD:             item.CostUSD,
+			CostAvailable:       item.CostAvailable,
+		})
+	}
+	return result
 }
 
 func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider, filter servicedto.UsageFilter) {
