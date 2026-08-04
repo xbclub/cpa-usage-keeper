@@ -66,7 +66,9 @@ type App struct {
 	QuotaAutoRefresh QuotaRunner
 	// UsageAggregation 是唯一串行调度三类派生聚合事务的后台 runner。
 	UsageAggregation Runner
-	Ranking           Runner
+	Ranking          Runner
+	// LocalRanking 聚合本地 usage_events 维护 API Key 今日/昨日/本月/上月排行（无外部请求）。
+	LocalRanking     Runner
 	RecentUsageCache *repository.UsageRecentEventCache
 	PricingCatalog   *pricing.Catalog
 	LogCloser        io.Closer
@@ -165,6 +167,25 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 
 	// cpaClient / quotaService 提前创建。
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
+	// Local ranking 聚合本地 usage_events，不依赖 cpaClient；提前构造以便注入 runner。
+	localRankingService, err := ranking.NewLocalRankingService(db, ranking.LocalRankingServiceOptions{})
+	if err != nil {
+		if recentUsageCache != nil {
+			recentUsageCache.Close()
+		}
+		_ = closeGormDB(db)
+		_ = logCloser.Close()
+		return nil, err
+	}
+	localRankingRunner, err := ranking.NewLocalRankingRunner(localRankingService)
+	if err != nil {
+		if recentUsageCache != nil {
+			recentUsageCache.Close()
+		}
+		_ = closeGormDB(db)
+		_ = logCloser.Close()
+		return nil, err
+	}
 	// 价格快照在启动时一次性加载到不可变 catalog，供 quota/usage/pricing 共享同一份计价口径。
 	pricingSnapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
 	if err != nil {
@@ -181,8 +202,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
-		BaseURL: cfg.CPABaseURL,
-		Client:  cpaClient,
+		BaseURL:           cfg.CPABaseURL,
+		Client:            cpaClient,
 		RecentUsageEvents: recentUsageCache,
 		// usage 与 metadata 提交后只唤醒单 writer runner，不在前台链路执行派生聚合。
 		UsageAggregationNotifier: usageAggregationRunner,
@@ -248,6 +269,7 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		SessionTTL:           cfg.AuthSessionTTL,
 		BasePath:             cfg.AppBasePath,
 		FrameAncestorOrigins: frameAncestorOrigins(cfg),
+		TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
 	}
 	// 启用登录保护时把 session 持久化到 PostgreSQL，重启后已登录浏览器仍保留有效会话。
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
@@ -293,7 +315,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 		QuotaService:     quotaService,
 		QuotaAutoRefresh: quotaAutoRefreshService(cfg, quotaService),
 		UsageAggregation: usageAggregationRunner,
-		Ranking:           rankingRunner,
+		Ranking:          rankingRunner,
+		LocalRanking:     localRankingRunner,
 		RecentUsageCache: recentUsageCache,
 		PricingCatalog:   pricingCatalog,
 		LogCloser:        logCloser,
@@ -311,6 +334,8 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 				CPAAPIKeys:    cpaAPIKeyService,
 				AuthFiles:     authFilesManagementService,
 				RequestLogs:   requestLogService,
+				Ranking:       rankingService,
+				LocalRanking:  localRankingService,
 				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL, CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled, ActiveRecorder: quotaActiveRecorder(cfg, quotaService), QuotaAutoRefreshEnabled: cfg.QuotaAutoRefreshEnabled},
 			},
 		),
@@ -412,6 +437,14 @@ func (a *App) Run() error {
 			}
 		})
 	}
+	if a.LocalRanking != nil {
+		a.startBackgroundTask(func() {
+			// Metadata 已先启动；Local runner 再等待首个五分钟周期，让 usage 与 Key 信息完成启动追赶。
+			if err := a.LocalRanking.Run(ctx); err != nil {
+				logrus.Errorf("local ranking aggregation stopped: %v", err)
+			}
+		})
+	}
 	if a.QuotaService != nil {
 		a.QuotaService.SetRefreshContext(ctx)
 	}
@@ -431,25 +464,12 @@ func (a *App) Run() error {
 			}
 		})
 	}
-	a.httpServer = a.buildHTTPServer()
+	a.httpServer = NewHTTPServer(*a.Config, a.Router)
 	return a.serveUntilShutdown(a.httpServer)
 }
 
 // defaultShutdownSignals 是触发优雅停机的信号集合。
 var defaultShutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
-
-// buildHTTPServer 用配置好的超时构造 HTTP 服务实例。
-func (a *App) buildHTTPServer() *http.Server {
-	return &http.Server{
-		Addr:              ":" + a.Config.AppPort,
-		Handler:           a.Router,
-		ReadHeaderTimeout: a.Config.HTTPReadHeaderTimeout,
-		ReadTimeout:       a.Config.HTTPReadTimeout,
-		WriteTimeout:      a.Config.HTTPWriteTimeout,
-		IdleTimeout:       a.Config.HTTPIdleTimeout,
-		ErrorLog:          logging.NewStandardLogger(logrus.ErrorLevel),
-	}
-}
 
 // serveUntilShutdown 在后台启动 HTTP 服务，并阻塞等待服务出错或收到停机信号。
 // 收到信号时先取消后台 runner（数据写入路径优先收尾），再排空在途 HTTP 请求。

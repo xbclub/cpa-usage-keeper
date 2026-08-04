@@ -537,30 +537,29 @@ func testAppConfig(t *testing.T) config.Config {
 	}
 }
 
-func TestBuildHTTPServerAppliesConfiguredTimeouts(t *testing.T) {
+func TestNewHTTPServerAppliesConfiguredTimeouts(t *testing.T) {
 	cfg := testAppConfig(t)
 	cfg.HTTPReadHeaderTimeout = 11 * time.Second
-	cfg.HTTPReadTimeout = 21 * time.Second
-	cfg.HTTPWriteTimeout = 31 * time.Second
 	cfg.HTTPIdleTimeout = 41 * time.Second
 	app := &App{Config: &cfg, Router: gin.New()}
 
-	server := app.buildHTTPServer()
+	server := NewHTTPServer(cfg, app.Router)
 
-	if server.Addr != ":"+cfg.AppPort {
-		t.Fatalf("expected addr :%s, got %s", cfg.AppPort, server.Addr)
+	if server.Addr != cfg.ListenAddress() {
+		t.Fatalf("expected addr %s, got %s", cfg.ListenAddress(), server.Addr)
 	}
 	if server.ReadHeaderTimeout != 11*time.Second {
 		t.Fatalf("expected read header timeout 11s, got %s", server.ReadHeaderTimeout)
 	}
-	if server.ReadTimeout != 21*time.Second {
-		t.Fatalf("expected read timeout 21s, got %s", server.ReadTimeout)
-	}
-	if server.WriteTimeout != 31*time.Second {
-		t.Fatalf("expected write timeout 31s, got %s", server.WriteTimeout)
-	}
 	if server.IdleTimeout != 41*time.Second {
 		t.Fatalf("expected idle timeout 41s, got %s", server.IdleTimeout)
+	}
+	// Read/Write Timeout 故意为 0，避免截断已认证的长响应（流式导出 CSV/JSON）。
+	if server.ReadTimeout != 0 || server.WriteTimeout != 0 {
+		t.Fatalf("expected read/write timeout 0 for streaming safety, got read=%s write=%s", server.ReadTimeout, server.WriteTimeout)
+	}
+	if server.MaxHeaderBytes != 64<<10 {
+		t.Fatalf("expected max header bytes 64KiB, got %d", server.MaxHeaderBytes)
 	}
 }
 
@@ -569,8 +568,6 @@ func TestRunGracefulShutdownOnSignal(t *testing.T) {
 	cfg.AppPort = freePort(t)
 	cfg.ShutdownTimeout = 2 * time.Second
 	cfg.HTTPReadHeaderTimeout = 5 * time.Second
-	cfg.HTTPReadTimeout = 5 * time.Second
-	cfg.HTTPWriteTimeout = 5 * time.Second
 	cfg.HTTPIdleTimeout = 5 * time.Second
 
 	sigCh := make(chan os.Signal, 1)
@@ -597,8 +594,6 @@ func TestRunCancelsBackgroundBeforeReturningOnSignal(t *testing.T) {
 	cfg.AppPort = freePort(t)
 	cfg.ShutdownTimeout = 2 * time.Second
 	cfg.HTTPReadHeaderTimeout = 5 * time.Second
-	cfg.HTTPReadTimeout = 5 * time.Second
-	cfg.HTTPWriteTimeout = 5 * time.Second
 	cfg.HTTPIdleTimeout = 5 * time.Second
 
 	ingestStarted := make(chan struct{})

@@ -25,6 +25,8 @@ import (
 
 const appBasePathPlaceholder = "__APP_BASE_PATH__"
 
+var loopbackTrustedProxyCIDRs = []string{"127.0.0.1/32", "::1/128"}
+
 type StatusProvider interface {
 	Status() poller.Status
 }
@@ -59,6 +61,7 @@ type OptionalProviders struct {
 	AuthFiles     service.AuthFilesManagementProvider
 	RequestLogs   service.RequestLogProvider
 	Ranking       rankinghttpapi.Provider
+	LocalRanking  rankinghttpapi.LocalProvider
 	Status        StatusRouteConfig
 }
 
@@ -73,7 +76,10 @@ func NewRouter(
 	optionalProviders ...OptionalProviders,
 ) *gin.Engine {
 	router := gin.New()
-	_ = router.SetTrustedProxies(nil)
+	trustedProxyCIDRs := append([]string{}, loopbackTrustedProxyCIDRs...)
+	trustedProxyCIDRs = append(trustedProxyCIDRs, authConfig.TrustedProxyCIDRs...)
+	_ = router.SetTrustedProxies(trustedProxyCIDRs)
+	router.RemoteIPHeaders = []string{"X-Forwarded-For"}
 	router.Use(logging.NewGinRecovery())
 
 	appGroup := router.Group(basePath)
@@ -81,6 +87,7 @@ func NewRouter(
 
 	apiV1 := appGroup.Group("/api/v1")
 	// 写请求（POST/PUT/PATCH/DELETE）必须携带 request-intent header，防止跨站表单/链接伪造。
+	apiV1.Use(unauthenticatedLoginRequestLimits(basePath))
 	apiV1.Use(requestIntentMiddleware())
 	if debugAPIRoutesEnabled() {
 		registerPingRoutes(apiV1)
@@ -98,6 +105,7 @@ func NewRouter(
 	var authFilesProvider service.AuthFilesManagementProvider
 	var requestLogProvider service.RequestLogProvider
 	var rankingProvider rankinghttpapi.Provider
+	var localRankingProvider rankinghttpapi.LocalProvider
 	var statusConfig StatusRouteConfig
 	if len(optionalProviders) > 0 {
 		usageIdentityProvider = optionalProviders[0].UsageIdentity
@@ -106,6 +114,7 @@ func NewRouter(
 		authFilesProvider = optionalProviders[0].AuthFiles
 		requestLogProvider = optionalProviders[0].RequestLogs
 		rankingProvider = optionalProviders[0].Ranking
+		localRankingProvider = optionalProviders[0].LocalRanking
 		statusConfig = optionalProviders[0].Status
 	}
 	requestLogDownloadTokens := newRequestLogDownloadTokenStore()
@@ -134,6 +143,9 @@ func NewRouter(
 	registerQuotaRoutes(adminProtected, quotaProvider)
 	if rankingProvider != nil {
 		rankinghttpapi.RegisterRoutes(adminProtected, rankingProvider)
+	}
+	if localRankingProvider != nil {
+		rankinghttpapi.RegisterLocalRoutes(adminProtected, localRankingProvider)
 	}
 
 	keyViewerProtected := apiV1.Group("")

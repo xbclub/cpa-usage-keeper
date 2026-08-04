@@ -17,6 +17,7 @@ import (
 
 const (
 	DefaultTimeZone                 = "Asia/Shanghai"
+	publicLoginPasswordPlaceholder  = "replace-with-your-login-password"
 	RedisQueueBatchSizeDefault      = 10000
 	MetadataSyncIntervalDefault     = 30 * time.Second
 	QuotaAutoRefreshIntervalDefault = 5 * time.Minute
@@ -26,10 +27,6 @@ const (
 
 	// HTTPReadHeaderTimeoutDefault 是读取请求头的超时，也是防御 Slowloris 慢速头攻击的关键上限。
 	HTTPReadHeaderTimeoutDefault = 10 * time.Second
-	// HTTPReadTimeoutDefault 是读取完整请求（含 body）的超时。
-	HTTPReadTimeoutDefault = 30 * time.Second
-	// HTTPWriteTimeoutDefault 是写回响应的超时；数据量大的聚合/分析查询可能需要调大。
-	HTTPWriteTimeoutDefault = 30 * time.Second
 	// HTTPIdleTimeoutDefault 是 keep-alive 空闲连接的最长存活时间。
 	HTTPIdleTimeoutDefault = 120 * time.Second
 	// ShutdownTimeoutDefault 是收到 SIGINT/SIGTERM 后优雅停机的总时限（HTTP 排空 + 后台 runner 收尾）。
@@ -60,6 +57,8 @@ type Config struct {
 	CPAPublicURL string
 	// CPARequestLogAccessEnabled 控制是否允许通过 Keeper 访问 CPA request log。
 	CPARequestLogAccessEnabled bool
+	// TrustedProxyCIDRs 是除本机 loopback 外允许提供客户端转发地址的代理网段。
+	TrustedProxyCIDRs []string
 	// TLSEnabled 控制是否以 HTTPS 模式启动 HTTP 服务。
 	TLSEnabled bool
 	// TLSCertFile 是 HTTPS 证书文件路径。
@@ -112,10 +111,6 @@ type Config struct {
 	AuthSessionTTL time.Duration
 	// HTTPReadHeaderTimeout 限制读取请求头的最长时间，防御 Slowloris 慢速头攻击。
 	HTTPReadHeaderTimeout time.Duration
-	// HTTPReadTimeout 限制读取完整请求（含 body）的最长时间。
-	HTTPReadTimeout time.Duration
-	// HTTPWriteTimeout 限制写回响应的最长时间；重型聚合/分析查询可能需要调大。
-	HTTPWriteTimeout time.Duration
 	// HTTPIdleTimeout 限制 keep-alive 空闲连接的最长存活时间。
 	HTTPIdleTimeout time.Duration
 	// ShutdownTimeout 是收到 SIGINT/SIGTERM 后优雅停机的总时限。
@@ -220,20 +215,6 @@ func Load(options LoadOptions) (*Config, error) {
 	if httpReadHeaderTimeout <= 0 {
 		return nil, fmt.Errorf("HTTP_READ_HEADER_TIMEOUT must be positive")
 	}
-	httpReadTimeout, err := getDuration("HTTP_READ_TIMEOUT", HTTPReadTimeoutDefault)
-	if err != nil {
-		return nil, err
-	}
-	if httpReadTimeout <= 0 {
-		return nil, fmt.Errorf("HTTP_READ_TIMEOUT must be positive")
-	}
-	httpWriteTimeout, err := getDuration("HTTP_WRITE_TIMEOUT", HTTPWriteTimeoutDefault)
-	if err != nil {
-		return nil, err
-	}
-	if httpWriteTimeout <= 0 {
-		return nil, fmt.Errorf("HTTP_WRITE_TIMEOUT must be positive")
-	}
 	httpIdleTimeout, err := getDuration("HTTP_IDLE_TIMEOUT", HTTPIdleTimeoutDefault)
 	if err != nil {
 		return nil, err
@@ -302,7 +283,12 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("AUTH_SESSION_TTL must be positive")
 	}
 
-	authEnabled, err := getBool("AUTH_ENABLED", false)
+	authEnabledValue := strings.TrimSpace(os.Getenv("AUTH_ENABLED"))
+	authEnabled, err := getBool("AUTH_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+	trustedProxyCIDRs, err := getCIDRs("TRUSTED_PROXY_CIDRS")
 	if err != nil {
 		return nil, err
 	}
@@ -334,44 +320,43 @@ func Load(options LoadOptions) (*Config, error) {
 
 	cfg := &Config{
 		AppHost:                    strings.TrimSpace(os.Getenv("APP_HOST")),
-		AppPort:                  getString("APP_PORT", "8080"),
-		AppBasePath:              appBasePath,
-		CPAPublicURL:             strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		AppPort:                    getString("APP_PORT", "8080"),
+		AppBasePath:                appBasePath,
+		CPAPublicURL:               strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		TrustedProxyCIDRs:          trustedProxyCIDRs,
 		CPARequestLogAccessEnabled: cpaRequestLogAccessEnabled,
-		TLSEnabled:               tlsEnabled,
-		TLSCertFile:              strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
-		TLSKeyFile:               strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
-		CPABaseURL:               strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
-		CPAManagementKey:         strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
-		RedisQueueAddr:           strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
-		RedisQueueTLS:            redisQueueTLS,
-		RedisQueueBatchSize:      redisQueueBatchSize,
-		RedisQueueIdleInterval:   redisQueueIdleInterval,
-		MetadataSyncInterval:     MetadataSyncIntervalDefault,
-		QuotaAutoRefreshEnabled:  quotaAutoRefreshEnabled,
-		QuotaAutoRefreshInterval: quotaAutoRefreshInterval,
-		QuotaRefreshWorkerLimit:  quotaRefreshWorkerLimit,
-		CleanupUsageEventsEnabled: cleanupUsageEventsEnabled,
-		WorkDir:                  workDir,
-		DatabaseURL:              strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		RequestTimeout:           requestTimeout,
-		TLSSkipVerify:            tlsSkipVerify,
-		LogLevel:                 getString("LOG_LEVEL", "info"),
-		LogFileEnabled:           logFileEnabled,
-		LogDir:                   filepath.Join(workDir, workDirLogsName),
-		LogRetentionDays:         logRetentionDays,
-		AuthEnabled:              authEnabled,
-		LoginPassword:            strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
-		AuthSessionTTL:           authSessionTTL,
-		HTTPReadHeaderTimeout:    httpReadHeaderTimeout,
-		HTTPReadTimeout:          httpReadTimeout,
-		HTTPWriteTimeout:         httpWriteTimeout,
-		HTTPIdleTimeout:          httpIdleTimeout,
-		ShutdownTimeout:          shutdownTimeout,
-		DBMaxOpenConns:           dbMaxOpenConns,
-		DBMaxIdleConns:           dbMaxIdleConns,
-		DBConnMaxLifetime:        dbConnMaxLifetime,
-		DBConnMaxIdleTime:        dbConnMaxIdleTime,
+		TLSEnabled:                 tlsEnabled,
+		TLSCertFile:                strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
+		TLSKeyFile:                 strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
+		CPABaseURL:                 strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
+		CPAManagementKey:           strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
+		RedisQueueAddr:             strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueTLS:              redisQueueTLS,
+		RedisQueueBatchSize:        redisQueueBatchSize,
+		RedisQueueIdleInterval:     redisQueueIdleInterval,
+		MetadataSyncInterval:       MetadataSyncIntervalDefault,
+		QuotaAutoRefreshEnabled:    quotaAutoRefreshEnabled,
+		QuotaAutoRefreshInterval:   quotaAutoRefreshInterval,
+		QuotaRefreshWorkerLimit:    quotaRefreshWorkerLimit,
+		CleanupUsageEventsEnabled:  cleanupUsageEventsEnabled,
+		WorkDir:                    workDir,
+		DatabaseURL:                strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		RequestTimeout:             requestTimeout,
+		TLSSkipVerify:              tlsSkipVerify,
+		LogLevel:                   getString("LOG_LEVEL", "info"),
+		LogFileEnabled:             logFileEnabled,
+		LogDir:                     filepath.Join(workDir, workDirLogsName),
+		LogRetentionDays:           logRetentionDays,
+		AuthEnabled:                authEnabled,
+		LoginPassword:              strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
+		AuthSessionTTL:             authSessionTTL,
+		HTTPReadHeaderTimeout:      httpReadHeaderTimeout,
+		HTTPIdleTimeout:            httpIdleTimeout,
+		ShutdownTimeout:            shutdownTimeout,
+		DBMaxOpenConns:             dbMaxOpenConns,
+		DBMaxIdleConns:             dbMaxIdleConns,
+		DBConnMaxLifetime:          dbConnMaxLifetime,
+		DBConnMaxIdleTime:          dbConnMaxIdleTime,
 	}
 	if appHost := strings.TrimSpace(options.AppHost); appHost != "" {
 		cfg.AppHost = appHost
@@ -382,8 +367,16 @@ func Load(options LoadOptions) (*Config, error) {
 	if cfg.CPAManagementKey == "" {
 		return nil, fmt.Errorf("CPA_MANAGEMENT_KEY is required")
 	}
-	if cfg.AuthEnabled && cfg.LoginPassword == "" {
-		return nil, fmt.Errorf("LOGIN_PASSWORD is required when AUTH_ENABLED is true")
+	if cfg.AuthEnabled {
+		if cfg.LoginPassword == "" && authEnabledValue == "" {
+			return nil, fmt.Errorf("AUTH_ENABLED is not set, so authentication defaults to true; LOGIN_PASSWORD is required")
+		}
+		if cfg.LoginPassword == "" {
+			return nil, fmt.Errorf("LOGIN_PASSWORD is required when AUTH_ENABLED is true")
+		}
+		if cfg.LoginPassword == publicLoginPasswordPlaceholder {
+			return nil, fmt.Errorf("LOGIN_PASSWORD must not use the public example value %q", publicLoginPasswordPlaceholder)
+		}
 	}
 	if cfg.TLSEnabled {
 		if cfg.TLSCertFile == "" {
@@ -512,6 +505,32 @@ func getString(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getCIDRs(key string) ([]string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if candidate == "" {
+			return nil, fmt.Errorf("%s must contain non-empty CIDR values", key)
+		}
+		_, network, err := net.ParseCIDR(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("%s contains invalid CIDR %q: %w", key, candidate, err)
+		}
+		ones, _ := network.Mask.Size()
+		if ones == 0 {
+			return nil, fmt.Errorf("%s must not trust every address via %q", key, candidate)
+		}
+		result = append(result, network.String())
+	}
+	return result, nil
 }
 
 func getDuration(key string, fallback time.Duration) (time.Duration, error) {

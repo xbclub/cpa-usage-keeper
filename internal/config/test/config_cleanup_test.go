@@ -22,6 +22,7 @@ func TestLoadFromEnvDefaultsUsageEventCleanupDisabled(t *testing.T) {
 	isolateCleanupConfigEnv(t)
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("AUTH_ENABLED", "false")
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -37,6 +38,7 @@ func TestLoadFromEnvReadsUsageEventCleanupFlag(t *testing.T) {
 	isolateCleanupConfigEnv(t)
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("AUTH_ENABLED", "false")
 	t.Setenv("CLEANUP_USAGE_EVENTS_ENABLED", "true")
 
 	cfg, err := config.LoadFromEnv()

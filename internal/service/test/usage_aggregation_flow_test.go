@@ -108,11 +108,11 @@ func TestProcessRedisUsageInboxEmptyBatchKeepsLegacyCatchUpWithoutNotifier(t *te
 	if result == nil || !result.Empty || result.ProcessedRows != 0 {
 		t.Fatalf("unexpected empty process result: %+v", result)
 	}
-	var overviewCheckpoint entities.UsageOverviewAggregationCheckpoint
+	var overviewCheckpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "overview").Take(&overviewCheckpoint).Error; err != nil {
 		t.Fatalf("load fallback overview checkpoint: %v", err)
 	}
-	var activityCheckpoint entities.UsageActivityAggregationCheckpoint
+	var activityCheckpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "activity").Take(&activityCheckpoint).Error; err != nil {
 		t.Fatalf("load fallback activity checkpoint: %v", err)
 	}
@@ -167,7 +167,7 @@ func assertUsageAggregationFlowOverviewCheckpointMissing(t *testing.T, db *gorm.
 	t.Helper()
 	var count int64
 	// 执行：读取 checkpoint 行数，不触发任何创建逻辑。
-	if err := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&count).Error; err != nil {
+	if err := db.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", "overview").Count(&count).Error; err != nil {
 		t.Fatalf("count overview checkpoints: %v", err)
 	}
 	// 断言：同步热路径没有创建或推进 Overview checkpoint。

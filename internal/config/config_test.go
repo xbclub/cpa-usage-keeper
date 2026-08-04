@@ -18,7 +18,7 @@ var configEnvKeys = []string{
 	"DATABASE_URL",
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TZ", "TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT", "QUOTA_AUTO_REFRESH_ENABLED", "QUOTA_AUTO_REFRESH_INTERVAL",
-	"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
+	"HTTP_READ_HEADER_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
 	"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 }
 
@@ -91,6 +91,8 @@ func withIsolatedEnvFiles(t *testing.T) {
 func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	// #395 后 AUTH_ENABLED 默认 true 且无密码会报错；本用例聚焦非 auth 默认值，显式关闭。
+	t.Setenv("AUTH_ENABLED", "false")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -156,12 +158,6 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	}
 	if cfg.HTTPReadHeaderTimeout != HTTPReadHeaderTimeoutDefault {
 		t.Fatalf("expected default http read header timeout %s, got %s", HTTPReadHeaderTimeoutDefault, cfg.HTTPReadHeaderTimeout)
-	}
-	if cfg.HTTPReadTimeout != HTTPReadTimeoutDefault {
-		t.Fatalf("expected default http read timeout %s, got %s", HTTPReadTimeoutDefault, cfg.HTTPReadTimeout)
-	}
-	if cfg.HTTPWriteTimeout != HTTPWriteTimeoutDefault {
-		t.Fatalf("expected default http write timeout %s, got %s", HTTPWriteTimeoutDefault, cfg.HTTPWriteTimeout)
 	}
 	if cfg.HTTPIdleTimeout != HTTPIdleTimeoutDefault {
 		t.Fatalf("expected default http idle timeout %s, got %s", HTTPIdleTimeoutDefault, cfg.HTTPIdleTimeout)
@@ -278,8 +274,6 @@ func TestLoadFromEnvHTTPAndShutdownTimeouts(t *testing.T) {
 		"CPA_BASE_URL":             "https://cpa.example.com",
 		"CPA_MANAGEMENT_KEY":       "secret",
 		"HTTP_READ_HEADER_TIMEOUT": "12s",
-		"HTTP_READ_TIMEOUT":        "40s",
-		"HTTP_WRITE_TIMEOUT":       "60s",
 		"HTTP_IDLE_TIMEOUT":        "90s",
 		"SHUTDOWN_TIMEOUT":         "15s",
 	}
@@ -296,12 +290,6 @@ func TestLoadFromEnvHTTPAndShutdownTimeouts(t *testing.T) {
 	}
 	if cfg.HTTPReadHeaderTimeout != 12*time.Second {
 		t.Fatalf("expected http read header timeout 12s, got %s", cfg.HTTPReadHeaderTimeout)
-	}
-	if cfg.HTTPReadTimeout != 40*time.Second {
-		t.Fatalf("expected http read timeout 40s, got %s", cfg.HTTPReadTimeout)
-	}
-	if cfg.HTTPWriteTimeout != 60*time.Second {
-		t.Fatalf("expected http write timeout 60s, got %s", cfg.HTTPWriteTimeout)
 	}
 	if cfg.HTTPIdleTimeout != 90*time.Second {
 		t.Fatalf("expected http idle timeout 90s, got %s", cfg.HTTPIdleTimeout)
@@ -322,7 +310,7 @@ func TestLoadRejectsNonPositiveHTTPTimeouts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Unsetenv("CPA_MANAGEMENT_KEY") })
 
-	cases := []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT"}
+	cases := []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT"}
 	for _, key := range cases {
 		if err := os.Setenv(key, "0s"); err != nil {
 			t.Fatalf("set env %s: %v", key, err)
@@ -575,7 +563,6 @@ func TestLoadFromEnvUsesRedisQueueAddrOverride(t *testing.T) {
 		t.Fatalf("expected redis queue addr override, got %q", cfg.RedisQueueAddr)
 	}
 }
-
 
 func TestLoadFromEnvRejectsNonPositiveRedisQueueBatchSize(t *testing.T) {
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
