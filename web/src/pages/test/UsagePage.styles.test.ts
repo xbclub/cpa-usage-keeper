@@ -28,7 +28,8 @@ const analysisPanelSource = readSource(new URL('../../components/usage/analysis/
 const analysisPanelStyles = readSource(new URL('../../components/usage/analysis/AnalysisPanel.module.scss', import.meta.url))
 const overviewRealtimePanelSource = readSource(new URL('../../components/usage/OverviewRealtimePanel.tsx', import.meta.url))
 const statCardsSource = readSource(new URL('../../components/usage/StatCards.tsx', import.meta.url))
-const dailyAveragePanelSource = readSource(new URL('../../components/usage/DailyAveragePanel.tsx', import.meta.url))
+// fork 组件名为 DailyAverageCard（非上游的 DailyAveragePanel）；保留旧变量名以兼容下方断言。
+const dailyAveragePanelSource = readSource(new URL('../../components/usage/DailyAverageCard.tsx', import.meta.url))
 const timeRangeControlSource = readSource(new URL('../../components/usage/TimeRangeControl.tsx', import.meta.url))
 const timeRangeControlStyles = readSource(new URL('../../components/usage/TimeRangeControl.module.scss', import.meta.url))
 
@@ -63,6 +64,88 @@ const styleRuleBlock = (source: string, selector: string) => {
 }
 
 describe('UsagePage toolbar styles', () => {
+  it('renders every authenticated page header logo at 20px without pill chrome', () => {
+    for (const pageStyles of [usagePageStyles, keyOverviewPageStyles]) {
+      const logo = styleRuleBlock(pageStyles, '.eyebrow')
+
+      expect(logo).toMatch(/padding:\s*0;/)
+      expect(logo).toMatch(/border-radius:\s*0;/)
+      expect(logo).toMatch(/border:\s*0;/)
+      expect(logo).toMatch(/background:\s*transparent;/)
+      expect(logo).toMatch(/font-size:\s*20px;/)
+      expect(logo).not.toContain('box-shadow')
+    }
+  })
+
+  it('routes Settings and Request Event Log headings through the global Card contract', () => {
+    expect(sessionSettingsSource).toContain("title={t('usage_stats.session_settings_title')}")
+    expect(sessionSettingsSource).toContain("subtitle={t('usage_stats.session_settings_subtitle')}")
+    expect(apiKeySettingsSource).toContain("title={t('usage_stats.api_key_settings_title')}")
+    expect(apiKeySettingsSource).toContain("subtitle={t('usage_stats.api_key_settings_subtitle')}")
+    expect(apiKeySettingsSource).toContain('titleMeta={')
+    expect(priceSettingsSource).toContain("title={t('usage_stats.model_price_settings_title')}")
+    expect(priceSettingsSource).toContain("subtitle={t('usage_stats.model_price_settings_subtitle')}")
+    expect(requestEventsSource).toContain('variant="flush"')
+    expect(requestEventsSource).toContain("title={t('usage_stats.request_events_title')}")
+    expect(requestEventsSource).toContain("subtitle={t('usage_stats.request_events_subtitle')}")
+    expect(requestEventsSource).toContain('titleMeta={')
+  })
+
+  it('keeps list internals square while subtitles use regular global weight', () => {
+    const subtitleBlock = styleRuleBlock(componentsStyles, '.keeper-card-subtitle')
+    const requestEventsCardBlock = styleRuleBlock(usagePageStyles, '.requestEventsCard:global(.card)')
+
+    expect(subtitleBlock).toContain('font-weight: var(--keeper-card-subtitle-weight);')
+    expect(requestEventsCardBlock).not.toContain('border-radius: 24px;')
+    expect(usagePageStyles).toMatch(/\.statCard\s*\{[\s\S]*?border-radius:\s*var\(--keeper-card-radius\);/)
+    expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/)
+  })
+
+  it('routes Analysis and Activity cards through the global surface and heading contract', () => {
+    const analysisChartSurface = styleRuleBlock(analysisPanelStyles, '\n.analysisChartSurface {')
+
+    expect(analysisPanelSource.match(/keeper-card-surface/g)).toHaveLength(7)
+    expect(analysisPanelSource).toContain('keeper-card-title-track')
+    expect(analysisPanelSource).toContain('keeper-card-title')
+    expect(analysisPanelSource).toContain('keeper-card-subtitle')
+    expect(serviceHealthCardSource).toContain('keeper-card-surface')
+    expect(serviceHealthCardSource).toContain('keeper-card-title-track')
+    expect(serviceHealthCardSource).toContain('keeper-card-title')
+    expect(serviceHealthCardSource).toContain('keeper-card-subtitle')
+    expect(tokenActivityCardSource).toContain('keeper-card-surface')
+    expect(tokenActivityCardSource).toContain('keeper-card-title-track')
+    expect(statCardsSource).not.toContain('keeper-card-surface')
+    expect(dailyAverageCardSource).not.toContain('keeper-card-surface')
+    expect(analysisChartSurface).toContain('border-radius: $radius-lg;')
+  })
+
+  it('keeps only the ranking source switch beside Refresh in the shared top toolbar', () => {
+    expect(usagePageSource).not.toContain("import { RankingToolbar }")
+    expect(usagePageSource).not.toContain('<RankingToolbar')
+    expect(usagePageStyles).not.toContain('.rankingToolbarSlot')
+    expect(usagePageSource).toContain("import { RankingScopeSwitch }")
+    expect(usagePageSource).toContain('<RankingScopeSwitch')
+    expect(usagePageSource).toContain('showRankingScopeControl ? styles.rankingScopeTransitionOpen')
+    expect(usagePageSource).not.toContain('buildLocalRankingPreviewLeaderboard')
+    expect(usagePageSource).not.toContain('RANKING_PREVIEW_ENABLED')
+    expect(usagePageSource).toContain("import { MainActionButton } from '@/components/ui/MainActionButton'")
+    expect(usagePageSource).toContain('<MainActionButton')
+    expect(keyOverviewPageSource).toContain("import { MainActionButton } from '@/components/ui/MainActionButton'")
+    expect(keyOverviewPageSource).toContain('<MainActionButton')
+  })
+
+  it('patches the local ranking cache by Key ID after a settings alias save', () => {
+    const start = usagePageSource.indexOf('const handleSaveApiKeyAlias = useCallback')
+    const end = usagePageSource.indexOf('\n  const handleRevokeAuthSession', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+
+    const handler = usagePageSource.slice(start, end)
+    expect(handler).toContain('patchLocalRankingProfileCache(updated.id, {')
+    expect(handler).toContain('key_alias: updated.keyAlias')
+    expect(handler).toContain('display_name: updated.label')
+  })
+
   it('removes obsolete Last Updated presentation and API plumbing', () => {
     expect(usagePageSource).not.toContain('lastSyncAt')
     expect(usagePageSource).not.toContain('status?.last_run_at')
@@ -393,7 +476,7 @@ describe('UsagePage toolbar styles', () => {
     expect(i18nSource).not.toContain('overview_realtime_latency_p95')
   })
 
-  it('keeps normal-mode range controls mounted in a stable transition slot', () => {
+  it('crossfades normal filters and ranking scope in one stable slot while Refresh stays fixed', () => {
     expect(usagePageSource).toContain("${!isEmbeddedInCPAMC ? styles.toolbarActionsRightAnimated : ''}")
     expect(usagePageSource).toContain('{(!isEmbeddedInCPAMC || showRangeControls) && (')
     expect(usagePageSource).toContain('showRangeControls ? styles.usageFilterTransitionOpen : \'\'')
@@ -401,18 +484,25 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('<div className={styles.usageFilterBar}>')
     expect(usagePageSource).not.toContain("key={showRangeControls ? 'open' : 'closed'}")
     expect(usagePageSource).toContain('className={styles.usageRefreshSlot}')
+    expect(usagePageSource).toContain('styles.toolbarContextSlotImmediate : styles.toolbarContextSlot')
+    expect(usagePageSource).toContain('styles.rankingScopeTransition')
     expect(usagePageStyles).toMatch(/\.toolbarActionsRightAnimated\s*\{[\s\S]*?display:\s*grid;/)
     expect(usagePageStyles).toMatch(/\.toolbarActionsRightAnimated\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto;/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransition\s*\{[\s\S]*?max-width:\s*0;/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransition\s*\{[\s\S]*?transform:\s*translateX\(8px\);/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransition\s*\{[\s\S]*?max-width 340ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransition\s*\{[\s\S]*?opacity 260ms ease/)
+    expect(usagePageStyles).toMatch(/\.toolbarContextSlot\s*\{[\s\S]*?display:\s*grid;/)
+    expect(usagePageStyles).toMatch(/\.usageFilterTransition,\s*\.rankingScopeTransition\s*\{[\s\S]*?grid-area:\s*1 \/ 1;/)
+    const contextTransition = styleRuleBlock(usagePageStyles, '.usageFilterTransition,\n.rankingScopeTransition')
+    expect(contextTransition).toContain('max-width: 0;')
+    expect(contextTransition).toContain('transform: translateX(8px);')
+    expect(contextTransition).toContain('max-width 340ms cubic-bezier(0.22, 1, 0.36, 1)')
+    expect(contextTransition).toContain('opacity 260ms ease')
     expect(usagePageStyles).toMatch(/\.usageFilterTransitionOpen\s*\{[\s\S]*?max-width:\s*960px;/)
     expect(usagePageStyles).toMatch(/\.usageFilterTransitionOpen\s*\{[\s\S]*?transform:\s*translateX\(0\);/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransitionInner\s*\{[\s\S]*?overflow:\s*hidden;/)
-    expect(usagePageStyles).toMatch(/\.usageFilterTransitionInner\s*\{[\s\S]*?width:\s*max-content;/)
+    const contextTransitionInner = styleRuleBlock(usagePageStyles, '.usageFilterTransitionInner,\n.rankingScopeTransitionInner')
+    expect(contextTransitionInner).toContain('overflow: hidden;')
+    expect(contextTransitionInner).toContain('width: max-content;')
     expect(usagePageStyles).toMatch(/\.usageRefreshSlot\s*\{[\s\S]*?flex:\s*0 0 auto;/)
-    expect(usagePageStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.usageFilterTransition,\s*\.usageFilterTransitionInner\s*\{[\s\S]*?width:\s*100%;/)
+    expect(usagePageStyles).toMatch(/\.rankingScopeTransitionOpen\s*\{[\s\S]*?max-width:\s*260px;/)
+    expect(usagePageStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.usageFilterTransition,\s*\.usageFilterTransitionInner,[\s\S]*?\.rankingScopeTransitionInner\s*\{[\s\S]*?width:\s*100%;/)
     expect(usagePageStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.usageFilterTransitionOpen\s*\{[\s\S]*?max-width:\s*100%;/)
   })
 
@@ -420,7 +510,7 @@ describe('UsagePage toolbar styles', () => {
     const reducedMotionStart = usagePageStyles.indexOf('@media (prefers-reduced-motion: reduce)')
     const mobileStart = usagePageStyles.lastIndexOf('@include mobile {', reducedMotionStart)
     const mobileStyles = usagePageStyles.slice(mobileStart, reducedMotionStart)
-    const transitionBlock = mobileStyles.match(/\.toolbarActionsRightAnimated \.usageFilterTransition\s*\{([^}]*)\}/)?.[1] ?? ''
+    const transitionBlock = mobileStyles.match(/\.toolbarActionsRightAnimated \.usageFilterTransition,\s*\.toolbarActionsRightAnimated \.rankingScopeTransition\s*\{([^}]*)\}/)?.[1] ?? ''
     const openBlock = mobileStyles.match(/\.toolbarActionsRightAnimated \.usageFilterTransitionOpen\s*\{([^}]*)\}/)?.[1] ?? ''
 
     expect(transitionBlock).toContain('max-height: 0;')
