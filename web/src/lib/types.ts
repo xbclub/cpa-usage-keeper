@@ -542,6 +542,17 @@ export interface AnalysisTokenUsageBucket {
   cost_available: boolean
 }
 
+export interface AnalysisModelUsageSeries {
+  model: string
+  total_tokens: number[]
+  requests: number[]
+}
+
+export interface AnalysisModelUsagePayload {
+  buckets: string[]
+  series: AnalysisModelUsageSeries[]
+}
+
 export interface AnalysisCompositionItem {
   key: string
   label: string
@@ -637,6 +648,7 @@ export interface AnalysisResponse {
   range_start?: string
   range_end?: string
   token_usage: AnalysisTokenUsageBucket[]
+  model_usage?: AnalysisModelUsagePayload
   api_key_composition: AnalysisCompositionItem[]
   model_composition: AnalysisCompositionItem[]
   auth_files_composition: AnalysisCompositionItem[]
