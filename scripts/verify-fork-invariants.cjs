@@ -166,6 +166,26 @@ const FORK_GUARDS = [
   if (clean) ok(`${FORK_GUARDS.length} 个 fork-only 守卫文件就位`);
 }
 
+// ---------- 7. fork-unique / 上游 #392 样式 class 存在(UsagePage.module.scss) ----------
+console.log('\n[6] UsagePage.module.scss 关键样式 class 存在(防 merge 静默丢样式)');
+{
+  const scss = fs.readFileSync(path.join(ROOT, 'web/src/pages/UsagePage.module.scss'), 'utf8');
+  // signOut* 是 fork-unique 重置/退出 pill(@extend updateCheck);rankingScopeTransition/toolbarContextSlot 是 #392 上游同步。
+  const REQUIRED = [
+    'signOutSwitcher', 'signOutPill', 'signOutPillActive', 'signOutPillInner',
+    'rankingScopeTransition', 'rankingScopeTransitionOpen', 'rankingScopeTransitionInner',
+    'toolbarContextSlot', 'toolbarContextSlotImmediate',
+    'apiKeyFilterGroup',  // fork-unique model filter 容器
+  ];
+  let clean = true;
+  for (const cls of REQUIRED) {
+    // SCSS 里可能 .cls 或 &cls(嵌套)或 @extend .cls;统一查 class 名出现。
+    const re = new RegExp('(\\.|&)' + cls + '\\b');
+    if (!re.test(scss)) { fail(`UsagePage.module.scss 缺 class: .${cls}`); clean = false; }
+  }
+  if (clean) ok(`${REQUIRED.length} 个关键样式 class 全部存在`);
+}
+
 // ---------- 收尾 ----------
 if (process.exitCode) {
   console.error('\n❌ 不变量校验失败 —— 见上方明细');

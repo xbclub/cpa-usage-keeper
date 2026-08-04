@@ -176,6 +176,24 @@
   gap: 7px;
 }
 
+// signOut pill 是 fork-unique 的重置/退出登录按钮(Step 4.5 #14),与上方 updateCheck
+// pill 在 topBar 相邻同款,直接 @extend 复用 updateCheck 的样式,不另发明。
+.signOutSwitcher {
+  @extend .updateCheckSwitcher;
+}
+
+.signOutPill {
+  @extend .updateCheckPill;
+}
+
+.signOutPillActive {
+  @extend .updateCheckPillActive;
+}
+
+.signOutPillInner {
+  @extend .updateCheckPillInner;
+}
+
 .updateCheckSpinner {
   width: 12px;
   height: 12px;
@@ -443,9 +461,23 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+  column-gap: 10px;
 }
 
-.usageFilterTransition {
+.toolbarContextSlot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: end;
+  min-width: 0;
+}
+
+.toolbarContextSlotImmediate {
+  display: contents;
+}
+
+.usageFilterTransition,
+.rankingScopeTransition {
+  grid-area: 1 / 1;
   width: max-content;
   max-width: 0;
   min-width: 0;
@@ -468,7 +500,16 @@
   transform: translateX(0);
 }
 
-.usageFilterTransitionInner {
+.rankingScopeTransitionOpen {
+  max-width: 260px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  transition-delay: 0ms, 80ms, 0ms, 0ms;
+}
+
+.usageFilterTransitionInner,
+.rankingScopeTransitionInner {
   width: max-content;
   min-width: 0;
   min-height: 0;
@@ -650,12 +691,19 @@
     row-gap: 0;
   }
 
-  .usageFilterTransition,
-  .usageFilterTransitionInner {
+  .toolbarContextSlot {
     width: 100%;
   }
 
-  .toolbarActionsRightAnimated .usageFilterTransition {
+  .usageFilterTransition,
+  .usageFilterTransitionInner,
+  .rankingScopeTransition,
+  .rankingScopeTransitionInner {
+    width: 100%;
+  }
+
+  .toolbarActionsRightAnimated .usageFilterTransition,
+  .toolbarActionsRightAnimated .rankingScopeTransition {
     max-height: 0;
     transition:
       max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -668,6 +716,12 @@
   .toolbarActionsRightAnimated .usageFilterTransitionOpen {
     max-width: 100%;
     max-height: 280px;
+    margin-bottom: 10px;
+  }
+
+  .toolbarActionsRightAnimated .rankingScopeTransitionOpen {
+    max-width: 100%;
+    max-height: 52px;
     margin-bottom: 10px;
   }
 
@@ -712,11 +766,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .usageFilterTransition,
+  .rankingScopeTransition,
   .usageFilterBar {
     transition: none;
   }
 
-  .usageFilterTransition {
+  .usageFilterTransition,
+  .rankingScopeTransition {
     transform: none;
   }
 }
