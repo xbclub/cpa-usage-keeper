@@ -1,6 +1,9 @@
-.PHONY: verify verify-backend verify-frontend verify-docker
+.PHONY: verify verify-backend verify-frontend verify-fork-invariants verify-docker
 
-verify: verify-backend verify-frontend
+verify: verify-fork-invariants verify-backend verify-frontend
+
+verify-fork-invariants:
+	node scripts/verify-fork-invariants.cjs
 
 verify-backend:
 	go test ./cmd/... ./internal/...

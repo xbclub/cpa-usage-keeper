@@ -956,6 +956,18 @@ Merged upstream v1.14.2 (`a69cc93..54e0806`) — 4 PRs, ~83 files, +6106/-534. F
 
 15. **i18n 审计:zh-TW 第 3 次丢 fork 键 + 4 个 fork-unique 键三 locale 全缺(pre-existing)。** 用 node flatten 三 locale 键集 diff:zh-TW 缺 6 个 fork-unique 键(`model_filter`/`all_models`/`api_key_summary_title`/`api_key`/`clear_cache`/`clear_cache_confirm`)—— Step 4.12 #3 / 4.17 #5 后**第 3 次**。另发现 4 个键 en/zh/zh-TW **全部缺失**(前端引用但从未定义):`common.clear_cache`/`common.clear_cache_confirm`(UsagePage 重置按钮 —— 定义误放在 `key_overview.` 命名空间,`common.` 真缺,按钮显示 raw key)、`usage_stats.model_filter_selected`(多选 filter 已选标签,需复数 `_one`/`_other`)、`usage_stats.credentials_refresh_single`(单凭证刷新 aria-label)。**全部 pre-existing**(baseline 230bfcb + upstream 均无,非 v1.14.2)。修复:补齐 3 locale 全部缺失键。**结构性根治(同 #14 教训):新建 fork-only 守卫 `web/src/i18n/test/forkKeys.test.ts`,断言所有 fork-unique 键在 en/zh/zh-TW 三 locale 都存在 + 简繁值正确(防 zh↔zh-TW 错位)。下次 i18n merge 丢键 → 守卫立刻失败。** 假阳性排查:静态 `t('k')` 引用扫描不懂 i18next 复数后缀(`range_value_day`→`_one`/`_other`)和负断言测试(`last_updated` 在 test 里 `.not.toContain`),需人工甄别。**login_title 测试失败是 pre-existing fork 测试债务**(fork 改 login_title='CPA USAGE KEEPER' 但 `index.test.ts` 还期望 'CPA Usage Statistics Dashboard'),非缺失键,不在本次范围。
 
+16. **反思:为什么 #14/#15 类 bug review 抓不到 + 为什么有缺失 —— 引入 `verify-fork-invariants` gate。** 两类 bug 共同点:**测试套件全绿,但功能实际坏了**。为什么反复漏掉:
+    - **把"测试绿"等同"功能正常"**:守卫测试被同一次 merge 删掉 → 套件因丢断言而绿,不是因过断言而绿。从没问"这次 merge 我丢了哪些测试"。
+    - **review 是读代码不是验行为**:从没 curl 真实 `/api/v1/usage/overview` 响应体、没渲染重置按钮看是"重置"还是 raw key。缺陷在"代码看着对"和"行为对"之间。
+    - **无可自动化的不变量**:locale 键对等、`t()` 引用⊆定义、fork 符号存活 —— 都是 10-20 行脚本,2 个月从没想过跑。靠记忆 + 检查表。
+    - **检查表是文档不是 gate**:Step 4.5 有 17 行,merge 后从不逐行执行。
+    - **"0 FAIL" 捕获不到静默失败**:空表/缺字段/raw key 都不红。
+    - **复现当噪音**:i18n 丢键第 3 次才加守卫,API Key Summary 修了又修。**第 2 次本该触发"修流程",却继续手动补症状。**
+    - **review 问错方向**:问"merge 干不干净"(缺陷都在 merge diff **之外**的 pre-existing 腐烂),该问"什么可能坏了但测试查不出"。
+    **结构性根治**:`scripts/verify-fork-invariants.cjs`(接入 `make verify-fork-invariants`,且并入 `verify` aggregate)。5 类机器判定:① i18n 三 locale 键对等;② fork-unique i18n 键三 locale 存在;③ 前端 `t()` 引用⊆定义(复数后缀感知,排除 test 负断言);④ fork-unique 后端符号 grep(API Key Summary 5 层链路 + multi-select + latency guard);⑤ fork-only 守卫文件存在。**每次上游 merge 后必跑** —— 它在引入缺陷的当下就抓,不依赖人工 review。负向已测:删 `buildUsageOverviewAPIKeySummary` → exit 1。
+
+
+
 
 
 Common adaptations needed:
@@ -996,6 +1008,7 @@ These files are PG-specific or fork-unique and must **never** be overwritten by 
 
 ```bash
 DATABASE_URL="<your-test-db-url>" go test ./internal/... -v
+make verify-fork-invariants   # fork-unique 不变量 gate(merge 后必跑,见 Step 4.23 #16)
 ```
 
 After testing, clean up leftover test schemas:
