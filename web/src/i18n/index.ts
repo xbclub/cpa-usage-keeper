@@ -30,7 +30,9 @@ const resources = {
         delete: 'Delete',
         close: 'Close',
         logout: 'Sign out',
-        retry: 'Retry'
+        retry: 'Retry',
+        clear_cache: 'Reset',
+        clear_cache_confirm: 'Clear all preferences and reload?'
       },
       notification: {
         download_failed: 'Download failed',
@@ -117,6 +119,8 @@ const resources = {
         all_models: 'All Models',
         api_key_summary_title: 'API Key Summary',
         api_key: 'API Key',
+        model_filter_selected_one: '{{count}} model selected',
+        model_filter_selected_other: '{{count}} models selected',
         range_today: 'Today',
         range_yesterday: 'Yesterday',
         range_custom: 'Custom',
@@ -367,6 +371,7 @@ const resources = {
         credentials_refresh_error_unauthorized: 'Please sign in again to refresh quota.',
         credentials_refresh_error_duplicate: 'Quota refresh is already running for this credential.',
         credentials_refresh_error_duplicate_request: 'This credential was already included in the refresh request.',
+        credentials_refresh_single: 'Refresh {{name}} quota',
         credentials_refresh_error_not_auth_file: 'Quota refresh only supports local auth files.',
         credentials_refresh_error_unsupported: 'Quota refresh is not supported for this credential type.',
         credentials_refresh_error_not_found: 'This credential is no longer available.',
@@ -768,7 +773,9 @@ const resources = {
         delete: '删除',
         close: '关闭',
         logout: '退出登录',
-        retry: '重试'
+        retry: '重试',
+        clear_cache: '重置',
+        clear_cache_confirm: '清空所有偏好并刷新？'
       },
       notification: {
         download_failed: '下载失败',
@@ -855,6 +862,8 @@ const resources = {
         all_models: '全部模型',
         api_key_summary_title: 'API Key 汇总',
         api_key: 'API Key',
+        model_filter_selected_one: '已选 {{count}} 个模型',
+        model_filter_selected_other: '已选 {{count}} 个模型',
         range_today: '今天',
         range_yesterday: '昨天',
         range_custom: '自定义',
@@ -1105,6 +1114,7 @@ const resources = {
         credentials_refresh_error_unauthorized: '请重新登录后刷新限额。',
         credentials_refresh_error_duplicate: '该凭证的限额刷新正在运行。',
         credentials_refresh_error_duplicate_request: '该凭证已包含在本次刷新请求中。',
+        credentials_refresh_single: '刷新 {{name}} 限额',
         credentials_refresh_error_not_auth_file: '限额刷新仅支持本地认证文件。',
         credentials_refresh_error_unsupported: '该凭证类型不支持限额刷新。',
         credentials_refresh_error_not_found: '该凭证已不可用。',
@@ -1506,7 +1516,9 @@ const resources = {
         delete: '刪除',
         close: '關閉',
         logout: '登出',
-        retry: '重試'
+        retry: '重試',
+        clear_cache: '重置',
+        clear_cache_confirm: '清空所有偏好並重新整理？'
       },
       notification: {
         download_failed: '下載失敗',
@@ -1554,6 +1566,8 @@ const resources = {
         tabs_aria_label: 'API Key 總覽分區',
         identity_unknown: '目前 API Key',
         logout: '登出',
+        clear_cache: '重置',
+        clear_cache_confirm: '清空所有偏好並重新整理？',
         load_failed: '無法載入 API Key 總覽',
         rate_limited: '總覽重新整理過於頻繁，請稍候再試。'
       },
@@ -1587,6 +1601,12 @@ const resources = {
         range_filter: '範圍',
         api_key_filter: 'API Key',
         api_key_filter_all: '全部',
+        model_filter: '模型篩選',
+        all_models: '全部模型',
+        api_key_summary_title: 'API Key 匯總',
+        api_key: 'API Key',
+        model_filter_selected_one: '已選 {{count}} 個模型',
+        model_filter_selected_other: '已選 {{count}} 個模型',
         range_today: '今天',
         range_yesterday: '昨天',
         range_custom: '自訂',
@@ -1837,6 +1857,7 @@ const resources = {
         credentials_refresh_error_unauthorized: '請重新登入後重新整理限額。',
         credentials_refresh_error_duplicate: '此憑證的限額重新整理正在執行。',
         credentials_refresh_error_duplicate_request: '此憑證已包含在本次重新整理請求中。',
+        credentials_refresh_single: '重新整理 {{name}} 限額',
         credentials_refresh_error_not_auth_file: '限額重新整理僅支援本機認證檔案。',
         credentials_refresh_error_unsupported: '此憑證類型不支援限額重新整理。',
         credentials_refresh_error_not_found: '此憑證已不可用。',
