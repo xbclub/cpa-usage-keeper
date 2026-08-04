@@ -922,7 +922,37 @@ Merged 5 upstream PRs after v1.13.7 (HEAD `85f2be6` already covered v1.13.7 equi
 
 **flaky 警告**:poller 异步测试在远程 PG + 全套装 `-v` 重负载下偶发超时(单次曾报 20 FAIL),但单独包运行 3/3 稳定通过。CI(本地 PG service container,低延迟)应无此问题。
 
-### Step 5: Adapt SQLite→PG Files
+### Step 4.23: v1.14.2 merge notes (2026-08-04) — #398/#395/#392/#397
+
+Merged upstream v1.14.2 (`a69cc93..54e0806`) — 4 PRs, ~83 files, +6106/-534. Features: #398 analysis top-model usage comparison, #395 auth hardening (login rate limiter + HTTP body/timeout boundaries + trusted proxy CIDRs), #392 local API key leaderboards (aggregates local usage_events, no external requests — distinct from v1.14.0's external ranking), #397 local ranking profile customization (avatar). New schema: `LocalRankingPeriodStat` entity + `CPAAPIKey.LocalRankingAvatarID` (both AutoMigrate-safe, no migration framework). 3 commits: `e27cd13` (#398), `107f6af` (backend #395+#392/#397), `d1c43b6` (frontend integration). Lessons:
+
+1. **HTTP 超时模型冲突需用户决断 — fork `buildHTTPServer` vs upstream `http_server.go`。** #395 引入 `http_server.go` 的 `NewHTTPServer`,**硬编码** ReadHeaderTimeout=5s/IdleTimeout=60s/MaxHeaderBytes=64KB,**故意** ReadTimeout=0/WriteTimeout=0(不限制已认证响应时长,保护流式 CSV/JSON 导出 #254)。fork 的 `buildHTTPServer`(commit `e0817a6`,Step 4.5 #16)用**可配置非零** Read/Write Timeout — 会截断大导出。**用户拍板采纳上游流式安全模型**:fork `buildHTTPServer` 方法退役,改调 `NewHTTPServer`,但 ReadHeader/Idle 仍走 fork 可配置字段(`cfg.HTTPReadHeaderTimeout`/`cfg.HTTPIdleTimeout`,默认 5s/60s 由 Step 4.5 #16 的 Default 常量),Read/Write 强制 0,MaxHeaderBytes 固定 64KB。**删除 fork `HTTPReadTimeout`/`HTTPWriteTimeout` 字段 + Default 常量 + Load() 解析**(config.go/config_test.go/app_test.go 三处同步)。`http_server_security_test.go` 改测试显式传 `HTTPReadHeaderTimeout:5s`/`HTTPIdleTimeout:60s`(原测试断言硬编码值)。**教训:当 fork 特性与上游安全模型冲突且有真实权衡(DoS 防护 vs 流式可靠性),让用户决断,别自作主张。**
+
+2. **AUTH_ENABLED 默认 `false`→`true` 是行为变更。** #395 翻转默认 + 加 `publicLoginPasswordPlaceholder` 拒绝示例密码。**所有 fork config 测试(`TestLoadFromEnvAppliesDefaults`/`config_cleanup_test`)必须在 LoadFromEnv 前显式 `t.Setenv("AUTH_ENABLED","false")`,否则 LoadFromEnv 返回 "AUTH_ENABLED is not set... LOGIN_PASSWORD is required"。** 这是安全特性,采纳。
+
+3. **`local_service.go` 复刻 ranking/aggregate.go 的两个 SQLite 老问题(Step 4.22)。** (a) `CAST(strftime('%%s', events.timestamp) AS INTEGER)/300` → `CAST(EXTRACT(EPOCH FROM events.timestamp) AS BIGINT)/300`(**注意 `%%s` 双百分号**,perl 单 `%s` 匹配不到)。(b) `events.failed = 0`→`false`、`failed <> 0`→`<> false`(PG boolean ≠ integer,6 处)。**每次 checkout 新 ranking SQL 都要 grep `strftime|failed = 0`。**
+
+4. **PG `pg_index.indkey` 是 `int2vector` 特殊类型,`ANY()`/`generate_subscripts()` 产生跨 schema 笛卡尔积。** `entities_test.go` 用 SQLite `PRAGMA index_list/index_info` 查索引列,改 PG 时:`ANY(ix.indkey)` 和 `generate_subscripts` 都返回重复行(bucket_start ×130)。**根因有二**:(a) `int2vector` 标准数组操作失效 → 改 `unnest(ix.indkey::int[]) WITH ORDINALITY AS u(attnum, ord) ORDER BY u.ord`;(b)**测试库累积大量 `test_*` schema(历史遗留),`relname` 跨所有 schema 匹配** → 必须加 `JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema()`。**任何查 `pg_class`/`pg_index` by `relname` 的测试都要过滤 `current_schema()`,否则跨 schema 数据污染。**(清理 `test_*` schema 见 Step 7,但测试本身也要自洽。)
+
+5. **`git merge-file` 捕获冲突数要用 exit code,不是 stdout。** `c=$(git merge-file ...)` 捕获的是 stdout(空),不是冲突数。**正确:`git merge-file ...; c=$?`**。config.go/app.go 有多处冲突但首次误判为 0。app.go 5 处冲突全是 fork graceful-shutdown 结构 vs 上游 LocalRanking/NewHTTPServer 的接线点 —— 手动解决(struct 字段加 `LocalRanking`、构造 localRankingService、OptionalProviders、删 buildHTTPServer)。
+
+6. **`app.go`/`router.go`/`config.go` 被 #395 + #392 同时改 → 不能按 PR 拆 commit。** 计划原本 commit 2=#395、commit 3=#392,但 app.go merge 一次带入全部 v1.14.2 改动,commit 2 引用未 checkout 的 ranking 包会编译断。**改为 commit 2=全部后端(#395+#392/#397)、commit 3=前端。** 每个 fork-modified 文件只 merge 一次,无返工。
+
+7. **`NewAuthHandler` 签名未变(login limiter 走 config 字段,非新参)。** #395 的 `LoginAttemptLimiter` 在 auth.go 内部 `NewAuthHandler` 构造,fork app.go 调用点 `api.NewAuthHandler(authCfg, sessionManager)` 不变。auth.go 是 fork-clean,直接 checkout(但仍要 grep `slog` — 本次上游已用 logrus,0 处)。
+
+8. **`usage_aggregation_flow_test.go` 是 v1.14.0 统一 checkpoint 后的 pre-existing 失败。** 测试读旧 `entities.UsageOverviewAggregationCheckpoint`/`UsageActivityAggregationCheckpoint`(仅 "历史 migration 编译" 用,未注册到 all.go,表不存在)→ "relation does not exist"。生产代码已用统一 `UsageAggregationCheckpoint`(name="overview"/"activity")。**修:测试改读 `entities.UsageAggregationCheckpoint`(字段 `LastAggregatedUsageEventID` 兼容)。** Step 4.22 "0 FAIL" 没覆盖到 service/test 此路径。
+
+9. **`version_flag_test.go`(#395 新测试)期望 `-v`/`--version`/`-host` CLI flag,fork main.go 仅 `-env`。** fork 已采纳 #250(version API),补齐 CLI flag 一致:`-host`(覆盖 APP_HOST)、`-v`/`--version`(打 version.Version 退出)。**测试 env 文件要加 `DATABASE_URL=`(fork PG 必需,上游 SQLite 不需要;测试 `command.Env=[]` 清空环境,必须 env 文件提供)。**
+
+10. **`UsagePage.styles.test.ts` 是 pre-existing fork 测试债务(DailyAveragePanel/Card 命名)。** file 在 HEAD 就引用不存在的 `DailyAveragePanel.tsx`(实际组件 `DailyAverageCard.tsx`)→ setup-error 全碎(0 tests run)。merge 保留 fork stale Panel 引用。**修 DailyAverageCard 后 56 过 18 挂** —— 18 个是 fork/upstream 样式断言结构分歧(file 从未在 HEAD 跑起来),**非 v1.14.2 回归**;#392 ranking 测试(ranking source switch/local ranking cache)全过。**教训:fork 长期 broken 的样式测试文件,merge 后即使"修复"加载,也会暴露 fork 组件结构与上游断言的累积分歧 —— 属独立 test-debt 清理,不在 merge scope。**
+
+11. **`entities/test/` 子包在 v1.14.2 全新(fork HEAD 不存在)。** `entities_test.go` 是新文件,用 `gorm.Open(sqlite.Open(":memory:"))` → 改 `testutil.OpenTestDatabase(t)`(3 处)。**判断新文件是否 fork 已有:`git cat-file -e HEAD:<path>` + `git ls-tree HEAD <dir>`。**
+
+12. **i18n/types 在 commit 1(#398)就一次性带入全部 v1.14.2 翻译/类型(theirs=upstream/main 含 #398+#392/#397)。** commit 3 对 i18n/types 的"re-merge ranking delta"是 no-op(git status 无变化)—— ranking 键早已在 commit 1。**fork-unique(DEFAULT_LANGUAGE='zh'+ 6 键)和 ranking 键(scope_local/local_empty_title/period_*,3 locale)全存活。**
+
+13. **v1.14.2 引入 0 个新后端失败 —— 4 个 service/test 失败是 pre-existing(worktree baseline 230bfcb 同样失败)。** `TestRequestLogServiceCoalescesConcurrentPreviewMisses`(并发 coalesce race)、`TestSyncServiceCleanupStorageDeletesUsageEventsWhenEnabled` + `TestNewSyncServiceCleanupStorageReadsCleanupFlagFromConfig`(archive guard:调 `CleanupStorage` 未传 `CleanupUsageEvents:true`,且 archive 要求聚合追平,测试未跑聚合 → "archive deferred because aggregations are lagging" → 旧事件保留)、`TestProcessRedisUsageInboxReturnsAfterCommitWithoutSynchronousAggregation`(header snapshot 通知空)。**这 4 个在 v1.14.2 前(230bfcb)就失败,属 Step 4.22 #15 遗留的 remote-PG-flaky / archive-guard-test-setup 类(Step 4.22 "0 FAIL" 在本地 PG 或未覆盖 service/test 全路径)。v1.14.2 不引入新回归,验证方法:`git worktree add /tmp/baseline 230bfcb` + 同 `-run` 复跑确认同 4 个失败。**
+
+
 
 Common adaptations needed:
 
