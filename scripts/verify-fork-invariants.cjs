@@ -224,6 +224,25 @@ console.log('\n[8] fork-unique 前端特性存活(渲染/集成,非仅文件存�
   if (clean) ok(`${checks.length} 个 fork-unique 前端特性全部存活`);
 }
 
+// ---------- 10. 上游共享特性 fork 未漏同步(跨文件抽查) ----------
+console.log('\n[9] 上游共享特性 fork 未漏同步(防 merge 静默丢上游加法)');
+{
+  const shared = [
+    // v1.14.0 client metadata:requestEventColumns 必须有 client_ip/x_forwarded_for/user_agent(后端实体有字段)
+    ['web/src/components/usage/requestEventColumns.ts', 'client_ip', 'requestEventColumns client_ip 列'],
+    ['web/src/components/usage/requestEventColumns.ts', 'x_forwarded_for', 'requestEventColumns x_forwarded_for 列'],
+    ['web/src/components/usage/requestEventColumns.ts', 'user_agent', 'requestEventColumns user_agent 列'],
+    // stores/index 导出 useConfigStore(上游有,fork 漏过一次)
+    ['web/src/stores/index.ts', 'useConfigStore', 'stores/index 导出 useConfigStore'],
+  ];
+  let clean = true;
+  for (const [file, sym, label] of shared) {
+    const t = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    if (!t.includes(sym)) { fail(`${label}: 缺失 (${file} 无 "${sym}")`); clean = false; }
+  }
+  if (clean) ok(`${shared.length} 个上游共享特性 fork 已同步`);
+}
+
 // ---------- 收尾 ----------
 if (process.exitCode) {
   console.error('\n❌ 不变量校验失败 —— 见上方明细');
