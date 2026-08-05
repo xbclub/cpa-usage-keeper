@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
+import { Combobox } from '@/components/ui/Combobox';
 import { IconCheck, IconCircleAlert, IconRefreshCw } from '@/components/ui/icons';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import type { ModelPrice, PricingRule, PricingSaveResult, PricingStyle, PricingSyncMatch, PricingSyncPreviewResponse, ReplacePricingRuleInput } from '@/lib/types';
@@ -585,7 +586,7 @@ export function PriceSettingsCard({
                 <div className={styles.formRow}>
                   <div className={`${styles.formField} ${styles.priceFormModelField}`}>
                     <label>{t('usage_stats.model_name')}</label>
-                    <Select
+                    <Combobox
                       value={selectedModel}
                       options={options}
                       onChange={handleModelSelect}

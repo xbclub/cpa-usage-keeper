@@ -18,6 +18,7 @@ import {
   RecentActivityPanel,
   OverviewRealtimePanel,
   AnalysisPanel,
+  ApiKeySummaryTable,
   ApiKeySettingsCard,
   SessionSettingsCard,
   PriceSettingsCard,
@@ -2176,6 +2177,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   requestIdentity={activityRequestIdentity}
                   onWindowChange={setActivityWindow}
                 />
+
+                <ApiKeySummaryTable usage={usage} loading={overviewDisplayLoading} />
 
                 <OverviewRealtimePanel
                   realtime={currentRealtime ?? undefined}

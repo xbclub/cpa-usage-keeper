@@ -320,7 +320,7 @@ export function Select({
                   onKeyDown={handleKeyDown}
                   onClick={opt.disabled ? undefined : () => commitSelection(index)}
                 >
-                  <span className={styles.optionLabel}>{opt.label}</span>
+                  <span className={styles.optionLabel} title={opt.label}>{opt.label}</span>
                   {opt.suffix ? (
                     <span className={styles.optionSuffix} aria-label={opt.suffixAriaLabel}>
                       {opt.suffix}

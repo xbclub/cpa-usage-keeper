@@ -201,6 +201,29 @@ console.log('\n[7] keeper-card 卡片重构采用对齐上游(fork >= upstream)'
   }
 }
 
+// ---------- 9. fork-unique 前端特性存活(merge 反复丢,Step 4.5 #1/#9/#13) ----------
+console.log('\n[8] fork-unique 前端特性存活(渲染/集成,非仅文件存在)');
+{
+  const checks = [
+    // ApiKeySummaryTable:文件存在 + 在 UsagePage 渲染(后端 api_key_summary 有消费者)
+    ['web/src/components/usage/ApiKeySummaryTable.tsx', 'export function ApiKeySummaryTable', 'ApiKeySummaryTable 组件'],
+    ['web/src/pages/UsagePage.tsx', '<ApiKeySummaryTable', 'UsagePage 渲染 ApiKeySummaryTable'],
+    ['web/src/components/usage/index.ts', "ApiKeySummaryTable", 'usage index 导出 ApiKeySummaryTable'],
+    // Select tooltip(Step 4.5 #13):option label 有 title 防截断
+    ['web/src/components/ui/Select.tsx', 'title={opt.label}', 'Select option tooltip'],
+    // Combobox 在 PriceSettingsCard(Step 4.5 #9):模型名下拉+自由输入
+    ['web/src/components/usage/PriceSettingsCard.tsx', '<Combobox', 'PriceSettingsCard 用 Combobox(模型名)'],
+    // Select disabled option(Step 4.5 #11)
+    ['web/src/components/ui/Select.tsx', 'disabled', 'Select disabled 选项'],
+  ];
+  let clean = true;
+  for (const [file, sym, label] of checks) {
+    const t = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    if (!t.includes(sym)) { fail(`${label}: 缺失 (${file} 无 "${sym}")`); clean = false; }
+  }
+  if (clean) ok(`${checks.length} 个 fork-unique 前端特性全部存活`);
+}
+
 // ---------- 收尾 ----------
 if (process.exitCode) {
   console.error('\n❌ 不变量校验失败 —— 见上方明细');
