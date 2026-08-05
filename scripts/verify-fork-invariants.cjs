@@ -186,6 +186,21 @@ console.log('\n[6] UsagePage.module.scss 关键样式 class 存在(防 merge 静
   if (clean) ok(`${REQUIRED.length} 个关键样式 class 全部存在`);
 }
 
+// ---------- 8. keeper-card 卡片统一重构采用对齐上游 ----------
+// 历史教训(Step 4.23):fork 反复落后上游"卡片统一重构"(本地 styles.xxx → 全局 keeper-card-*)。
+// 本检查确保 fork 采用 keeper-card-surface 的组件数 >= 上游,防止再漏同步。
+console.log('\n[7] keeper-card 卡片重构采用对齐上游(fork >= upstream)');
+{
+  const forkFiles = execSync("grep -rl 'keeper-card-surface' web/src --include='*.tsx'", { cwd: ROOT }).toString().split('\n').filter(Boolean).map(f => f.replace(/^web\/src\//, ''));
+  // 上游基准(写入固定值,避免每次 git show):v1.14.2 后上游 7 个 .tsx 用 keeper-card-surface。
+  const UPSTREAM_KEEPER_CARD_FILES = 7;
+  if (forkFiles.length < UPSTREAM_KEEPER_CARD_FILES) {
+    fail(`fork keeper-card-surface 采用 ${forkFiles.length} 文件 < 上游 ${UPSTREAM_KEEPER_CARD_FILES}(可能漏同步卡片统一重构)`);
+  } else {
+    ok(`fork keeper-card-surface 采用 ${forkFiles.length} 文件 >= 上游 ${UPSTREAM_KEEPER_CARD_FILES}`);
+  }
+}
+
 // ---------- 收尾 ----------
 if (process.exitCode) {
   console.error('\n❌ 不变量校验失败 —— 见上方明细');
