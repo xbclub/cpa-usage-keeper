@@ -19,6 +19,8 @@ func TestAllIncludesCoreModels(t *testing.T) {
 		&UsageOverviewDailyStat{},
 		// v1.14 起三类聚合用统一 checkpoint 表。
 		&UsageAggregationCheckpoint{},
+		// 本地排行统计（v1.14.2 #392）。
+		&LocalRankingPeriodStat{},
 		&UsageActivityStat{},
 		// Latency hour/day 共用一张可合并聚合表。
 		&UsageLatencyStat{},

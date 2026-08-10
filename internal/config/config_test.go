@@ -56,6 +56,8 @@ func withIsolatedEnvFiles(t *testing.T) {
 			t.Fatalf("unset %s: %v", key, err)
 		}
 	}
+	// fork: v1.14.2 #395 起 AUTH_ENABLED 默认 true 会要求 LOGIN_PASSWORD；非 auth 测试默认关闭。
+	t.Setenv("AUTH_ENABLED", "false")
 	t.Cleanup(func() {
 		for _, key := range configEnvKeys {
 			if previousPresent[key] {
@@ -180,6 +182,7 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnvDBPool(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	env := map[string]string{
 		"CPA_BASE_URL":          "https://cpa.example.com",
@@ -215,6 +218,7 @@ func TestLoadFromEnvDBPool(t *testing.T) {
 }
 
 func TestLoadClampsDBIdleConnsToOpenConns(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	env := map[string]string{
 		"CPA_BASE_URL":       "https://cpa.example.com",
@@ -269,6 +273,7 @@ func TestLoadRejectsNonPositiveDBPool(t *testing.T) {
 }
 
 func TestLoadFromEnvHTTPAndShutdownTimeouts(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	env := map[string]string{
 		"CPA_BASE_URL":             "https://cpa.example.com",
@@ -325,6 +330,7 @@ func TestLoadRejectsNonPositiveHTTPTimeouts(t *testing.T) {
 }
 
 func TestLoadReadsSpecifiedEnvFile(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	envDir := t.TempDir()
 	envPath := filepath.Join(envDir, "custom.env")
@@ -343,6 +349,7 @@ func TestLoadReadsSpecifiedEnvFile(t *testing.T) {
 }
 
 func TestLoadResolvesRelativeEnvFilePathBase(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	cwd := t.TempDir()
 	previousWorkingDir, err := os.Getwd()
@@ -380,6 +387,7 @@ func TestLoadResolvesRelativeEnvFilePathBase(t *testing.T) {
 }
 
 func TestLoadIgnoresLegacyPathOverrides(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	envDir := t.TempDir()
 	envPath := filepath.Join(envDir, "legacy.env")
@@ -411,6 +419,7 @@ func TestLoadRejectsMissingSpecifiedEnvFile(t *testing.T) {
 }
 
 func TestLoadFallsBackToExecutableDirEnv(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	withIsolatedEnvFiles(t)
 	exeDir, err := executableDir()
 	if err != nil {
@@ -441,6 +450,7 @@ func TestDefaultTimeZoneIsLoadable(t *testing.T) {
 }
 
 func TestLoadFromEnvAppliesDefaultTimeZone(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	previousLocal := time.Local
 	t.Cleanup(func() { time.Local = previousLocal })
 	t.Setenv("TZ", "")
@@ -458,6 +468,7 @@ func TestLoadFromEnvAppliesDefaultTimeZone(t *testing.T) {
 }
 
 func TestLoadFromEnvHonorsExplicitTimeZone(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	previousLocal := time.Local
 	t.Cleanup(func() { time.Local = previousLocal })
 	t.Setenv("TZ", "UTC")
@@ -475,6 +486,7 @@ func TestLoadFromEnvHonorsExplicitTimeZone(t *testing.T) {
 }
 
 func TestLoadFromEnvHonorsExplicitIANATimeZone(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	previousLocal := time.Local
 	t.Cleanup(func() { time.Local = previousLocal })
 	t.Setenv("TZ", "America/New_York")
@@ -538,6 +550,7 @@ func TestLoadFromEnvRequiresCriticalValues(t *testing.T) {
 }
 
 func TestLoadFromEnvIgnoresRemovedLegacySyncEnvVars(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
 	t.Setenv("USAGE_SYNC_MODE", "invalid")
@@ -550,6 +563,7 @@ func TestLoadFromEnvIgnoresRemovedLegacySyncEnvVars(t *testing.T) {
 }
 
 func TestLoadFromEnvUsesRedisQueueAddrOverride(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	t.Setenv("CPA_BASE_URL", "https://cpa.example.com")
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
 	t.Setenv("REDIS_QUEUE_ADDR", "redis-stream.example.com:6380")
@@ -680,6 +694,7 @@ func TestLoadFromEnvRejectsNonPositiveRedisQueueIdleInterval(t *testing.T) {
 }
 
 func TestLoadFromEnvIgnoresRemovedMetadataSyncIntervalOverride(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "false")
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
 	t.Setenv("REDIS_METADATA_SYNC_INTERVAL", "45s")
