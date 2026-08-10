@@ -990,6 +990,41 @@ Merged upstream v1.14.3 (`54e0806..ba3d64a`) — 12 PRs, 81 files, +3574/−995.
 
 8. **README/package-lock fork 独立/自动生成,跳过 checkout。** fork README 599L diff(fork-specific PG 文档,与 upstream 独立);package-lock.json 自动生成,merge 易错。#415(deps advisories)跳过,记录 fork 后续 `npm audit` 处理。Dockerfile 仅升 node:22→24(手动改 web-builder,保留 fork `CGO_ENABLED=0`/无 build-base)。
 
+### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
+
+合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
+
+**Gate 1:全量文件清单,不漏 checkout**
+- 合并前 `git diff --name-only <base> upstream/main -- .` 列出**所有**上游改动文件
+- 逐个分类:`git diff <base> HEAD -- <file>` 返回 0 行 = fork-clean → 直接 checkout;非 0 = fork-modified → merge/重应用
+- ⚠️ clean 文件必须**全部** checkout,不能因为"不在我的计划列表"漏掉。v1.14.3 漏了 5 个 clean 文件(credentialProviderFilters/CredentialProviderFilterBar/CredentialSectionShell/AiProviderCredentialsSection/TimeRangeControl),fork 仍用旧 gemini-cli/iflow,徽章/type 显示和上游不一致
+
+**Gate 2:merge-file 后必须 vs-upstream diff 验证(merge-file 静默丢失上游改动)**
+- 每个 merge 文件后:`git diff upstream/main -- <file>`
+- 差异应**只剩 fork-unique 改动**;若上游独有内容被 `-` 标记 = 丢失,**必须手动补回**
+- ⚠️ merge-file 报"0 冲突"≠ 上游改动落地。它对 gofmt 重对齐 / 结构体字段增删 / fork 大改动区域会**静默丢弃** theirs 而不产生冲突标记(v1.14.3 service.go 的 CheckResponse.Subscription + NormalizeSubscription 回退块、usage_identities.go 的 PlanType→Subscription 都被静默吞掉,靠此 gate 才发现)
+
+**Gate 3:上游特性完整应用,禁止"最小接入"**
+- 上游特性(组件集成、新 prop、scss 类、i18n 键、filter 列表、#412 clamp 等)必须**完整**应用到 fork
+- ⚠️ "避免连锁改 CredentialRowShell/TimeRangeControl""后端已保护所以前端可缓""scss 块复杂所以记债务"——**全部不是**跳过上游特性的借口。fork-unique 保留,上游特性全应用,没有中间态
+- 判断标准:fork 若和 upstream 不一致(且不是 fork-unique),就是没做完。v1.14.3 用"最小接入"跳过了 ProviderBrandIcon/#412/scss 4 类/i18n 死键,review 才逼出来
+
+**Gate 4:不留债务,一口气做完**
+- 所有上游改动本次应用完。**禁止**把差异标记为"债务/待办"留到后面 —— 用户明确不要返工
+- "风险高/复杂"不是留债务的理由:scss 块用 node 脚本提取 upstream 规则追加、config test 用 withIsolatedEnvFiles 批量适配,风险都可控。嫌麻烦而留债务 = 必然返工
+
+**Gate 5:完工验证(三项全过才准收工)**
+1. `git diff upstream/main -- <每个上游改动文件>` 差异只剩 fork-unique(逐文件过)
+2. `node scripts/verify-fork-invariants.cjs` 9 项全过
+3. `DATABASE_URL=... go test ./internal/...` 全量 0 失败 + `npm --prefix ./web run typecheck && lint && build` 全过
+
+**反模式(v1.14.3 犯的,勿再犯)**:
+- ❌ "这个文件 fork-modified,最小接入就好" → 上游特性没应用
+- ❌ "scss/config/entities 债务留后面" → 返工
+- ❌ "merge-file 0 冲突所以干净" → 静默丢失
+- ❌ "checkout 列表漏几个文件没事" → fork 和上游不一致
+- ❌ "review 时才承认有差异" → 合并完就该 vs-upstream 自检,不要等 review 逼
+
 Common adaptations needed:
 
 1. **`batch.go`** — `sqliteVariableLimit=999` → `pgVariableLimit=65535`; `insertBatchSize()` → `insertBatchSize(model)` (dynamic per-column)
