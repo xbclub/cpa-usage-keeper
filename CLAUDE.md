@@ -970,6 +970,26 @@ Merged upstream v1.14.2 (`a69cc93..54e0806`) — 4 PRs, ~83 files, +6106/-534. F
 
 
 
+### Step 4.24: v1.14.3 merge notes (2026-08-10) — #399/#400/#402/#404/#406/#407/#410/#412/#413
+
+Merged upstream v1.14.3 (`54e0806..ba3d64a`) — 12 PRs, 81 files, +3574/−995. **"干净 merge" 典型**:无 schema、无 migration、无 entity 变更,后端基础设施层(router/app/go.mod/.env/cmd/config)上游**零改动**,完全不碰 fork-unique 接线。Features:provider 订阅契约 + 凭证徽章(#404 breaking:QuotaRow.PlanType 迁移到 response 级 Subscription)、品牌图标(#400)、events 默认页 50(#399)、events custom dates 90 天(#412)、剩余中文化(#413)、Node 22→24(#410)。Lessons:
+
+1. **⚠️ `git merge-file` 对 fork-modified 文件全部静默丢失上游改动 —— 这是本次最重要的教训。** 7 个后端 + 14 个前端 merge-file 全部报告"0 冲突",但实际上游改动**大量丢失**(service.go 的 `CheckResponse.Subscription` 字段 + `NormalizeSubscription` 回退块;usage_identities.go 的 `PlanType→Subscription`;前端 types/UsagePage/AuthFile/scss/i18n 的所有上游改动)。**0 冲突 ≠ 上游改动落地。** merge-file 对"gofmt 重对齐 + 字段增删"和"fork 大改动(158L+)区域"会静默丢弃 theirs 改动而不产生冲突标记。**结构性根治:每个 merge 文件后必须 `git diff upstream/main -- <file>` 验证,差异应只剩 fork-unique 改动;出现上游独有内容被 `-` 标记即手动补回。** 本次靠此验证发现并补回 service.go 2 处 + usage_identities.go 3 处生产逻辑(否则 subscription 链路断裂、徽章空)。
+
+2. **breaking 点上游同批配套适配时,直接 checkout 即得一致改动。** #404 删 `QuotaRow.PlanType`、`HasClaudeMax/Pro` bool→*bool,但上游同批改了 header_cache_worker.go(删 PlanType 合并)/normalize.go(删 PlanType 赋值)/payloads.go(boolField→boolPtrField),这些文件 fork-vs-v1.14.2 全 clean → checkout 即一致,**无编译断点**。`entities.UsageIdentity.PlanType` 链路(service/repo 用)完整保留(entity 字段没删,删的是 QuotaRow 字段)。**判断 breaking 是否危险:grep fork 是否引用被改字段 + 确认上游同批是否配套改了引用方文件。**
+
+3. **merge-file 对大-diff test 文件(fork 几百行 PG 适配)失效时,`git diff HEAD -- <test>` 显示 -0/+0 = merge 没做任何改动(== fork HEAD)。** 这不是回归(没丢 fork test),只是没拿到上游新 test(覆盖债务)。header_cache_worker_test.go fork HEAD 缺大量 header worker test(pre-existing 债务),merge 无补。判断:**`git diff HEAD` -0/+0 on a merge file = merge-file 完全没应用 theirs,该文件停留在 fork HEAD(无回归但无上游新增)。**
+
+4. **前端 fork-modified 文件 merge 失败时的手动策略(按改动量选方向):** types.ts = checkout upstream(拿 UsageSubscriptionInfo)+ 加回 fork ApiKeySummary 接口(fork 改动小且明确);UsagePage/AuthFile/i18n = fork 基底 + 手动应用上游(fork 改动大,上游改动小)。i18n 用 node 脚本提取上游三 locale 键 + 按锚点(`credentials_filter_iflow`)插入,三 locale 对等验证(verify-fork-invariants [1])。
+
+5. **fork 组件不同步时,接受最小可行接入而非完整重构。** fork TimeRangeControl 不支持 #412 的 `maxCustomDayRangeDays` prop、fork CredentialRowShell 可能不支持 #400 的 `icon` prop —— 完整接入需改连锁组件(scope 扩大)。决策:AuthFile 最小徽章接入(subtitle CredentialPlanBadge→CredentialSubscriptionBadge,保留 CredentialBadge/expiry/不碰 RowShell icon);#412 前端 clamp 待办(**后端 usage_filter.go 已强制 events 90 天 = 功能保护就位**)。**判断依据:后端是否已保护;若后端强制了,前端 UX clamp 可待办。**
+
+6. **scss 缺类不阻塞编译(CSS modules undefined 类 = 无样式,不编译错)。** CredentialSubscriptionBadge 用 10 个 credentialPlanBadge* 类,fork scss 只有 6/10(缺 Corona/Enterprise/Flow/Label,#404 新视觉)。typecheck/lint/build 全过,徽章可渲染但视觉简化。**缺 scss 类是视觉债务,非编译阻塞 —— 可接受并记录,不卡 merge。**
+
+7. **pre-existing 后端 test 债务(v1.14.2 遗留)不阻塞 v1.14.3 merge。** config 13 test 缺 `AUTH_ENABLED=false` 适配(v1.14.2 #395 AUTH_ENABLED 默认翻 true)、entities TestAllIncludesCoreModels 14→15(v1.14.2 #392 LocalRankingPeriodStat)。本次 C1 未碰 config/entities 代码 → 逻辑上不可能引入,确认 pre-existing。**判断 merge 是否引入新失败:只看 v1.14.3 改动的包(quota/api/timeutil)是否绿,pre-existing 债务单独记录。**
+
+8. **README/package-lock fork 独立/自动生成,跳过 checkout。** fork README 599L diff(fork-specific PG 文档,与 upstream 独立);package-lock.json 自动生成,merge 易错。#415(deps advisories)跳过,记录 fork 后续 `npm audit` 处理。Dockerfile 仅升 node:22→24(手动改 web-builder,保留 fork `CGO_ENABLED=0`/无 build-base)。
+
 Common adaptations needed:
 
 1. **`batch.go`** — `sqliteVariableLimit=999` → `pgVariableLimit=65535`; `insertBatchSize()` → `insertBatchSize(model)` (dynamic per-column)
