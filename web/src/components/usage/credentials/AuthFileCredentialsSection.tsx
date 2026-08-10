@@ -7,12 +7,13 @@ import { IconChartLine, IconGaugeReset, IconRefreshCw, IconSearch, IconSettings,
 import quotaCostIcon from '@/assets/icons/quota-cost.svg'
 import quotaTokenIcon from '@/assets/icons/quota-token.svg'
 import styles from './CredentialSections.module.scss'
-import type { AuthFileCredentialRow, DisplayQuota, PlanTypeTone } from './credentialViewModels'
+import type { AuthFileCredentialRow, DisplayQuota } from './credentialViewModels'
 import { deleteAuthFiles, fetchQuotaAutoRefreshSettings, fetchUsageQuotaResetCredits, setAuthFilesDisabled, updateQuotaAutoRefreshSettings, type UsageIdentityPageSort } from '@/lib/api'
 import type { QuotaAutoRefreshScheduleUnit, QuotaAutoRefreshSettings, UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus, UsageQuotaInspectionStatusResponse, UsageQuotaResetCreditsResponse } from '@/lib/types'
 import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './CredentialAliasEditor'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialProviderFilterIcon } from './CredentialProviderFilterBar'
+import { CredentialSubscriptionBadge } from './CredentialSubscriptionBadge'
 import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 
 type Translate = (key: string, options?: Record<string, string>) => string
@@ -271,7 +272,7 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
             subtitle={(
               <span className={styles.credentialIdentityBadges}>
                 <CredentialBadge>{row.typeLabel}</CredentialBadge>
-                {row.planTypeLabel && <CredentialPlanBadge tone={row.planTypeTone}>{row.planTypeLabel}</CredentialPlanBadge>}
+                {row.subscriptionBadge && <CredentialSubscriptionBadge model={row.subscriptionBadge} />}
                 {row.remainingDaysLabel && row.expiresAtLabel
                   ? (
                     <span
@@ -1513,10 +1514,6 @@ export function formatInspectionCompletedAt(value: string | undefined): string {
 
 function formatInspectionDate(value: string | undefined): string {
   return formatInspectionCompletedAt(value)
-}
-
-function CredentialPlanBadge({ children, tone = 'neutral' }: { children: string; tone?: PlanTypeTone }) {
-  return <span className={`${styles.credentialPlanBadge} ${styles[`credentialPlanBadge${capitalize(tone)}`]}`.trim()}>{children}</span>
 }
 
 function QuotaUsageModeSwitch({ label, mode, onChange }: { label: string; mode: QuotaUsageMode; onChange: (mode: QuotaUsageMode) => void }) {
