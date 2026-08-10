@@ -12,9 +12,9 @@ import { deleteAuthFiles, fetchQuotaAutoRefreshSettings, fetchUsageQuotaResetCre
 import type { QuotaAutoRefreshScheduleUnit, QuotaAutoRefreshSettings, UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus, UsageQuotaInspectionStatusResponse, UsageQuotaResetCreditsResponse } from '@/lib/types'
 import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './CredentialAliasEditor'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
-import { CredentialProviderFilterIcon } from './CredentialProviderFilterBar'
 import { CredentialSubscriptionBadge } from './CredentialSubscriptionBadge'
-import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon'
+import { CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 
 type Translate = (key: string, options?: Record<string, string>) => string
 type InspectionIndicatorTone = 'idle' | 'running' | 'completed'
@@ -269,9 +269,9 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
                 onSaveAlias={onSaveAlias}
               />
             ) : row.displayName}
+            icon={<ProviderBrandIcon providerType={row.identity.type} size={30} ariaLabel={row.typeLabel} />}
             subtitle={(
               <span className={styles.credentialIdentityBadges}>
-                <CredentialBadge>{row.typeLabel}</CredentialBadge>
                 {row.subscriptionBadge && <CredentialSubscriptionBadge model={row.subscriptionBadge} />}
                 {row.remainingDaysLabel && row.expiresAtLabel
                   ? (
@@ -1458,7 +1458,7 @@ function InspectionResultRow({ result }: { result: UsageQuotaInspectionResult })
   return (
     <div className={styles.credentialInspectionResultRow}>
       <span className={styles.credentialInspectionTypeIcon}>
-        <CredentialProviderFilterIcon provider={result.type} />
+        <ProviderBrandIcon providerType={result.type} size={20} />
       </span>
       <span className={styles.credentialInspectionIdentity}>
         <strong>{result.name || result.file_name || '-'}</strong>

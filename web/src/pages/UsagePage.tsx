@@ -40,7 +40,7 @@ import {
   normalizeRequestEventColumnOrder,
   type RequestEventColumnId,
 } from '@/components/usage/RequestEventsDetailsCard';
-import { clampStoredUsageRangeStateToCurrentBounds, parseLegacyCustomRange, parseStoredUsageRangeState, resolveUsageRangeRecoveryTimeZone, serializeUsageRangeState, type StoredUsageRangeState } from '@/utils/usage/customRange';
+import { clampCustomRangeToCurrentBounds, clampStoredUsageRangeStateToCurrentBounds, parseLegacyCustomRange, parseStoredUsageRangeState, resolveUsageRangeRecoveryTimeZone, serializeUsageRangeState, type StoredUsageRangeState } from '@/utils/usage/customRange';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import { getDailyAverageCardUsage, isDailyAverageRange } from '@/utils/usage/overview';
 import type { Theme } from '@/types';
@@ -84,6 +84,20 @@ const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_PAGE_SIZES = [20, 50, 100, 500, 1000] as const;
 const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 50;
+const REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS = 90;
+export const getUsageCustomRangeForTab = (
+  tab: UsageTab,
+  customRange: UsageCustomRange | undefined,
+  { nowMs, timeZone }: { nowMs: number; timeZone?: string },
+): UsageCustomRange | undefined => {
+  const normalizedTimeZone = timeZone?.trim();
+  if (tab !== 'events' || !customRange || !normalizedTimeZone) return customRange;
+  return clampCustomRangeToCurrentBounds(customRange, {
+    nowMs,
+    timeZone: normalizedTimeZone,
+    maxDayRangeDays: REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS,
+  });
+};
 // v7 是完整列顺序格式；v8 加入客户端请求元数据列，并保留历史自定义顺序。
 const REQUEST_EVENTS_PREFERENCES_VERSION = 8;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';
@@ -917,6 +931,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const activityWindow = manualActivityWindow ?? activity?.window ?? null;
   const activityWindowIsCurrent = manualActivityWindow !== null || activityMatchesRequest;
   const rangeTimeZone = status?.timezone ?? usage?.timezone ?? timeRangeState.timeZone;
+  const activeCustomRange = useMemo(() => getUsageCustomRangeForTab(activeTab, customRange, {
+    nowMs: Date.now(),
+    timeZone: rangeTimeZone,
+  }), [activeTab, customRange, rangeTimeZone]);
   const handleTimeRangeChange = useCallback((range: UsageTimeRange, nextCustomRange?: UsageCustomRange) => {
     pendingLegacyCustomRangeRef.current = null;
     try {
@@ -2102,8 +2120,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                     )}
                     <TimeRangeControl
                       value={timeRange}
-                      customRange={customRange}
+                      customRange={activeCustomRange}
                       timeZone={rangeTimeZone}
+                      maxCustomDayRangeDays={activeTab === 'events' ? REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS : undefined}
                       onChange={handleTimeRangeChange}
                       ariaLabel={t('usage_stats.range_filter')}
                     />

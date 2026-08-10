@@ -21,6 +21,7 @@ interface CustomRangePanelProps {
   timeZone: string;
   locale?: string;
   anchorMs: number;
+  maxDayRangeDays: number;
   onChange: (value: UsageCustomRange) => void;
   onApply: () => void;
   onCancel: () => void;
@@ -145,11 +146,11 @@ function CustomRangeSummary({
   );
 }
 
-export function CustomRangePanel({ value, timeZone, locale, anchorMs, onChange, onApply, onCancel }: CustomRangePanelProps) {
+export function CustomRangePanel({ value, timeZone, locale, anchorMs, maxDayRangeDays, onChange, onApply, onCancel }: CustomRangePanelProps) {
   const { t } = useTranslation();
   const [view, setView] = useState<CustomPickerView>('summary');
   const [activeEndpoint, setActiveEndpoint] = useState<CustomEndpoint>('start');
-  const daySlots = useMemo(() => buildCustomDaySlots({ nowMs: anchorMs, timeZone, locale }), [anchorMs, locale, timeZone]);
+  const daySlots = useMemo(() => buildCustomDaySlots({ nowMs: anchorMs, timeZone, locale, maxDayRangeDays }), [anchorMs, locale, maxDayRangeDays, timeZone]);
   const hourSlots = useMemo(() => buildCustomHourSlots({ nowMs: anchorMs, timeZone, locale }), [anchorMs, locale, timeZone]);
   const weekdayLabels = useMemo(() => buildCustomWeekdayLabels(locale), [locale]);
   const slots = value.unit === 'hour' ? hourSlots : daySlots;
@@ -179,7 +180,7 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, onChange, 
     if (unit === value.unit) return;
     setView('summary');
     setActiveEndpoint('start');
-    onChange(buildDefaultCustomRange({ unit, nowMs: anchorMs, timeZone }));
+    onChange(buildDefaultCustomRange({ unit, nowMs: anchorMs, timeZone, maxDayRangeDays }));
   };
 
   const handleEdit = (endpoint: CustomEndpoint) => {
