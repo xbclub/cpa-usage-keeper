@@ -471,7 +471,6 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 			Label:             "Manual 5h",
 			Scope:             "window",
 			Metric:            "manual",
-			PlanType:          "pro",
 			Used:              &oldUsed,
 			Limit:             &oldLimit,
 			Remaining:         &oldRemaining,

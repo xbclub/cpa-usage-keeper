@@ -180,7 +180,7 @@ func TestUsageIdentitiesRouteReturnsPublishedMetadataFields(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
 	for _, expected := range []string{
-		`"plan_type":"team"`,
+		`"subscription":{"provider":"codex","plan":"team"}`,
 		`"active_start":"2026-05-01T00:00:00Z"`,
 		`"active_until":"2026-06-01T00:00:00Z"`,
 		`"prefix":"codex-prefix"`,
