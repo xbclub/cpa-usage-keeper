@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
+import { PortalTooltip, usePortalTooltip } from '@/components/ui/PortalTooltip';
 import { Select } from '@/components/ui/Select';
 import { IconCheck, IconChevronDown, IconCopy, IconDownload, IconScrollText, IconSettings } from '@/components/ui/icons';
 import type { UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption } from '@/lib/types';
@@ -53,6 +54,16 @@ const REQUEST_EVENTS_SPEED_MODE_TOOLTIP_MAX_WIDTH = 280;
 const REQUEST_EVENTS_SPEED_MODE_TOOLTIP_ESTIMATED_HEIGHT = 72;
 const REQUEST_EVENTS_SPEED_MODE_TOOLTIP_OFFSET = 10;
 const REQUEST_EVENTS_SPEED_MODE_TOOLTIP_VIEWPORT_PADDING = 8;
+const REQUEST_EVENT_CLIENT_IP_DISPLAY_LENGTH = 39;
+const REQUEST_EVENT_X_FORWARDED_FOR_DISPLAY_LENGTH = 48;
+const REQUEST_EVENT_USER_AGENT_DISPLAY_LENGTH = 48;
+
+const truncateRequestEventMetadata = (value: string, maxLength: number): string => {
+  const characters = Array.from(value);
+  return characters.length <= maxLength
+    ? value
+    : `${characters.slice(0, maxLength).join('')}...`;
+};
 const REQUEST_LOG_GRAPHEME_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
   ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   : null;
@@ -117,6 +128,9 @@ type RequestEventRow = {
   cacheReadRate: string;
   cost: number | null;
   costAvailable: boolean;
+  clientIP: string;
+  xForwardedFor: string;
+  userAgent: string;
 };
 
 type RequestEventSpeedModeTooltipState = {
@@ -792,6 +806,9 @@ export function RequestEventsDetailsCard({
       const latencyMs = Number.isFinite(event.latency_ms) ? event.latency_ms : null;
       const ttftMs = Number.isFinite(event.ttft_ms) ? event.ttft_ms as number : null;
       const speedTPS = Number.isFinite(event.speed_tps) ? event.speed_tps as number : null;
+      const clientIP = String(event.client_ip ?? '').trim() || '-';
+      const xForwardedFor = String(event.x_forwarded_for ?? '').trim() || '-';
+      const userAgent = String(event.user_agent ?? '').trim() || '-';
       // 费用由后端按当前价格配置运行时计算，前端只负责展示可用/不可用状态。
       const costAvailable = event.cost_available === true;
       const cost = costAvailable ? Math.max(toNumber(event.cost_usd), 0) : null;
@@ -831,9 +848,49 @@ export function RequestEventsDetailsCard({
         cacheReadRate: formatCacheReadRate(cacheReadTokens, inputTokens),
         cost,
         costAvailable,
+        clientIP,
+        xForwardedFor,
+        userAgent,
       };
     });
   }, [events, t]);
+  const {
+    tooltip: requestEventsTooltip,
+    showOnMouseEnter: handleRequestEventsTooltipMouseEnter,
+    hideOnMouseLeave: handleRequestEventsTooltipMouseLeave,
+    showOnFocus: handleRequestEventsTooltipFocus,
+    hideOnBlur: handleRequestEventsTooltipBlur,
+  } = usePortalTooltip();
+  const renderClientMetadataCell = useCallback((value: string, maxLength: number) => {
+    const hasValue = value !== '-';
+    const tooltipLines = [value];
+    return (
+      <td
+        className={`${styles.requestEventsNoWrapCell} ${styles.requestEventsSpeedModeCell}`}
+        tabIndex={hasValue ? 0 : undefined}
+        aria-label={hasValue ? value : undefined}
+        onMouseEnter={hasValue
+          ? (event) => handleRequestEventsTooltipMouseEnter(tooltipLines, event.currentTarget)
+          : undefined}
+        onMouseLeave={hasValue
+          ? (event) => handleRequestEventsTooltipMouseLeave(event.currentTarget)
+          : undefined}
+        onFocus={hasValue
+          ? (event) => handleRequestEventsTooltipFocus(tooltipLines, event.currentTarget)
+          : undefined}
+        onBlur={hasValue
+          ? (event) => handleRequestEventsTooltipBlur(event.currentTarget)
+          : undefined}
+      >
+        {truncateRequestEventMetadata(value, maxLength)}
+      </td>
+    );
+  }, [
+    handleRequestEventsTooltipBlur,
+    handleRequestEventsTooltipFocus,
+    handleRequestEventsTooltipMouseEnter,
+    handleRequestEventsTooltipMouseLeave,
+  ]);
   useScrollBoundaryContainment(requestEventsTableWrapperRef, rows.length > 0);
 
   const [internalVisibleColumnIds, setInternalVisibleColumnIds] = useState<RequestEventColumnId[]>(() => (
@@ -983,6 +1040,24 @@ export function RequestEventsDetailsCard({
         label: t('usage_stats.model_alias'),
         header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.model_alias')}</th>,
         renderCell: (row) => <td className={styles.modelCell} title={row.modelAlias}>{row.modelAlias}</td>,
+      },
+      {
+        id: 'client_ip',
+        label: t('usage_stats.client_ip'),
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.client_ip')}</th>,
+        renderCell: (row) => renderClientMetadataCell(row.clientIP, REQUEST_EVENT_CLIENT_IP_DISPLAY_LENGTH),
+      },
+      {
+        id: 'x_forwarded_for',
+        label: t('usage_stats.x_forwarded_for'),
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.x_forwarded_for')}</th>,
+        renderCell: (row) => renderClientMetadataCell(row.xForwardedFor, REQUEST_EVENT_X_FORWARDED_FOR_DISPLAY_LENGTH),
+      },
+      {
+        id: 'user_agent',
+        label: t('usage_stats.user_agent'),
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.user_agent')}</th>,
+        renderCell: (row) => renderClientMetadataCell(row.userAgent, REQUEST_EVENT_USER_AGENT_DISPLAY_LENGTH),
       },
       {
         id: 'reasoning_effort',
@@ -1145,6 +1220,7 @@ export function RequestEventsDetailsCard({
     speedHint,
     t,
     ttftHint,
+    renderClientMetadataCell,
   ]);
 
   const visibleColumns = useMemo(() => {
@@ -1332,6 +1408,7 @@ export function RequestEventsDetailsCard({
         onApply={handleColumnSettingsApply}
         onClose={() => setColumnSettingsOpen(false)}
       />
+      <PortalTooltip tooltip={requestEventsTooltip} />
       {speedModeTooltip && typeof document !== 'undefined'
         ? createPortal(
             <div
