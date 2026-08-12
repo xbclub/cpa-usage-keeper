@@ -33,6 +33,56 @@ func OpenTestDatabaseForB(b *testing.B) *gorm.DB {
 	return openTestDatabaseCore(b)
 }
 
+// OpenTestDatabaseURL creates an isolated PG schema (like OpenTestDatabase),
+// runs AutoMigrate, and returns the schema-pinned DATABASE_URL so callers can
+// hand it to app config (e.g. NewWithConfig startup tests where the app opens
+// its own pool into the isolated schema instead of the shared production one).
+func OpenTestDatabaseURL(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv(testDatabaseURLEnv)
+	if dsn == "" {
+		t.Fatalf("%s is required for database tests", testDatabaseURLEnv)
+	}
+	bootstrap, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+	})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	schemaName := fmt.Sprintf("test_%d", rand.Int63())
+	if err := bootstrap.Exec(fmt.Sprintf(`CREATE SCHEMA "%s"`, schemaName)).Error; err != nil {
+		t.Fatalf("create test schema %s: %v", schemaName, err)
+	}
+	if sqlDB, err := bootstrap.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+	testDSN := pinSchemaInDSN(dsn, schemaName)
+	migrateDB, err := gorm.Open(postgres.Open(testDSN), &gorm.Config{
+		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+	})
+	if err != nil {
+		t.Fatalf("open migrate database: %v", err)
+	}
+	if err := migrateDB.AutoMigrate(entities.All()...); err != nil {
+		t.Fatalf("auto migrate test schema %s: %v", schemaName, err)
+	}
+	if sqlDB, err := migrateDB.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+	t.Cleanup(func() {
+		dropDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+			NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+		})
+		if err == nil {
+			_ = dropDB.Exec(fmt.Sprintf(`DROP SCHEMA IF EXISTS "%s" CASCADE`, schemaName)).Error
+			if dropSQL, e := dropDB.DB(); e == nil {
+				_ = dropSQL.Close()
+			}
+		}
+	})
+	return testDSN
+}
+
 // openTestDatabaseCore creates an isolated PG schema for each test, runs
 // AutoMigrate inside it, and registers a cleanup to drop the schema.
 //
