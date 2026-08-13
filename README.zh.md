@@ -39,6 +39,8 @@
 ## 快速开始
 
 > 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
+>
+> 同一 CPA 接入多个 usage 采集服务时，请确保均使用订阅模式，否则可能导致收数中断或数据不完整。
 
 推荐部署路径：
 

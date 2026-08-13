@@ -15,6 +15,26 @@ const cssBlock = (selector: string) => {
   return credentialStyles.slice(start, next === -1 ? undefined : next)
 }
 
+const scssRule = (source: string, selector: string, occurrence = 0) => {
+  let start = -selector.length
+  for (let index = 0; index <= occurrence; index += 1) {
+    start = source.indexOf(selector, start + selector.length)
+    expect(start).toBeGreaterThanOrEqual(0)
+  }
+
+  const openingBrace = source.indexOf('{', start + selector.length)
+  expect(openingBrace).toBeGreaterThan(start)
+  let depth = 1
+  for (let index = openingBrace + 1; index < source.length; index += 1) {
+    if (source[index] === '{') {
+      depth += 1
+    } else if (source[index] === '}' && --depth === 0) {
+      return source.slice(start, index + 1)
+    }
+  }
+  throw new Error(`Unclosed SCSS rule: ${selector}`)
+}
+
 describe('Credential section styles', () => {
   it('keeps Auth Files and AI Provider row sizing separate', () => {
     expect(credentialStyles).toMatch(/\.authFileCredentialRow\s*\{[\s\S]*?grid-template-columns:\s*236px minmax\(0, 448px\) minmax\(250px, 1fr\);/)
@@ -223,8 +243,17 @@ describe('Credential section styles', () => {
     expect(credentialStyles).toMatch(/\.credentialPriorityBadge\s*\{[\s\S]*?min-width:\s*22px;/)
     expect(credentialShellSource).toContain('CredentialPriorityBadge')
     expect(authFileSectionSource).toContain('row.priorityLabel')
-    expect(authFileSectionSource).toMatch(/row\.planTypeLabel[\s\S]*?row\.remainingDaysLabel[\s\S]*?row\.priorityLabel/)
+    expect(authFileSectionSource).toMatch(/row\.subscriptionBadge[\s\S]*?row\.remainingDaysLabel[\s\S]*?row\.priorityLabel/)
     expect(aiProviderSectionSource).toContain('row.priorityLabel')
+  })
+
+  it('keeps screen blending by default and disables it only for Safari WebKit', () => {
+    const coronaRule = scssRule(credentialStyles, '.credentialPlanBadgeCorona')
+    const safariWebKitRule = scssRule(credentialStyles, '@supports (-webkit-nbsp-mode: space)')
+
+    expect(coronaRule).toContain('mix-blend-mode: screen;')
+    expect(scssRule(safariWebKitRule, '.credentialPlanBadgeCorona')).toContain('mix-blend-mode: normal;')
+    expect(safariWebKitRule).not.toContain('.credentialPlanBadgeFlow')
   })
 
   it('uses a portal-based floating tooltip for credential expiry badges', () => {

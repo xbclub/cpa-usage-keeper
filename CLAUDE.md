@@ -990,6 +990,26 @@ Merged upstream v1.14.3 (`54e0806..ba3d64a`) — 12 PRs, 81 files, +3574/−995.
 
 8. **README/package-lock fork 独立/自动生成,跳过 checkout。** fork README 599L diff(fork-specific PG 文档,与 upstream 独立);package-lock.json 自动生成,merge 易错。#415(deps advisories)跳过,记录 fork 后续 `npm audit` 处理。Dockerfile 仅升 node:22→24(手动改 web-builder,保留 fork `CGO_ENABLED=0`/无 build-base)。
 
+### Step 4.26: v1.14.4 merge notes (2026-08-13) — #411/#413/#414/#415 合并 · #412/#410 已有 · #417 跳过
+
+Merged upstream v1.14.4 (`ba3d64a..d62cad3`) — 7 PR 分布:**#412/#410 Step 4.24(v1.14.3)已合并**;**#413/#414/#415/#411 本次合并**;**#417 跳过**。0 生产后端代码、0 schema、0 migration。Lessons:
+
+1. **⚠️ 又踩 git ancestry 坑(Step 4.9 #1 第 N 次)。** 首次用臆断 base `ba3d64a..d62cad3` 得出"v1.14.4 只有 #417",把整个 v1.14.4 判"跳过"。实际 `git log --merges e949e64..upstream/main` 显示 7 个 PR。`git merge-base --is-ancestor` 对选择性 cherry-pick 的 fork **完全失效**(ba3d64a 不是 fork HEAD 祖先,但 fork 已合并其内容)。**判断 fork 是否已合并某 PR:grep 该 PR 引入的符号/字段/值是否存在,不看 commit ancestry。** #412(usage_filter.go 90 天)/#410(Dockerfile node:24)grep 确认已有;#414(scss @supports)/#413(i18n)/#415(react-router-dom)/#411(README)grep 确认缺。
+
+2. **⚠️ `git merge-file` 第 3 次静默丢失(Step 4.24 #1)—— exit 0 + 0 冲突 ≠ theirs 落地。** 本轮 i18n `index.ts` 3-way merge exit 0/0 冲突 → grep #413 新值全 0、旧值残留;3 个 i18n test 同样 exit 0 但 0 个 #413 断言进入。**根因**:fork-modified 大文件 + theirs 改动落在 fork 已分叉区域,merge-file 找不到 hunk 上下文静默丢弃。**对策(已验证):i18n 这类纯值替换用 node 脚本按 locale 块区间精确 patch(本轮 `/tmp/i18n_patch.cjs`,33/34 命中,1 对 fork 已是目标值);test 文件若 fork 落后 upstream(缺用例)直接 checkout 追齐。merge-file 对 fork-modified 文件 3 次不可靠,放弃使用。**
+
+3. **`grep | head` 截断漏判 #414;补 test 需引入 scssRule helper;删 v1.11.1 旧版残留。** 首次 grep `@supports` `| head` 截断了 line 2974 的 `@supports (-webkit-nbsp-mode: space)`(corona 变量行占满 10 行),误判"fork 缺 #414 scss"。实际 Step 4.24 append upstream/main credentialPlanBadge 块时已带入 #414 WebKit scope(fork line 2974-2978)。**grep 验证勿 `| head` 截断。** #414 生产 scss 已有;test 补全:fork `test/CredentialSections.styles.test.ts` 用 cssBlock 非 upstream scssRule(#414 用例需嵌套查找 cssBlock 做不到)→ 引入 scssRule helper + #414 用例 + 修 pre-existing `planTypeLabel` 断言为 `subscriptionBadge`(fork #404 已 planType→subscriptionBadge),test/ 19/19 过。另:fork 根目录 `credentials/CredentialSections.styles.test.ts`(fork-only,v1.11.1 旧版残留,4 fail,与 test/ 同名 describe/it 重复)删除 —— upstream 已重组到 test/ 子目录,fork 漏删旧版。**test 重组 merge 后检查有无重复旧版残留。**
+
+4. **fork i18n test 整体落后 upstream —— checkout 追齐比 merge 安全。** `index.test.ts` fork 缺 7 个 upstream 用例(#413 session/realtime/inspection 中文化 + #412/#414 等),merge-file 无法补(缺上下文)。直接 `git checkout upstream/main -- index.test.ts pricing-rules.test.ts rankingTranslations.test.ts` 追齐;fork-unique 键守卫在独立 `forkKeys.test.ts`(Step 4.21 #16),不依赖 index.test.ts。checkout 后 i18n 9 文件 74 tests 0 fail。
+
+5. **#415 npm audit fix 到 0 vuln;vite 本身不 vulnerable,6 个是 transitive 旧依赖。** fork package.json `vite: ^8.0.16` 实际装 8.2.1(范围最新),**不在** vite vulnerable range(7.0.0-7.3.3)→ 报 "vite: high" 的是 `vite-node/node_modules/vite`(内嵌旧 7.x)。6 vuln 全是 transitive 旧依赖(@babel/core、esbuild、immutable、js-yaml、brace-expansion、vite-node 内嵌 vite),upstream 同源同样有。`npm audit fix` 升 29 个 transitive patched 包 → **0 vulnerabilities**,build/test 无 regression,fork 现比 upstream 更干净。**audit 报的直接依赖名 ≠ 该依赖 vulnerable,看 vulnerable range + 路径(transitive)。**
+
+6. **#417 capacity suite 跳过(SQLite+Linux 专属)。** production capacity benchmark 深度绑定 SQLite 单文件模型(go-sqlite3 + sqlite3 CLI backup + Linux pagecache/cgroup/systemd),fork 用 PG 无对应物。checkout 必编译断(fork 已删 config.SQLitePath、无 OpenReadDatabase、go.mod 无 go-sqlite3)。同 Step 2 把 db.go/backup_runner 列 skip 的同类,更重度。0 生产代码改动 → 跳过对 fork 功能零影响。
+
+7. **fork-unique i18n 键是 8 个不是 6 个。** 本次核对发现 fork 比 upstream 多 8 key:`model_filter`/`all_models`/`api_key_summary_title`/`clear_cache`/`clear_cache_confirm`(Step 4.5 已记)+ **`credentials_refresh_single`/`model_filter_selected_one`/`model_filter_selected_other`**(Step 4.5 未记,本次发现:单凭证刷新 aria + 多选 filter 标签复数)。forkKeys.test.ts 守卫覆盖全部 8 个。Step 4.5 fork-unique 键清单应补这 3 个。
+
+8. **review 发现 #412 i18n 文案 Step 4.24 遗漏(merge-file 静默丢失不只发生在当次 merge)。** review fork i18n vs upstream(排除 8 fork-unique 后的剩余 diff)发现 2 键三 locale 全落后:`range_custom_day_limit_hint`(fork 写死 365 vs upstream `{{count}}`;events tab 该显示 90,fork 写死 365 误导;且 fork 代码无 t() 调用=死键,upstream TimeRangeControl 用)、`request_events_subtitle`(fork 旧版 vs upstream #412 "最近 90 天")。Step 4.24 声称 #412 已合并,但只合了后端(usage_filter.go 90 天)+ 前端 customRange clamp,**i18n 文案被 merge-file 静默丢失**(同 lesson 2)。**review 时排除 fork-unique 后的 i18n diff 必须逐键确认是 fork 有意还是落后,历史 merge 的 i18n 也会被 merge-file 丢。** 另:`credentials_subscription_*`/`credentials_filter_*` fork 双引号 vs upstream 单引号、`retry` 尾逗号、`react-virtual` 3.14.6 vs 3.14.5 —— 格式/版本差异非落后,保留。
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
