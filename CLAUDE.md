@@ -1010,6 +1010,28 @@ Merged upstream v1.14.4 (`ba3d64a..d62cad3`) — 7 PR 分布:**#412/#410 Step 4.
 
 8. **review 发现 #412 i18n 文案 Step 4.24 遗漏(merge-file 静默丢失不只发生在当次 merge)。** review fork i18n vs upstream(排除 8 fork-unique 后的剩余 diff)发现 2 键三 locale 全落后:`range_custom_day_limit_hint`(fork 写死 365 vs upstream `{{count}}`;events tab 该显示 90,fork 写死 365 误导;且 fork 代码无 t() 调用=死键,upstream TimeRangeControl 用)、`request_events_subtitle`(fork 旧版 vs upstream #412 "最近 90 天")。Step 4.24 声称 #412 已合并,但只合了后端(usage_filter.go 90 天)+ 前端 customRange clamp,**i18n 文案被 merge-file 静默丢失**(同 lesson 2)。**review 时排除 fork-unique 后的 i18n diff 必须逐键确认是 fork 有意还是落后,历史 merge 的 i18n 也会被 merge-file 丢。** 另:`credentials_subscription_*`/`credentials_filter_*` fork 双引号 vs upstream 单引号、`retry` 尾逗号、`react-virtual` 3.14.6 vs 3.14.5 —— 格式/版本差异非落后,保留。
 
+### Step 4.27: v1.14.5 merge notes (2026-08-18) — #421/#422/#423/#424
+
+Merged upstream v1.14.5 (`d62cad3..498abd1`) — 4 PR, 48 文件,+2090/−299。Features:#421 request-events 虚拟滚动(react-virtual)+ cursor keyset 分页 + 流式 load-more(**删 500/1000 页大小**,20/50/100 + 加载更多替代;后端 cursor `(timestamp,id)` + cursor 页跳过 Count;`next_cursor`/`has_more` 响应)、#422 Models.dev 同步超时报 504、#423 会话客户端活动跟踪(`AuthSession` +`LoginIP/LastSeenIP/UserAgent/LastSeenAt` nullable,`Touch` 异步写,XFF 从右解析)、#424 virtualizer teardown 测试修复。无 schema migration(4 个 `migration/*` 文件跳过,新列全 nullable → AutoMigrate)。Lessons:
+
+1. **⚠️ `git apply --3way` 也静默丢失(第 4 次,静默丢失类从 merge-file 扩展到 3way)。** 全部 19 个 fork-modified 文件 3way 报"成功应用",但 `api/test/usage_events_test.go` 5 个上游新测试只落地 1 个、`usage_filter_test.go` 缺整个 `TestParseUsageTimeFilterQueryIgnoresEventOnlyParameters` 函数、`logic.test.ts` 丢 8 个 it/describe(3way 留了 9 处冲突标记的同时又静默丢非冲突区)、root card test 丢了 flush-heading 测试且保了 8 行 fork 过时断言(`keeper-card-title-track` vs fork 旧 `_requestEventsTitleRow_`)。**根因**:fork 大分叉文件 + theirs 新增 hunk 落在 fork 已分叉区域,3way 三方合并取 ours 侧且不报冲突。**对策(本轮验证有效):3way 后必须做"上游符号级落地审计"——对每个文件 grep 上游新增的函数/常量/测试名(`func TestX`/`it('...')`/新 symbol),与 upstream 版本做集合对比(comm -23),缺失即 checkout 上游版 + 重放 fork 小块。仅看 exit code / 冲突数 = 必漏。**
+
+2. **大分叉 test 文件的最优路径是 checkout 上游 + 重放 fork 小块(不是 3way)。** fork 侧 unique 内容小而明确(stub 方法、PG 适配、口径断言)时,checkout 上游版拿全部新测试,再重放 fork 块,比 3way 可靠且工作量更小。本轮:`api/test/usage_events_test.go`(重放 `ListOverviewModels` stub + speed 可见口径 6 case)、`logic.test.ts`/`styles.test.ts`/`api.test.ts`/`ModelAlias.test.ts`(fork-only 测试为 0 或已被取代,直接 checkout = 0 diff)。**判断标准:先做 fork-only 测试/符号集合对比,fork-only = 0 → 无脑 checkout;fork-only 小 → checkout + 重放;fork-only 大且密集 → 才考虑 3way + 审计。**
+
+3. **与不存在路径比 diff 会产生假 MOD 分类。** 上游新文件(如 `test/RequestEventsDetailsCardClientMetadata.test.tsx`)在 `git diff <base> HEAD -- <path>` 中显示为整文件删除 diff(非 0 行)→ 被误分类为 fork-modified。修正:用 `git cat-file -e HEAD:<path>` 判断 fork 是否真的有此文件;不存在 = 新文件直接 checkout。
+
+4. **"upstream 旧代码 ≠ fork-unique" 溯源法。** fork `RequestEventsDetailsCard.tsx` 有 15 处 `SPEED_MODE_TOOLTIP` 自研定位逻辑,看似 fork-unique;`git log --all -S` + `git branch -r --contains` 溯源确认来自上游 `d6359ff`,且上游 #421 已重构为通用 `usePortalTooltip` 方案(upstream main grep = 0)→ 整文件 checkout,零 fork 丢失。**大 diff 文件先溯源再定策略:`git log --all -S '<symbol>'` 找引入 commit,`git branch -r --contains <commit>` 判断上游是否包含。**
+
+5. **功能删除时同步淘汰其测试(且 3way 会保 fork 侧旧测试)。** #421 删分页 UI → fork 的 pager footer 测试、pageSize 偏好测试、500/1000 页大小断言全部过时。3way 会保留这些(ours 侧未被 patch 触及),checkout 上游版天然淘汰。同理 fork 的 'clamps aged legacy dates'(断言 30 天 clamp 06-17→06-18)被上游 'preserves historical legacy dates'(90 天口径不 clamp)取代 —— **测试期望值随功能口径演进,旧口径测试是债务不是资产。**
+
+6. **fork speed TPS 可见口径(Step 4.22 #1)的测试适配点。** 上游 speed 测试断言完整 output(30.5/0.5/2),fork 生产代码是可见口径(29.5/省略)。checkout 上游测试后需改 3 类:① `TestUsageEventSpeedTPS` 的 case 集(6 case 换 fork 版);② 响应断言 `"speed_tps":30.5` → `29.5`;③ CSV 导出断言 `,30.5,` → `,29.5`(导出走同一 `usageEventSpeedTPS`)。fork 旧版用 substring `"speed_tps":29` 匹配 29.5 的写法是巧合可读性差,新适配用精确 29.5。
+
+7. **PG 适配的固定模式再 +3 处。** 上游新 test 的 DB 打开(`gorm.Open(sqlite.Open(...))` + 手动 Close)→ `testutil.OpenTestDatabase(t)`(t.Cleanup 自动清理,删掉 sqlDB/Close 块),imports 删 `path/filepath`+`gorm.io/driver/sqlite` 加 testutil。本轮:`auth/test/session_metadata_test.go`、`api/test/auth_session_metadata_test.go`、`repository/usage_events_test.go` 新 cursor 测试。
+
+8. **前端 fail 列表对比是硬数字。** merge 前 152 failed/956 passed(1108),merge 后 **140 failed/1017 passed(1157)** —— +49 净新测试全过,−12 失败(淘汰的旧口径失败测试 > 新增的 2 个语言类失败:`SessionSettingsCardMetadata` 断言英文 'Login IP'/'Unknown' 但 fork 渲染中文,属 Step 4.13 #6 已记录的 DEFAULT_LANGUAGE='zh' pre-existing 模式)。失败文件数 36 不变。**对比必须用汇总行(Tests/Test Files)而非 FAIL 行抽样 —— 本轮首次读串了 baseline 和 after 的 cat 段,差点误判"计数完全一致"。**
+
+9. **stash 在 OMC hooks 下依然危险(Step 4.21 #8 重申)。** 本轮为验证 lint warning 是否 pre-existing 用了一次 `git stash`/`stash pop`,往返成功但属侥幸。**基线对比改用 `git worktree add` 或直接读 HEAD 文件,不再 stash。**
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
