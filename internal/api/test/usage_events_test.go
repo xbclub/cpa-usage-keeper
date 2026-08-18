@@ -3,15 +3,19 @@ package test
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	_ "unsafe"
@@ -35,6 +39,13 @@ type usageEventsStub struct {
 	filterCalls        int
 	filterOptionCalls  int
 	exportCalls        int
+}
+
+type blockingUsageEventsExportStub struct {
+	*usageEventsStub
+	started chan struct{}
+	release <-chan struct{}
+	calls   atomic.Int32
 }
 
 type requestLogProviderStub struct {
@@ -94,12 +105,17 @@ func (s *usageEventsStub) GetUsageOverview(_ context.Context, filter servicedto.
 	return nil, nil
 }
 
+func (s *usageEventsStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, s.err
+}
+
 func (s *usageEventsStub) GetUsageOverviewRealtime(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
 	return nil, nil
 }
 
+// ListOverviewModels 是 fork-unique 的 /usage/models endpoint stub（上游接口没有此方法）。
 func (s *usageEventsStub) ListOverviewModels(_ context.Context, _ servicedto.UsageFilter) ([]string, error) {
-	return nil, nil
+	return nil, s.err
 }
 
 func (s *usageEventsStub) ListUsageEvents(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
@@ -126,6 +142,17 @@ func (s *usageEventsStub) StreamUsageEvents(_ context.Context, filter servicedto
 	return s.err
 }
 
+func (s *blockingUsageEventsExportStub) StreamUsageEvents(ctx context.Context, _ servicedto.UsageFilter, _ func(servicedto.UsageEventRecord) error) error {
+	s.calls.Add(1)
+	s.started <- struct{}{}
+	select {
+	case <-s.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *usageEventsStub) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	s.lastFilter = filter
 	s.filterOptionCalls++
@@ -140,10 +167,6 @@ func (s *usageEventsStub) GetAnalysis(context.Context, servicedto.UsageFilter) (
 }
 
 func (s *usageEventsStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
-	return nil, s.err
-}
-
-func (s *usageEventsStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
 	return nil, s.err
 }
 
@@ -191,6 +214,92 @@ func (s usageIdentitiesStub) UpdateUsageIdentityAlias(context.Context, int64, st
 	return s.items[0], s.err
 }
 
+func TestUsageEventsEndpointsAcceptNinetyDayCustomRange(t *testing.T) {
+	now := time.Now().In(time.Local)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	startDay := today.AddDate(0, 0, -89)
+	query := url.Values{
+		"range": {"custom"},
+		"unit":  {"day"},
+		"start": {startDay.Format(time.DateOnly)},
+		"end":   {today.Format(time.DateOnly)},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		path   string
+		export bool
+	}{
+		{name: "list", path: "/api/v1/usage/events?" + query.Encode()},
+		{name: "export", path: "/api/v1/usage/events/export?format=csv&" + query.Encode(), export: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &usageEventsStub{}
+			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("expected 90-day custom Events %s to return 200, got %d body=%s", tc.name, response.Code, response.Body.String())
+			}
+			if tc.export {
+				if provider.exportCalls != 1 || provider.filterCalls != 0 {
+					t.Fatalf("expected only export provider call, export=%d list=%d", provider.exportCalls, provider.filterCalls)
+				}
+			} else if provider.filterCalls != 1 || provider.exportCalls != 0 {
+				t.Fatalf("expected only list provider call, list=%d export=%d", provider.filterCalls, provider.exportCalls)
+			}
+			if provider.lastFilter.StartTime == nil || !provider.lastFilter.StartTime.Equal(startDay) {
+				t.Fatalf("expected custom day start %s, got %+v", startDay, provider.lastFilter)
+			}
+			expectedEnd := today.AddDate(0, 0, 1)
+			if provider.lastFilter.EndTime == nil || !provider.lastFilter.EndTime.Equal(expectedEnd) || !provider.lastFilter.EndExclusive {
+				t.Fatalf("expected exclusive custom day end %s, got %+v", expectedEnd, provider.lastFilter)
+			}
+			if provider.lastFilter.CustomUnit != "day" || provider.lastFilter.RangeCount != 90 {
+				t.Fatalf("expected 90 complete custom day buckets, got %+v", provider.lastFilter)
+			}
+		})
+	}
+}
+
+func TestUsageEventsEndpointsRejectCustomRangeBeyondNinetyDays(t *testing.T) {
+	now := time.Now().In(time.Local)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	query := url.Values{
+		"range": {"custom"},
+		"unit":  {"day"},
+		"start": {today.AddDate(0, 0, -90).Format(time.DateOnly)},
+		"end":   {today.Format(time.DateOnly)},
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "list", path: "/api/v1/usage/events?" + query.Encode()},
+		{name: "export", path: "/api/v1/usage/events/export?format=csv&" + query.Encode()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &usageEventsStub{}
+			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 91-day custom Events %s to return 400, got %d body=%s", tc.name, response.Code, response.Body.String())
+			}
+			if provider.filterCalls != 0 || provider.exportCalls != 0 {
+				t.Fatalf("expected rejected range not to reach provider, list=%d export=%d", provider.filterCalls, provider.exportCalls)
+			}
+		})
+	}
+}
+
 func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
@@ -208,6 +317,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.10"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.5, 198.51.100.8"),
+		UserAgent:           usageEventStringPtr("test-client/1.0"),
 		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
@@ -277,13 +389,17 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	if !contains(body, `"response_service_tier":"default"`) {
 		t.Fatalf("expected response_service_tier in response body: %s", body)
 	}
+	if !contains(body, `"client_ip":"192.0.2.10"`) || !contains(body, `"x_forwarded_for":"203.0.113.5, 198.51.100.8"`) || !contains(body, `"user_agent":"test-client/1.0"`) {
+		t.Fatalf("expected client metadata in response body: %s", body)
+	}
 	if !contains(body, `"endpoint":"POST /v1/responses"`) {
 		t.Fatalf("expected endpoint in response body: %s", body)
 	}
 	if !contains(body, `"ttft_ms":45`) {
 		t.Fatalf("expected ttft_ms in response body: %s", body)
 	}
-	if !contains(body, `"speed_tps":29`) {
+	// fork 口径：61 output - 2 reasoning = 59 可见 token / 2s = 29.5（Step 4.22 #1）。
+	if !contains(body, `"speed_tps":29.5`) {
 		t.Fatalf("expected speed_tps in response body: %s", body)
 	}
 	if !contains(body, `"executor_type":"responses"`) {
@@ -689,6 +805,9 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.10"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.5, 198.51.100.8"),
+		UserAgent:           usageEventStringPtr("test-client/1.0"),
 		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
@@ -757,6 +876,10 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if !regexp.MustCompile(`(?m)^id,timestamp,api_key,cpa_api_key_id,source,source_type,auth_index,is_identity_deleted,model,model_alias,reasoning_effort,`).MatchString(body) {
 		t.Fatalf("expected model_alias to follow model in csv header, got %s", body)
 	}
+	// fork 口径：CSV 导出的 speed_tps 同样是可见 output 口径（29.5，Step 4.22 #1）。
+	if !contains(body, "speed_tps,client_ip,x_forwarded_for,user_agent,input_tokens") || !contains(body, ",29.5,192.0.2.10,\"203.0.113.5, 198.51.100.8\",test-client/1.0,10,") {
+		t.Fatalf("expected client metadata after speed in csv export, got %s", body)
+	}
 	if !contains(body, "service_tier,response_service_tier,executor_type") || !contains(body, ",auto,default,responses,") {
 		t.Fatalf("expected separate request and response service tiers in csv export, got %s", body)
 	}
@@ -771,6 +894,120 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	}
 }
 
+func TestUsageEventsExportCSVFormatsClientMetadataAsText(t *testing.T) {
+	provider := &usageEventsStub{exportEvents: []servicedto.UsageEventRecord{{
+		ID:            54,
+		Timestamp:     time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC),
+		ClientIP:      usageEventStringPtr("=1+1"),
+		XForwardedFor: usageEventStringPtr("+SUM(1,1)"),
+		UserAgent:     usageEventStringPtr("@HYPERLINK(\"https://example.invalid\")"),
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=csv", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	records, err := csv.NewReader(strings.NewReader(resp.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv export: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected header and one row, got %d records", len(records))
+	}
+	columnIndexes := map[string]int{}
+	for index, column := range records[0] {
+		columnIndexes[column] = index
+	}
+	for column, want := range map[string]string{
+		"client_ip":       "'=1+1",
+		"x_forwarded_for": "'+SUM(1,1)",
+		"user_agent":      "'@HYPERLINK(\"https://example.invalid\")",
+	} {
+		index, ok := columnIndexes[column]
+		if !ok {
+			t.Fatalf("expected %s column in csv header", column)
+		}
+		if got := records[1][index]; got != want {
+			t.Fatalf("expected %s to be exported as text %q, got %q", column, want, got)
+		}
+	}
+}
+
+func TestUsageEventsExportAllowsTwoConcurrentStreamsAndRejectsThird(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(releaseAll)
+
+	provider := &blockingUsageEventsExportStub{
+		usageEventsStub: &usageEventsStub{},
+		started:         make(chan struct{}, 3),
+		release:         release,
+	}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	type exportResult struct {
+		status int
+		body   string
+	}
+	results := make(chan exportResult, 3)
+	for range 3 {
+		go func() {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=csv", nil)
+			router.ServeHTTP(response, request)
+			results <- exportResult{status: response.Code, body: response.Body.String()}
+		}()
+	}
+
+	started := 0
+	rejected := false
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for started < 2 || !rejected {
+		select {
+		case <-provider.started:
+			started++
+			if started > 2 {
+				releaseAll()
+				t.Fatalf("expected at most two export streams to reach provider, got %d", started)
+			}
+		case result := <-results:
+			if result.status != http.StatusTooManyRequests {
+				releaseAll()
+				t.Fatalf("expected concurrent overflow status 429, got %d body=%s", result.status, result.body)
+			}
+			rejected = true
+		case <-deadline.C:
+			releaseAll()
+			t.Fatal("timed out waiting for two active exports and one rejection")
+		}
+	}
+
+	releaseAll()
+	for range 2 {
+		result := <-results
+		if result.status != http.StatusOK {
+			t.Fatalf("expected active export status 200, got %d body=%s", result.status, result.body)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=json", nil)
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected a later export to reuse a released slot, got %d body=%s", response.Code, response.Body.String())
+	}
+	if provider.calls.Load() != 3 {
+		t.Fatalf("expected exactly three provider streams after slot reuse, got %d", provider.calls.Load())
+	}
+}
+
 func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
 		ID:                  53,
@@ -780,6 +1017,9 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 		ModelAlias:          "gpt-json-alias",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.11"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.6"),
+		UserAgent:           usageEventStringPtr("json-client/1.0"),
 		ExecutorType:        "chat_completions",
 		Endpoint:            "GET /v1/responses",
 		AuthType:            "oauth",
@@ -831,6 +1071,9 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	}
 	if !contains(body, `"service_tier":"auto"`) || !contains(body, `"response_service_tier":"default"`) {
 		t.Fatalf("expected separate request and response service tiers in json export, got %s", body)
+	}
+	if !contains(body, `"client_ip":"192.0.2.11"`) || !contains(body, `"x_forwarded_for":"203.0.113.6"`) || !contains(body, `"user_agent":"json-client/1.0"`) {
+		t.Fatalf("expected client metadata in json export, got %s", body)
 	}
 	if contains(body, `"cached_tokens"`) || !contains(body, `"cache_read_tokens":3`) || !contains(body, `"cache_creation_tokens":4`) || !contains(body, `"cache_read_rate":33.33333333333333`) {
 		t.Fatalf("expected canonical cache token fields in json export, got %s", body)
@@ -1174,6 +1417,52 @@ func TestUsageEventsPassesPaginationAndAuthIndexSourceFilter(t *testing.T) {
 	}
 }
 
+func TestUsageEventsReturnsAndAcceptsCursorPagination(t *testing.T) {
+	eventTimestamp := time.Date(2026, 4, 22, 11, 0, 0, 123456789, time.UTC)
+	provider := &usageEventsStub{eventsPage: &servicedto.UsageEventsPage{
+		Events:     []servicedto.UsageEventRecord{{ID: 42, Timestamp: eventTimestamp, Model: "gpt-5"}},
+		TotalCount: 3,
+		Page:       1,
+		PageSize:   20,
+		HasMore:    true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	firstRequest := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h&page_size=20&cursor_mode=true", nil)
+	firstResponse := httptest.NewRecorder()
+	router.ServeHTTP(firstResponse, firstRequest)
+
+	if firstResponse.Code != http.StatusOK {
+		t.Fatalf("expected first cursor response status 200, got %d", firstResponse.Code)
+	}
+	var payload struct {
+		NextCursor string `json:"next_cursor"`
+		HasMore    bool   `json:"has_more"`
+	}
+	if err := json.Unmarshal(firstResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode cursor response: %v", err)
+	}
+	if !payload.HasMore || payload.NextCursor == "" {
+		t.Fatalf("expected next cursor metadata, got %s", firstResponse.Body.String())
+	}
+
+	secondRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/usage/events?range=24h&page_size=20&cursor="+url.QueryEscape(payload.NextCursor),
+		nil,
+	)
+	secondResponse := httptest.NewRecorder()
+	router.ServeHTTP(secondResponse, secondRequest)
+	if secondResponse.Code != http.StatusOK {
+		t.Fatalf("expected continuation response status 200, got %d", secondResponse.Code)
+	}
+	if !provider.lastFilter.CursorMode || provider.lastFilter.CursorTimestamp == nil || provider.lastFilter.CursorID != 42 {
+		t.Fatalf("expected decoded cursor filter, got %+v", provider.lastFilter)
+	}
+	if !provider.lastFilter.CursorTimestamp.Equal(eventTimestamp) {
+		t.Fatalf("expected cursor timestamp %s, got %s", eventTimestamp, provider.lastFilter.CursorTimestamp)
+	}
+}
+
 func TestUsageEventsPassesAuthFileIdentitySourceFilterAsAuthIndex(t *testing.T) {
 	provider := &usageEventsStub{eventsPage: &servicedto.UsageEventsPage{Events: []servicedto.UsageEventRecord{}, TotalCount: 0, Page: 1, PageSize: 100, TotalPages: 0}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
@@ -1253,6 +1542,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 			want: usageEventFloat64Ptr(30.5),
 		},
 		{
+			// fork 口径：speed 使用可见 output（扣除 reasoning），见 usageEventSpeedTPS（Step 4.22 #1）。
 			name: "uses visible output tokens after first token over generation duration",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:       2045,
@@ -1278,6 +1568,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 			},
 		},
 		{
+			// fork 口径：仅首 token（visible <= 1）时省略 speed。
 			name: "omits speed when only first token is present",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:    2045,
@@ -1292,6 +1583,13 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 				TTFTMS:          usageEventInt64Ptr(45),
 				OutputTokens:    4,
 				ReasoningTokens: 3,
+			},
+		},
+		{
+			name: "omits speed without output tokens",
+			row: servicedto.UsageEventRecord{
+				LatencyMS: 2045,
+				TTFTMS:    usageEventInt64Ptr(45),
 			},
 		},
 	}
@@ -1345,6 +1643,10 @@ func TestUsageEventSourceFilterOptionsReturnsIdentitySources(t *testing.T) {
 }
 
 func usageEventInt64Ptr(value int64) *int64 {
+	return &value
+}
+
+func usageEventStringPtr(value string) *string {
 	return &value
 }
 

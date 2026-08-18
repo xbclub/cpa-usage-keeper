@@ -263,6 +263,28 @@ func TestParseUsageFilterQueryRejectsCustomRangeBeforeRetentionStart(t *testing.
 	}
 }
 
+// TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays 对齐上游 #412/#421：
+// events 路径的 custom day range 上限 90 天（overview 路径仍走 LongCustomDayRangeMaxDays）。
+func TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays(t *testing.T) {
+	previousLocal := time.Local
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	t.Cleanup(func() { time.Local = previousLocal })
+	time.Local = location
+	anchor := time.Date(2026, 6, 16, 9, 0, 0, 0, location)
+
+	today := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, location)
+	start := today.AddDate(0, 0, -90)
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=custom&unit=day&start="+start.Format(time.DateOnly)+"&end="+today.Format(time.DateOnly), nil)
+
+	_, err = parseUsageFilterQuery(req, anchor)
+	if err == nil {
+		t.Fatal("expected 91-day custom Events range to be rejected")
+	}
+}
+
 func TestParseUsageFilterQueryRejectsMissingRange(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events", nil)
 
@@ -296,6 +318,33 @@ func TestParseUsageFilterQueryAcceptsEventsPaginationAndFilters(t *testing.T) {
 	}
 	if filter.Source != "source-a" || filter.AuthIndex != "2" {
 		t.Fatalf("expected trimmed server-side filters, got %+v", filter)
+	}
+}
+
+func TestParseUsageFilterQueryRejectsInvalidEventsCursor(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=24h&cursor=not-a-cursor", nil)
+	if _, err := parseUsageFilterQuery(req, time.Time{}); err == nil {
+		t.Fatal("expected invalid cursor error")
+	}
+}
+
+
+func TestParseUsageTimeFilterQueryIgnoresEventOnlyParameters(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=2d&page=0&page_size=25&model=x&source=y&auth_index=z&result=bogus&api_key_id=42", nil)
+	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+
+	filter, err := parseUsageTimeFilterQuery(req, anchor)
+	if err != nil {
+		t.Fatalf("time-only parser should ignore Events parameters: %v", err)
+	}
+	if filter.Range != "2d" || filter.RangeUnit != "day" || filter.RangeCount != 2 {
+		t.Fatalf("unexpected normalized time identity: %+v", filter)
+	}
+	if filter.APIKeyID != "42" {
+		t.Fatalf("expected Admin API key scope to remain available: %+v", filter)
+	}
+	if filter.Page != 0 || filter.PageSize != 0 || filter.Model != "" || filter.Source != "" || filter.AuthIndex != "" || filter.Result != "" {
+		t.Fatalf("time-only parser leaked Events fields: %+v", filter)
 	}
 }
 

@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,9 +21,19 @@ type pricingStub struct {
 	preview    servicedto.PricingSyncPreview
 	updated    *entities.ModelPriceSetting
 	lastUpdate *servicedto.UpdatePricingInput
+	batch      []entities.ModelPriceSetting
+	lastBatch  []servicedto.UpdatePricingInput
+	rules      []servicedto.PricingRule
+	lastRules  *servicedto.ReplacePricingRulesInput
 	deleted    string
 	err        error
 }
+
+type pricingTimeoutError struct{}
+
+func (pricingTimeoutError) Error() string   { return "net/http: TLS handshake timeout" }
+func (pricingTimeoutError) Timeout() bool   { return true }
+func (pricingTimeoutError) Temporary() bool { return true }
 
 func (s pricingStub) ListUsedModels(context.Context) ([]string, error) {
 	return s.usedModels, s.err
@@ -41,21 +52,23 @@ func (s *pricingStub) UpdatePricing(_ context.Context, input servicedto.UpdatePr
 	return s.updated, s.err
 }
 
+func (s *pricingStub) UpdatePricingBatch(_ context.Context, input []servicedto.UpdatePricingInput) ([]entities.ModelPriceSetting, error) {
+	s.lastBatch = input
+	return s.batch, s.err
+}
+
 func (s *pricingStub) DeletePricing(_ context.Context, model string) error {
 	s.deleted = model
 	return s.err
 }
 
-func (s *pricingStub) UpdatePricingBatch(_ context.Context, _ []servicedto.UpdatePricingInput) ([]entities.ModelPriceSetting, error) {
-	return nil, nil
-}
-
 func (s *pricingStub) ListPricingRules(context.Context, string) ([]servicedto.PricingRule, error) {
-	return nil, nil
+	return s.rules, s.err
 }
 
-func (s *pricingStub) ReplacePricingRules(_ context.Context, _ servicedto.ReplacePricingRulesInput) ([]servicedto.PricingRule, error) {
-	return nil, nil
+func (s *pricingStub) ReplacePricingRules(_ context.Context, input servicedto.ReplacePricingRulesInput) ([]servicedto.PricingRule, error) {
+	s.lastRules = &input
+	return s.rules, s.err
 }
 
 func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
@@ -148,6 +161,51 @@ func TestPricingSyncPreviewRoute(t *testing.T) {
 	}
 }
 
+func TestPricingSyncPreviewRouteReturnsGatewayTimeoutForUpstreamTimeout(t *testing.T) {
+	router := NewRouter(nil, nil, nil, &pricingStub{
+		err: fmt.Errorf("fetch pricing catalog: %w", context.DeadlineExceeded),
+	}, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pricing/sync/preview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusGatewayTimeout ||
+		!contains(resp.Body.String(), `"error":"Models.dev request timed out"`) {
+		t.Fatalf("unexpected pricing sync timeout response: %d %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestPricingSyncPreviewRouteReturnsGatewayTimeoutForNetworkTimeout(t *testing.T) {
+	router := NewRouter(nil, nil, nil, &pricingStub{
+		err: fmt.Errorf("fetch pricing catalog: %w", pricingTimeoutError{}),
+	}, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pricing/sync/preview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusGatewayTimeout ||
+		!contains(resp.Body.String(), `"error":"Models.dev request timed out"`) {
+		t.Fatalf("unexpected pricing sync network timeout response: %d %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestPricingSyncPreviewRouteKeepsNonTimeoutErrorsInternal(t *testing.T) {
+	router := NewRouter(nil, nil, nil, &pricingStub{
+		err: errors.New("decode pricing catalog: invalid character"),
+	}, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pricing/sync/preview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusInternalServerError ||
+		!contains(resp.Body.String(), `"error":"internal server error"`) {
+		t.Fatalf("unexpected pricing sync non-timeout response: %d %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestUpdatePricingRoutePreservesOpenAICacheWritePrice(t *testing.T) {
 	provider := &pricingStub{
 		updated: &entities.ModelPriceSetting{
@@ -221,6 +279,43 @@ func TestUpdatePricingRoute(t *testing.T) {
 	}
 }
 
+func TestBatchUpdatePricingRouteUsesOneProviderCall(t *testing.T) {
+	provider := &pricingStub{batch: []entities.ModelPriceSetting{
+		{Model: "model-a", PromptPricePer1M: 2},
+		{Model: "model-b", PromptPricePer1M: 3},
+	}}
+	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/batch", strings.NewReader(`{"pricing":[{"model":"model-a","prompt_price_per_1m":2},{"model":"model-b","prompt_price_per_1m":3}]}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK || !contains(resp.Body.String(), `"model":"model-a"`) || !contains(resp.Body.String(), `"model":"model-b"`) {
+		t.Fatalf("unexpected batch response: %d %s", resp.Code, resp.Body.String())
+	}
+	if len(provider.lastBatch) != 2 || provider.lastBatch[0].Model != "model-a" || provider.lastBatch[1].Model != "model-b" {
+		t.Fatalf("expected one two-model batch call, got %+v", provider.lastBatch)
+	}
+	if provider.lastUpdate != nil {
+		t.Fatalf("batch route must not call single update, got %+v", provider.lastUpdate)
+	}
+}
+
+func TestBatchUpdatePricingRouteMapsInvalidInputToBadRequest(t *testing.T) {
+	provider := &pricingStub{err: service.ErrInvalidPricingInput}
+	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/batch", strings.NewReader(`{"pricing":[{"model":"overflow-model","prompt_price_per_1m":1.7976931348623157e308}]}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid batch input to map to 400, got %d %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestUpdatePricingRouteAllowsZeroPriceMultiplier(t *testing.T) {
 	zero := 0.0
 	provider := &pricingStub{
@@ -260,6 +355,21 @@ func TestUpdatePricingRouteMapsPriceMultiplierValidationToBadRequest(t *testing.
 
 	if resp.Code != http.StatusBadRequest || !contains(resp.Body.String(), "price_multiplier must be non-negative") {
 		t.Fatalf("expected price multiplier validation to map to 400, got %d %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestUpdatePricingRouteMapsInvalidSnapshotInputToBadRequest(t *testing.T) {
+	provider := &pricingStub{err: service.ErrInvalidPricingInput}
+	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/overflow-model", strings.NewReader(`{"prompt_price_per_1m":1.7976931348623157e308}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected unsafe price input to map to 400, got %d %s", resp.Code, resp.Body.String())
 	}
 }
 
