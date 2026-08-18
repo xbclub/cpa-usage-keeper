@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"sed -n '834,839p' internal/repository/usage.go | cat -A\",\"description\":\"Check exact whitespace in target lines\"}",
-  "error": "Exit code 1\ncat: illegal option -- A\nusage: cat [-belnstuv] [file ...]",
-  "timestamp": "2026-06-12T03:01:54.851Z",
-  "retry_count": 1
-}
