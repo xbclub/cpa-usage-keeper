@@ -356,18 +356,27 @@ func applyUsageEventFilterOptionsQuery(query *gorm.DB, filter dto.UsageQueryFilt
 	return applyUsageQueryWindow(query, filter)
 }
 
+// applyUsageOverviewModelQueryFilter 应用 fork-unique 的 model 筛选(多选 IN / 单选 =),
+// 用于 events 列表、overview hourly/daily stats 与边界事件查询。
+// ⚠️ 只用于有 model 列的表;health stats(usage_overview_health_stats)无 model 列,禁止使用(Step 4.5 #4)。
+func applyUsageOverviewModelQueryFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+	if len(filter.Models) > 0 {
+		// multi-select 下拉用 IN 过滤（Step 4.17 #4）。
+		return query.Where("model IN ?", filter.Models)
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		return query.Where("model = ?", model)
+	}
+	return query
+}
+
 // Request Event Log 列表第一步：在时间窗口上叠加 model/auth_index/result。
 func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
 	query = applyUsageQueryWindow(query, filter)
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
-	if len(filter.Models) > 0 {
-		// multi-select 下拉用 IN 过滤（Step 4.17 #4）。
-		query = query.Where("model IN ?", filter.Models)
-	} else if model := strings.TrimSpace(filter.Model); model != "" {
-		query = query.Where("model = ?", model)
-	}
+	query = applyUsageOverviewModelQueryFilter(query, filter)
 	if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" {
 		// Source 下拉在 API 层已转换成 auth_index，仓储层只保留真实查询维度。
 		query = query.Where("auth_index = ?", authIndex)
@@ -1280,6 +1289,8 @@ func loadUsageOverviewEventRangeWithProjection(db *gorm.DB, filter dto.UsageQuer
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
+	// fork-unique model 筛选:与 recent-cache 内存过滤(usageOverviewRecentCacheEventMatchesModel)口径一致。
+	query = applyUsageOverviewModelQueryFilter(query, filter)
 	var rows []usageEventProjection
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load usage overview boundary event range: %w", err)

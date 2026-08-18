@@ -191,16 +191,15 @@ func TestAPIKeySummaryUsesModelAliasForPricing(t *testing.T) {
 	}
 }
 
-
 func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias string, pricedModel string, expectCost float64, expectAvailable bool) {
 	t.Helper()
 	db := openTestDatabase(t)
 	if pricedModel != "" {
 		if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
-			Model:             pricedModel,
-			PromptPricePer1M:  3,
+			Model:                pricedModel,
+			PromptPricePer1M:     3,
 			CompletionPricePer1M: 0,
-			CacheReadPricePer1M: 0,
+			CacheReadPricePer1M:  0,
 		}); err != nil {
 			t.Fatalf("UpsertModelPriceSetting %s: %v", pricedModel, err)
 		}
@@ -233,5 +232,64 @@ func runAPIKeySummaryPricingCase(t *testing.T, eventModel string, eventAlias str
 	}
 	if expectAvailable && item.CostUSD < expectCost-0.000001 || item.CostUSD > expectCost+0.000001 {
 		t.Fatalf("expected cost=%.6f, got %.6f", expectCost, item.CostUSD)
+	}
+}
+
+// TestOverviewStatsFilterByModel 验证 overview hourly/daily stats 查询尊重 filter.Models。
+// v1.12.0 合并(4683b60)时 service 层 Model 接线丢失 + stats 查询无 model 过滤,model 筛选静默失效约 2 个月;
+// 本测试钉住仓储层行为(service 接线由 verify-fork-invariants 的 splitUsageModelsFilter 符号守卫)。
+func TestOverviewStatsFilterByModel(t *testing.T) {
+	db := openTestDatabase(t)
+	hourStart := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+
+	// 插入 2 个模型的事件并触发聚合,让 hourly stats 表按 model 维度落行。
+	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
+		{EventKey: "stats-model-a", APIGroupKey: "provider-a", Model: "model-a", Timestamp: hourStart.Add(5 * time.Minute), InputTokens: 100, TotalTokens: 100},
+		{EventKey: "stats-model-b", APIGroupKey: "provider-a", Model: "model-b", Timestamp: hourStart.Add(6 * time.Minute), InputTokens: 200, TotalTokens: 200},
+	}); err != nil {
+		t.Fatalf("InsertUsageEvents: %v", err)
+	}
+	if err := AggregateUsageOverviewStats(context.Background(), db, hourStart.Add(2*time.Hour)); err != nil {
+		t.Fatalf("AggregateUsageOverviewStats: %v", err)
+	}
+
+	start := hourStart
+	end := hourStart.Add(time.Hour)
+	queryNow := end
+
+	// 多选 IN:只保留 model-a。
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{
+		Range:     "custom",
+		StartTime: &start,
+		EndTime:   &end,
+		Models:    []string{"model-a"},
+		QueryNow:  &queryNow,
+	}, pricingResolverFromDBForTest(t, db))
+	if err != nil {
+		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
+	}
+	if overview.Usage == nil {
+		t.Fatal("expected usage snapshot")
+	}
+	if overview.Usage.TotalRequests != 1 || overview.Usage.TotalTokens != 100 {
+		t.Fatalf("expected model-a only (1 request / 100 tokens), got %+v", overview.Usage)
+	}
+	if overview.Summary.InputTokens != 100 {
+		t.Fatalf("expected summary input tokens 100 (model-a only), got %d", overview.Summary.InputTokens)
+	}
+
+	// 单选 =:filter.Model 单值口径等价。
+	overviewSingle, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{
+		Range:     "custom",
+		StartTime: &start,
+		EndTime:   &end,
+		Model:     "model-b",
+		QueryNow:  &queryNow,
+	}, pricingResolverFromDBForTest(t, db))
+	if err != nil {
+		t.Fatalf("BuildUsageOverviewWithFilter (single model) returned error: %v", err)
+	}
+	if overviewSingle.Usage.TotalRequests != 1 || overviewSingle.Usage.TotalTokens != 200 {
+		t.Fatalf("expected model-b only (1 request / 200 tokens), got %+v", overviewSingle.Usage)
 	}
 }

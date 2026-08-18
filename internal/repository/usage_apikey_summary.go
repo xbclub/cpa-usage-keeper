@@ -188,6 +188,8 @@ func loadAPIKeySummaryHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, star
 	var rows []entities.UsageOverviewHourlyStat
 	query := db.Model(&entities.UsageOverviewHourlyStat{}).
 		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end))
+	// fork-unique model 筛选:API Key 汇总与主 Overview 口径一致(不按 api_group_key 过滤,按 key 分组)。
+	query = applyUsageOverviewModelQueryFilter(query, filter)
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load api key summary hourly stats: %w", err)
 	}
@@ -199,6 +201,7 @@ func loadAPIKeySummaryDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start
 	var rows []entities.UsageOverviewDailyStat
 	query := db.Model(&entities.UsageOverviewDailyStat{}).
 		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end))
+	query = applyUsageOverviewModelQueryFilter(query, filter)
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load api key summary daily stats: %w", err)
 	}

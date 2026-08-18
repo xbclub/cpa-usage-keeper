@@ -1032,6 +1032,8 @@ Merged upstream v1.14.5 (`d62cad3..498abd1`) — 4 PR, 48 文件,+2090/−299。
 
 9. **stash 在 OMC hooks 下依然危险(Step 4.21 #8 重申)。** 本轮为验证 lint warning 是否 pre-existing 用了一次 `git stash`/`stash pop`,往返成功但属侥幸。**基线对比改用 `git worktree add` 或直接读 HEAD 文件,不再 stash。**
 
+10. **⚠️ review 发现 overview model 筛选后端断链 2 个月(Step 4.6 #3 教训第 3 次重演,本次在 v1.12.0)。** `GetUsageOverview` 的 `Model: filter.Model` 在 v1.12.0 合并(4683b60,2026-06-24)时被上游重构静默抹掉,且新版 hourly/daily stats 查询(`loadUsageOverviewStatProjection`)从无 model WHERE → **前端 model 下拉(单选/多选)选了等于没选**。repo 层 `Models IN` 逻辑与 `p0_model_filter_test.go` 全绿(recent-cache 路径有过滤)——又一次"code exists ≠ wired",且 **Gate 2(vs upstream diff)抓不到"变少"的丢失**(丢失让 fork 更像 upstream)。**修复 4 处:** service `GetUsageOverview` 传 `Model + Models: splitUsageModelsFilter(filter.Model)`(新 helper 拆逗号);repo 新 helper `applyUsageOverviewModelQueryFilter`(Models IN / Model =)注入 ①`loadUsageOverviewStatProjection`(hourly+daily stats)②`loadUsageOverviewEventRangeWithProjection`(边界事件 DB 路径)③`loadAPIKeySummaryHourlyStats/DailyStats`(API Key 汇总同口径)④`applyUsageEventListQuery`(重构成调 helper)。**守卫三层:** `TestOverviewStatsFilterByModel`(p0 fork-only,经聚合管线端到端断言 totals)、`TestSplitUsageModelsFilter`(service 拆分)、invariants [4] 新增 5 个接线符号(含 `Models: splitUsageModelsFilter` 这种"接线行"级别的符号,专抓 wiring 丢失)。**教训:fork-unique 的接线行(字段传递/调用点)必须进 invariants 符号清单,只查函数存在抓不到 wiring 断裂;health stats 无 model 列的限制依旧(Step 4.22 #14 skip)。**
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。

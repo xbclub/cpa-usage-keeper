@@ -80,6 +80,22 @@ func (s *usageService) ListOverviewModels(_ context.Context, filter servicedto.U
 	})
 }
 
+// splitUsageModelsFilter 把前端多选 model 筛选的逗号串拆成去空白的模型列表；
+// 空串返回 nil(仓储层据此跳过 model 过滤)。单选值拆出长度 1 的切片,与单选 = 口径等价。
+func splitUsageModelsFilter(value string) []string {
+	parts := strings.Split(value, ",")
+	models := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if model := strings.TrimSpace(part); model != "" {
+			models = append(models, model)
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
+}
+
 // Usage 页面里的 Overview tab 下传时间窗口和全局 API-Key，仓储层负责构建 overview 聚合。
 func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	ctx = usageServiceContext(ctx)
@@ -95,6 +111,10 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 		EndExclusive: filter.EndExclusive,
 		QueryNow:     filter.QueryNow,
 		APIGroupKey:  apiGroupKey,
+		// fork-unique model 筛选:前端多选下拉把逗号串放在 filter.Model,
+		// 这里拆成 Models 走仓储层 model IN 过滤(v1.12.0 合并时此接线丢失,review 修复)。
+		Model:  filter.Model,
+		Models: splitUsageModelsFilter(filter.Model),
 	}, s.recentUsage, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err

@@ -81,6 +81,8 @@ func loadUsageOverviewStatProjection(query *gorm.DB, filter dto.UsageQueryFilter
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
+	// fork-unique model 筛选:stats 表按 model 维度存行,直接 WHERE 过滤(Step 4.5 #4)。
+	query = applyUsageOverviewModelQueryFilter(query, filter)
 	if err := query.Group(strings.Join(dimensionColumns, ", ")).Order("bucket_start asc").Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load usage overview %s projection: %w", grain, err)
 	}
