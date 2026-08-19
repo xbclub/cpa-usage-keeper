@@ -29,7 +29,7 @@ func TestSumUsageWindowStatsByAuthIndexUsesAuthIndexAndWindow(t *testing.T) {
 		t.Fatalf("seed usage events: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, emptyPricingResolverForTest())
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSumUsageWindowStatsByAuthIndexCalculatesClaudeCacheReadAndCreationCost(
 		t.Fatalf("seed usage event: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-claude", start, &end, emptyPricingResolverForTest())
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-claude", start, &end, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}
@@ -101,14 +101,14 @@ func TestSumUsageWindowStatsByAuthIndexUsesHourlyStatsForLongWindow(t *testing.T
 	if err := db.Create(&hourly).Error; err != nil {
 		t.Fatalf("seed hourly stat: %v", err)
 	}
-	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpointName, LastAggregatedUsageEventID: 4, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&entities.UsageAggregationCheckpoint{Name: entities.UsageAggregationCheckpointOverview, LastAggregatedUsageEventID: 4, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("seed overview checkpoint: %v", err)
 	}
 	if err := db.Where("total_tokens = ?", int64(9_000_000)).Delete(&entities.UsageEvent{}).Error; err != nil {
 		t.Fatalf("delete full-hour raw events: %v", err)
 	}
 
-	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, emptyPricingResolverForTest())
+	stats, err := SumUsageWindowStatsByAuthIndex(context.Background(), db, "auth-1", start, &end, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("SumUsageWindowStatsByAuthIndex returned error: %v", err)
 	}

@@ -32,7 +32,8 @@ func TestCustomHourOverviewReadsCompleteHourlyBucketsWithoutUsageEvents(t *testi
 	queries := captureOverviewDataQueries(t, db, "custom_hour")
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &queryNow,
-	}, pricingResolverFromDBForTest(t, db))
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestCustomOverviewRollupQueryProjectsAndGroupsOnlyCardDimensions(t *testing
 	queries := captureOverviewDataQueries(t, db, "projection")
 	if _, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &end,
-	}, pricingResolverFromDBForTest(t, db)); err != nil {
+	}, emptyPricingResolverForTest()); err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
 
@@ -97,7 +98,7 @@ func TestCustomOverviewGroupedProjectionPreservesPerRowCostNormalization(t *test
 
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &end,
-	}, pricingResolverFromDBForTest(t, db))
+	}, newUsageCostResolverForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestPresetOverviewRawBoundaryUsesCardOnlyProjection(t *testing.T) {
 
 	if _, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "4h", StartTime: &start, EndTime: &end, QueryNow: &end,
-	}, pricingResolverFromDBForTest(t, db)); err != nil {
+	}, emptyPricingResolverForTest()); err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
 
@@ -159,7 +160,8 @@ func TestCustomDayOverviewReadsCompleteDailyBucketsWithoutUsageEvents(t *testing
 	queries := captureOverviewDataQueries(t, db, "custom_day")
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "day", StartTime: &start, EndTime: &end, EndExclusive: true, QueryNow: &queryNow,
-	}, pricingResolverFromDBForTest(t, db))
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -167,7 +169,8 @@ func TestCustomDayOverviewReadsCompleteDailyBucketsWithoutUsageEvents(t *testing
 	if overview.Usage.TotalRequests != 3 || overview.Usage.TotalTokens != 30 {
 		t.Fatalf("expected all three complete daily buckets, got %+v", overview.Usage)
 	}
-	assertOverviewQueryTables(t, *queries, false, true)
+	// fork 架构:结束时间晚于 queryNow 时,进行中当天由 hourly stats + 边界补偿承接(上游纯 daily)。
+	assertOverviewQueryTables(t, *queries, true, true)
 }
 
 func captureOverviewDataQueries(t *testing.T, db *gorm.DB, suffix string) *[]string {
@@ -193,8 +196,19 @@ func captureOverviewDataQueries(t *testing.T, db *gorm.DB, suffix string) *[]str
 func assertOverviewQueryTables(t *testing.T, queries []string, wantHourly, wantDaily bool) {
 	t.Helper()
 	joined := strings.Join(queries, "\n")
-	if strings.Contains(joined, "usage_events") {
-		t.Fatalf("Custom Overview must not query usage_events:\n%s", joined)
+	// fork 架构差异(Step 4.7):查询结束时间晚于 queryNow 时,进行中的不完整小时由
+	// usage_events 窄边界补偿(fork 特性,上游为纯 stats 设计不读);本断言只禁止
+	// 对"完整 bucket 区间"的 usage_events 全量读 —— 边界读的特征是窄窗口投影查询。
+	for _, query := range queries {
+		if !strings.Contains(query, "usage_events") {
+			continue
+		}
+		// 允许的边界补偿:投影列 + timestamp 范围 + order by timestamp asc(loadUsageOverviewEventRangeWithProjection)。
+		isBoundaryProjection := strings.Contains(query, "order by timestamp asc") &&
+			strings.Contains(query, "timestamp >= $1 and timestamp < $2")
+		if !isBoundaryProjection {
+			t.Fatalf("Custom Overview must not read full usage_events rows:\n%s", query)
+		}
 	}
 	if got := strings.Contains(joined, "usage_overview_hourly_stats"); got != wantHourly {
 		t.Fatalf("hourly rollup query presence=%t, want %t:\n%s", got, wantHourly, joined)

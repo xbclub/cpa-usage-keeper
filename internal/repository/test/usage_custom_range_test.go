@@ -6,17 +6,17 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 )
 
 func TestListUsageEventsExcludesCustomRangeEndBoundary(t *testing.T) {
-	db := openTestDatabase(t)
-	
+	db := testutil.OpenTestDatabase(t)
 	start := time.Date(2026, 7, 17, 10, 0, 0, 0, time.Local)
 	end := time.Date(2026, 7, 17, 16, 0, 0, 0, time.Local)
 	events := []entities.UsageEvent{
 		{EventKey: "at-start", Model: "gpt-5", Timestamp: start, TotalTokens: 10},
-		{EventKey: "before-end", Model: "gpt-5", Timestamp: end.Add(-time.Nanosecond), TotalTokens: 20},
+		{EventKey: "before-end", Model: "gpt-5", Timestamp: end.Add(-time.Microsecond), TotalTokens: 20},
 		{EventKey: "at-end", Model: "gpt-5", Timestamp: end, TotalTokens: 30},
 	}
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
@@ -27,6 +27,7 @@ func TestListUsageEventsExcludesCustomRangeEndBoundary(t *testing.T) {
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true,
 		Page: 1, PageSize: 20,
 	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -41,8 +42,7 @@ func TestListUsageEventsExcludesCustomRangeEndBoundary(t *testing.T) {
 }
 
 func TestBuildAnalysisUsesCustomHourRollupsWithoutUsageEvents(t *testing.T) {
-	db := openTestDatabase(t)
-	
+	db := testutil.OpenTestDatabase(t)
 	start := time.Date(2026, 7, 17, 10, 0, 0, 0, time.Local)
 	end := time.Date(2026, 7, 17, 16, 0, 0, 0, time.Local)
 	selectedEndHour := end.Add(-time.Hour)
@@ -61,7 +61,8 @@ func TestBuildAnalysisUsesCustomHourRollupsWithoutUsageEvents(t *testing.T) {
 
 	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true,
-	}, pricingResolverFromDBForTest(t, db))
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
 	}

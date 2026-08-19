@@ -2,18 +2,30 @@ package test
 
 import (
 	"context"
-		"testing"
+	"testing"
 	"time"
 
-		"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
-	"cpa-usage-keeper/internal/testutil"
 	repositorydto "cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
+
+type recordingUsageHeaderSnapshotAppender struct {
+	calls     int
+	snapshots []quota.UsageHeaderSnapshot
+}
+
+func (a *recordingUsageHeaderSnapshotAppender) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+	// Header 接收方和聚合 notifier 独立，测试保留原始批次顺序和重复身份。
+	a.calls++
+	a.snapshots = append(a.snapshots, snapshots...)
+	return true
+}
 
 type recordingUsageAggregationNotifier struct {
 	// usageCalls 记录 usage 事务提交后的通知次数。
@@ -32,7 +44,7 @@ func (n *recordingUsageAggregationNotifier) NotifyUsageEventsCommitted(events []
 	// events 必须已经带有数据库分配的自增 ID。
 	n.events = append(n.events, events...)
 	// snapshots 只包含本批真正提交事件对应的值。
-	
+
 }
 
 func (n *recordingUsageAggregationNotifier) NotifyUsageIdentitiesChanged() {
@@ -58,17 +70,18 @@ func TestProcessRedisUsageInboxReturnsAfterCommitWithoutSynchronousAggregation(t
 		}`,
 		PoppedAt: now,
 	}})
-	
+
 	notifier := &recordingUsageAggregationNotifier{}
+	headerAppender := &recordingUsageHeaderSnapshotAppender{}
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		BaseURL:                  "https://cpa.example.com",
 		Now:                      func() time.Time { return now },
 		UsageAggregationNotifier: notifier,
+		UsageHeaderQuota:         headerAppender,
 	})
 
 	// 执行：处理 inbox；返回前只允许提交 usage_events、processed 状态和内存通知。
 	result, _ := syncService.ProcessRedisUsageInbox(context.Background())
-	
 
 	// 断言：前台结果保持成功，notifier 收到带 ID 的事件，但旧 Overview 仍等待后台 runner。
 	if result == nil || result.Status != "completed" || result.InsertedEvents != 1 {
@@ -77,8 +90,8 @@ func TestProcessRedisUsageInboxReturnsAfterCommitWithoutSynchronousAggregation(t
 	if notifier.usageCalls != 1 || len(notifier.events) != 1 || notifier.events[0].ID <= 0 {
 		t.Fatalf("expected one committed event notification with ID, got calls=%d events=%+v", notifier.usageCalls, notifier.events)
 	}
-	if len(notifier.snapshots) != 1 || notifier.snapshots[0].AuthIndex != "auth-a" {
-		t.Fatalf("expected committed header snapshot notification, got %+v", notifier.snapshots)
+	if len(headerAppender.snapshots) != 1 || headerAppender.snapshots[0].AuthIndex != "auth-a" {
+		t.Fatalf("expected committed header snapshot notification, got %+v", headerAppender.snapshots)
 	}
 	var inbox entities.RedisUsageInbox
 	if err := db.First(&inbox, rows[0].ID).Error; err != nil {
@@ -102,7 +115,6 @@ func TestProcessRedisUsageInboxEmptyBatchKeepsLegacyCatchUpWithoutNotifier(t *te
 
 	// 执行：空 inbox 轮次通过兼容 fallback 追平旧 Overview 和新 Activity。
 	result, _ := syncService.ProcessRedisUsageInbox(context.Background())
-	
 
 	// 断言：原有 empty 信号保留，同时兼容路径不能相对 main 静默停止聚合。
 	if result == nil || !result.Empty || result.ProcessedRows != 0 {

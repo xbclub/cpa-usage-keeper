@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
 
 func TestAggregateUsageOverviewStatsAggregatesIncrementallyAndIdempotently(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	defer closeTestDatabase(t, db)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 
@@ -44,7 +45,7 @@ func TestAggregateUsageOverviewStatsAggregatesIncrementallyAndIdempotently(t *te
 }
 
 func TestAggregateUsageOverviewStatsSplitsHourlyAndDailyByAuthIndexAndModelAlias(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	defer closeTestDatabase(t, db)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	modelAlias := "alias-a"
@@ -86,7 +87,7 @@ func TestAggregateUsageOverviewStatsSplitsHourlyAndDailyByAuthIndexAndModelAlias
 }
 
 func TestAggregateUsageOverviewStatsNormalizesBlankDimensionsWithoutWritingActivity(t *testing.T) {
-	db := openTestDatabase(t)
+	db := testutil.OpenTestDatabase(t)
 	defer closeTestDatabase(t, db)
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 
@@ -178,8 +179,8 @@ func assertUsageOverviewStatValues(t *testing.T, label string, gotRequestCount, 
 
 func assertUsageOverviewCheckpoint(t *testing.T, db *gorm.DB, wantLastID int64) {
 	t.Helper()
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
-	if err := db.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
+	var checkpoint entities.UsageAggregationCheckpoint
+	if err := db.Where("name = ?", entities.UsageAggregationCheckpointOverview).First(&checkpoint).Error; err != nil {
 		t.Fatalf("load overview checkpoint: %v", err)
 	}
 	if checkpoint.LastAggregatedUsageEventID != wantLastID || checkpoint.StatsUpdatedAt == nil {

@@ -195,7 +195,9 @@ func TestRequestLogServiceCoalescesConcurrentPreviewMisses(t *testing.T) {
 		}(eventID)
 	}
 	<-client.started
-	time.Sleep(20 * time.Millisecond)
+	// 远程 PG 适配:第二个并发请求的 DB 查找回程可达几十毫秒,20ms 窗口(上游按本地
+	// SQLite 调校)会让它错过 still-in-flight 的合并窗口;放大到 300ms 保住合并语义。
+	time.Sleep(300 * time.Millisecond)
 	close(client.block)
 	wg.Wait()
 	close(errs)

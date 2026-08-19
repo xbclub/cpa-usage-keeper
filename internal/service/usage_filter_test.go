@@ -11,11 +11,15 @@ import (
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
-	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
+
+func emptyPricingCatalogForTest() *pricing.Catalog {
+	return pricing.NewCatalog(pricing.EmptySnapshot())
+}
 
 func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 	previousLocal := time.Local
@@ -27,7 +31,6 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 	time.Local = location
 
 	db := testutil.OpenTestDatabase(t)
-	
 	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
@@ -48,7 +51,11 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 0, time.UTC)
-	provider := NewUsageService(db, emptyPricingCatalogForTest())
+	pricingSnapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatalf("LoadPricingSnapshot returned error: %v", err)
+	}
+	provider := NewUsageServiceWithOptions(db, UsageServiceOptions{PricingCatalog: pricing.NewCatalog(pricingSnapshot)})
 	overview, err := provider.GetUsageOverview(context.Background(), servicedto.UsageFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("GetUsageOverview returned error: %v", err)
@@ -78,7 +85,6 @@ func TestUsageServiceGetUsageOverviewUsesRecentCacheForBoundaries(t *testing.T) 
 	time.Local = location
 
 	db := testutil.OpenTestDatabase(t)
-	
 
 	now := time.Date(2026, 6, 10, 12, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -108,7 +114,6 @@ func TestUsageServiceGetUsageOverviewUsesRecentCacheForBoundaries(t *testing.T) 
 
 func TestUsageServiceGetUsageOverviewRealtimeUsesRecentCache(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	
 
 	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	cache := newServiceRecentCacheFromEvents(t, db, now, []entities.UsageEvent{{
@@ -142,7 +147,6 @@ func TestUsageServiceGetUsageOverviewRealtimeUsesRecentCache(t *testing.T) {
 
 func TestUsageServiceGetUsageOverviewRealtimeResolvesAPIKeyIDForRecentCache(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-target-key", "sk-other-key"}, time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("SyncCPAAPIKeys returned error: %v", err)
 	}
@@ -184,7 +188,6 @@ func TestUsageServiceGetUsageOverviewRealtimeResolvesAPIKeyIDForRecentCache(t *t
 
 func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-target-key", "sk-other-key"}, time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("SyncCPAAPIKeys returned error: %v", err)
 	}
@@ -241,7 +244,6 @@ func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
 
 func TestUsageServiceRejectsInvalidAPIKeyID(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	
 	provider := NewUsageService(db, emptyPricingCatalogForTest())
 
 	_, err := provider.ListUsageEvents(context.Background(), servicedto.UsageFilter{APIKeyID: "not-an-id", Page: 1, PageSize: 100, Limit: 100})
@@ -252,7 +254,6 @@ func TestUsageServiceRejectsInvalidAPIKeyID(t *testing.T) {
 
 func TestUsageServiceRejectsDeletedAPIKeyID(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	
 	if err := repository.SyncCPAAPIKeys(db, []string{"sk-deleted-key"}, time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("SyncCPAAPIKeys returned error: %v", err)
 	}
@@ -268,8 +269,7 @@ func TestUsageServiceRejectsDeletedAPIKeyID(t *testing.T) {
 	}
 	provider := NewUsageService(db, emptyPricingCatalogForTest())
 
-	_, err = provider.GetUsageOverview(context.Background(), servicedto.UsageFilter{APIKeyID: strconv.FormatInt(activeKeys[0].ID, 10)})
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, err := provider.GetUsageOverview(context.Background(), servicedto.UsageFilter{APIKeyID: strconv.FormatInt(activeKeys[0].ID, 10)}); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected deleted key to return record not found, got %v", err)
 	}
 }
@@ -285,9 +285,4 @@ func newServiceRecentCacheFromEvents(t *testing.T, db *gorm.DB, now time.Time, e
 	}
 	t.Cleanup(cache.Close)
 	return cache
-}
-
-// emptyPricingCatalogForTest 返回基于空快照的定价 catalog，供不需要真实价格数据的测试使用。
-func emptyPricingCatalogForTest() *pricing.Catalog {
-	return pricing.NewCatalog(pricing.EmptySnapshot())
 }

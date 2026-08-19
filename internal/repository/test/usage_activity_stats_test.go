@@ -31,8 +31,8 @@ func TestAggregateUsageActivityStatsUsesIndependentCheckpointAndCanonicalTokens(
 		t.Fatalf("insert usage events: %v", err)
 	}
 
-	// Overview checkpoint 使用无关 sentinel，证明 Activity 不读取或推进它。
-	overviewCheckpoint := entities.UsageOverviewAggregationCheckpoint{Name: "overview", LastAggregatedUsageEventID: 777}
+	// Overview 行使用无关 sentinel，证明 Activity 只推进通用表中的自己那一行。
+	overviewCheckpoint := entities.UsageAggregationCheckpoint{Name: entities.UsageAggregationCheckpointOverview, LastAggregatedUsageEventID: 777}
 	if err := db.Create(&overviewCheckpoint).Error; err != nil {
 		t.Fatalf("seed overview checkpoint: %v", err)
 	}
@@ -59,15 +59,15 @@ func TestAggregateUsageActivityStatsUsesIndependentCheckpointAndCanonicalTokens(
 	assertRepositoryUsageActivityTotals(t, db, entities.UsageActivityGrainDaily, repositoryUsageActivityTotals{Success: 3, Failure: 1, Input: 1000, Output: 140, Reasoning: 26, CacheRead: 100, CacheCreation: 18, Total: 1284})
 
 	// Activity checkpoint 必须独立推进到最后一个 event ID。
-	var activityCheckpoint entities.UsageActivityAggregationCheckpoint
-	if err := db.Where("name = ?", "activity").Take(&activityCheckpoint).Error; err != nil {
+	var activityCheckpoint entities.UsageAggregationCheckpoint
+	if err := db.Where("name = ?", entities.UsageAggregationCheckpointActivity).Take(&activityCheckpoint).Error; err != nil {
 		t.Fatalf("load activity checkpoint: %v", err)
 	}
 	if activityCheckpoint.LastAggregatedUsageEventID != 4 {
 		t.Fatalf("expected activity checkpoint 4, got %+v", activityCheckpoint)
 	}
-	var unchangedOverview entities.UsageOverviewAggregationCheckpoint
-	if err := db.Where("name = ?", "overview").Take(&unchangedOverview).Error; err != nil {
+	var unchangedOverview entities.UsageAggregationCheckpoint
+	if err := db.Where("name = ?", entities.UsageAggregationCheckpointOverview).Take(&unchangedOverview).Error; err != nil {
 		t.Fatalf("load overview checkpoint: %v", err)
 	}
 	if unchangedOverview.LastAggregatedUsageEventID != 777 {
@@ -142,20 +142,22 @@ func TestAggregateUsageActivityStatsStoresDSTFallbackBucketByInstantOrder(t *tes
 	if !row.BucketStart.Equal(fallbackBucket.Start) || !row.BucketEnd.Equal(fallbackBucket.End) {
 		t.Fatalf("unexpected fallback Activity bounds: got=%s..%s want=%s..%s", row.BucketStart, row.BucketEnd, fallbackBucket.Start, fallbackBucket.End)
 	}
-	// 断言：底层文本必须是固定宽度 UTC，保证 CHECK、索引范围和 retention 使用同一 instant 顺序。
+	// PG 适配:SQLite 用 CAST AS TEXT 比存储文本格式;PG timestamptz 是二进制存储、
+	// 文本投影格式天然不同 —— 改为读回原始列并断言规范化 instant 等价(CHECK/索引/retention
+	// 依赖的同一 instant 顺序由值等价保证)。
 	var storedBounds struct {
-		BucketStart string
-		BucketEnd   string
+		BucketStart time.Time
+		BucketEnd   time.Time
 	}
-	// CAST 绕过 SQLite driver 对 datetime 的 time.Time 格式化，读取数据库实际保存的 TEXT。
-	if err := db.Table("usage_activity_stats").Select("CAST(bucket_start AS TEXT) AS bucket_start, CAST(bucket_end AS TEXT) AS bucket_end").Where("id = ?", row.ID).Scan(&storedBounds).Error; err != nil {
+	if err := db.Table("usage_activity_stats").Select("bucket_start, bucket_end").Where("id = ?", row.ID).Scan(&storedBounds).Error; err != nil {
 		t.Fatalf("load raw fallback Activity bounds: %v", err)
 	}
-	if storedBounds.BucketStart != timeutil.FormatSortableStorageTime(fallbackBucket.Start) || storedBounds.BucketEnd != timeutil.FormatSortableStorageTime(fallbackBucket.End) {
-		t.Fatalf("unexpected stored fallback bounds: got=%s..%s", storedBounds.BucketStart, storedBounds.BucketEnd)
+	if !timeutil.NormalizeStorageTime(storedBounds.BucketStart).Equal(timeutil.NormalizeStorageTime(fallbackBucket.Start)) ||
+		!timeutil.NormalizeStorageTime(storedBounds.BucketEnd).Equal(timeutil.NormalizeStorageTime(fallbackBucket.End)) {
+		t.Fatalf("unexpected stored fallback bounds: got=%s..%s want=%s..%s", storedBounds.BucketStart, storedBounds.BucketEnd, fallbackBucket.Start, fallbackBucket.End)
 	}
-	var checkpoint entities.UsageActivityAggregationCheckpoint
-	if err := db.Where("name = ?", "activity").Take(&checkpoint).Error; err != nil {
+	var checkpoint entities.UsageAggregationCheckpoint
+	if err := db.Where("name = ?", entities.UsageAggregationCheckpointActivity).Take(&checkpoint).Error; err != nil {
 		t.Fatalf("load fallback Activity checkpoint: %v", err)
 	}
 	if checkpoint.LastAggregatedUsageEventID != 1 {

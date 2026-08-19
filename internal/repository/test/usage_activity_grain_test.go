@@ -1,13 +1,14 @@
 package test
 
 import (
-		"reflect"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
 
-		"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
@@ -154,17 +155,18 @@ func TestUsageActivityDailyGrainUsesNextLocalMidnight(t *testing.T) {
 }
 
 func TestOpenDatabaseCreatesUsageActivitySchema(t *testing.T) {
-	// 准备：为 fresh database 分配独立 SQLite 文件。
-	
-	// 执行：通过生产 OpenDatabase 路径创建最终 schema 和索引。
-	db := openTestDatabase(t)
+	// PG 适配:testutil 经 DSN search_path 建隔离 schema 并按 entities.All AutoMigrate(与生产 OpenDatabase 同一契约)。
+	db := testutil.OpenTestDatabase(t)
 
-	// 断言：Activity 两张表、精确字段集合和三个索引顺序都符合数据契约。
+	// 断言：Activity stats 与通用 checkpoint 表、精确字段集合和三个索引顺序都符合数据契约。
 	if !db.Migrator().HasTable(&entities.UsageActivityStat{}) {
 		t.Fatal("expected usage_activity_stats table")
 	}
-	if !db.Migrator().HasTable(&entities.UsageActivityAggregationCheckpoint{}) {
-		t.Fatal("expected usage_activity_aggregation_checkpoints table")
+	if !db.Migrator().HasTable(&entities.UsageAggregationCheckpoint{}) {
+		t.Fatal("expected usage_aggregation_checkpoints table")
+	}
+	if db.Migrator().HasTable(&entities.UsageActivityAggregationCheckpoint{}) {
+		t.Fatal("did not expect legacy usage_activity_aggregation_checkpoints table")
 	}
 
 	columnTypes, err := db.Migrator().ColumnTypes(&entities.UsageActivityStat{})
@@ -206,12 +208,19 @@ func TestOpenDatabaseCreatesUsageActivitySchema(t *testing.T) {
 
 func assertUsageActivityIndexColumns(t *testing.T, db *gorm.DB, name string, wantColumns []string, wantUnique bool) {
 	t.Helper()
+	// PG 目录版(Step 4.23 #4 范式):pg_index + unnest ORDINALITY,current_schema 过滤防跨 schema 污染。
 	type indexListRow struct {
-		Name   string `gorm:"column:name"`
-		Unique int    `gorm:"column:unique"`
+		Name     string `gorm:"column:name"`
+		IsUnique bool   `gorm:"column:is_unique"`
 	}
 	var indexes []indexListRow
-	if err := db.Raw("PRAGMA index_list(usage_activity_stats)").Scan(&indexes).Error; err != nil {
+	if err := db.Raw(`
+SELECT i.relname AS name, ix.indisunique AS is_unique
+FROM pg_index ix
+JOIN pg_class c ON c.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relname = 'usage_activity_stats' AND n.nspname = current_schema()`).Scan(&indexes).Error; err != nil {
 		t.Fatalf("list activity indexes: %v", err)
 	}
 	found := false
@@ -220,8 +229,8 @@ func assertUsageActivityIndexColumns(t *testing.T, db *gorm.DB, name string, wan
 			continue
 		}
 		found = true
-		if (index.Unique == 1) != wantUnique {
-			t.Fatalf("index %s unique=%v, want %v", name, index.Unique == 1, wantUnique)
+		if index.IsUnique != wantUnique {
+			t.Fatalf("index %s unique=%v, want %v", name, index.IsUnique, wantUnique)
 		}
 	}
 	if !found {
@@ -233,7 +242,16 @@ func assertUsageActivityIndexColumns(t *testing.T, db *gorm.DB, name string, wan
 		Name  string `gorm:"column:name"`
 	}
 	var rows []indexInfoRow
-	if err := db.Raw("PRAGMA index_info(" + name + ")").Scan(&rows).Error; err != nil {
+	if err := db.Raw(`
+SELECT a.attname AS name, u.ord AS seqno
+FROM pg_index ix
+JOIN pg_class c ON c.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN unnest(ix.indkey::int[]) WITH ORDINALITY AS u(attnum, ord) ON true
+JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = u.attnum
+WHERE i.relname = ? AND n.nspname = current_schema()
+ORDER BY u.ord`, name).Scan(&rows).Error; err != nil {
 		t.Fatalf("load index %s columns: %v", name, err)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].SeqNo < rows[j].SeqNo })

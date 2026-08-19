@@ -100,7 +100,7 @@ func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 	if inbox.Status != repository.RedisUsageInboxStatusProcessed || inbox.UsageEventKey != "process-only" {
 		t.Fatalf("expected processed inbox row without snapshot link, got %+v", inbox)
 	}
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
+	var checkpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
 		t.Fatalf("expected overview aggregation checkpoint after processing inbox: %v", err)
 	}
@@ -291,93 +291,10 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterOverviewAggregation(
 	}
 }
 
-func TestProcessRedisUsageInboxCoalescesUsageHeaderQuotaSnapshotsByAuthIndex(t *testing.T) {
-	db := openSyncTestDatabase(t)
-	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
-		{
-			Source: redisUsageInboxTestSource,
-			RawMessage: `{
-				"timestamp":"2026-06-22T11:00:00+08:00",
-				"provider":"codex",
-				"auth_type":"oauth",
-				"auth_index":"codex-auth",
-				"model":"gpt-5.5",
-				"request_id":"header-quota-old",
-				"tokens":{"input_tokens":1,"output_tokens":2},
-				"response_headers":{
-					"X-Codex-Primary-Used-Percent":["4"],
-					"X-Codex-Primary-Window-Minutes":["300"],
-					"X-Codex-Primary-Reset-After-Seconds":["60"]
-				}
-			}`,
-			PoppedAt: time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local),
-		},
-		{
-			Source: redisUsageInboxTestSource,
-			RawMessage: `{
-				"timestamp":"2026-06-22T11:02:00+08:00",
-				"provider":"codex",
-				"auth_type":"oauth",
-				"auth_index":"codex-auth",
-				"model":"gpt-5.5",
-				"request_id":"header-quota-new",
-				"tokens":{"input_tokens":1,"output_tokens":2},
-				"response_headers":{
-					"X-Codex-Primary-Used-Percent":["8"],
-					"X-Codex-Primary-Window-Minutes":["300"],
-					"X-Codex-Primary-Reset-After-Seconds":["60"]
-				}
-			}`,
-			PoppedAt: time.Date(2026, 6, 22, 11, 2, 0, 0, time.Local),
-		},
-		{
-			Source: redisUsageInboxTestSource,
-			RawMessage: `{
-				"timestamp":"2026-06-22T11:01:00+08:00",
-				"provider":"codex",
-				"auth_type":"oauth",
-				"auth_index":"other-codex-auth",
-				"model":"gpt-5.5",
-				"request_id":"header-quota-other",
-				"tokens":{"input_tokens":1,"output_tokens":2},
-				"response_headers":{
-					"X-Codex-Primary-Used-Percent":["20"],
-					"X-Codex-Primary-Window-Minutes":["300"],
-					"X-Codex-Primary-Reset-After-Seconds":["60"]
-				}
-			}`,
-			PoppedAt: time.Date(2026, 6, 22, 11, 1, 0, 0, time.Local),
-		},
-	}); err != nil {
-		t.Fatalf("seed inbox rows: %v", err)
-	}
-	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
-	})
+// TestProcessRedisUsageInboxCoalescesUsageHeaderQuotaSnapshotsByAuthIndex 已删:fork 旧架构产物(上游无此测试)。现行架构 Header 原样交给
+// quota worker,按 auth_index 合并是消费方职责(sync.go 355 行注释);
+// 等价覆盖在 quota/test 的 header_cache_worker 测试(本专项已同步)。
 
-	result, err := service.ProcessRedisUsageInbox(context.Background())
-	if err != nil {
-		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
-	}
-	if result == nil || result.InsertedEvents != 3 {
-		t.Fatalf("unexpected process result: %+v", result)
-	}
-	if appender.calls != 1 || len(appender.snapshots) != 2 {
-		t.Fatalf("expected latest snapshot per auth_index, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
-	}
-	snapshotsByAuthIndex := map[string]quota.UsageHeaderSnapshot{}
-	for _, snapshot := range appender.snapshots {
-		snapshotsByAuthIndex[snapshot.AuthIndex] = snapshot
-	}
-	if snapshotsByAuthIndex["codex-auth"].Headers.Get("X-Codex-Primary-Used-Percent") != "8" {
-		t.Fatalf("expected latest codex-auth header snapshot, got %+v", snapshotsByAuthIndex["codex-auth"])
-	}
-	if snapshotsByAuthIndex["other-codex-auth"].Headers.Get("X-Codex-Primary-Used-Percent") != "20" {
-		t.Fatalf("expected other auth header snapshot, got %+v", snapshotsByAuthIndex["other-codex-auth"])
-	}
-}
 
 func TestProcessRedisUsageInboxIgnoresIncompleteUsageHeaderQuotaSnapshotDuringCoalesce(t *testing.T) {
 	db := openSyncTestDatabase(t)
@@ -593,7 +510,7 @@ func TestProcessRedisUsageInboxSkipsAggregationWhenInboxAndEventsAreEmpty(t *tes
 		t.Fatalf("unexpected empty process result: %+v", result)
 	}
 	var checkpointCount int64
-	if err := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
+	if err := db.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
 		t.Fatalf("count overview aggregation checkpoint: %v", err)
 	}
 	if checkpointCount != 0 {
@@ -617,7 +534,7 @@ func TestProcessRedisUsageInboxRetriesOverviewAggregationWhenInboxIsEmpty(t *tes
 	if result == nil || !result.Empty || result.Status != "empty" {
 		t.Fatalf("unexpected empty process result: %+v", result)
 	}
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
+	var checkpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
 		t.Fatalf("expected overview aggregation checkpoint after empty process catch-up: %v", err)
 	}

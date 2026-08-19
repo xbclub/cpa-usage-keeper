@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/testutil"
 	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -75,7 +75,9 @@ func appSettingsColumnNames(t *testing.T, db *gorm.DB) map[string]bool {
 		Name string `gorm:"column:name"`
 	}
 	var rows []columnInfo
-	if err := db.Raw("PRAGMA table_info(app_settings)").Scan(&rows).Error; err != nil {
+	// PG 目录版(Step 4.23 #4 范式):information_schema + current_schema 过滤。
+	if err := db.Raw(`SELECT column_name AS name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'app_settings'`).Scan(&rows).Error; err != nil {
 		t.Fatalf("read app_settings columns: %v", err)
 	}
 	columns := make(map[string]bool, len(rows))
