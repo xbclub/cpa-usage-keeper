@@ -805,11 +805,7 @@ func openPricingServiceTestDatabase(t *testing.T) *gorm.DB {
 	return testutil.OpenTestDatabase(t)
 }
 
-// emptyPricingCatalogForTest 返回基于空快照的定价 catalog，供不需要真实价格数据的测试使用。
-func emptyPricingCatalogForTest() *pricing.Catalog {
-	return pricing.NewCatalog(pricing.EmptySnapshot())
-}
-
+// emptyPricingCatalogForTest 由上游 pricing_dependency_test.go 提供(fork 原本地副本已删,对齐上游布局)。
 // emptyPricingResolverForTest 返回基于空快照的定价 resolver，供不需要真实价格数据的测试使用。
 func emptyPricingResolverForTest() pricing.Resolver {
 	return emptyPricingCatalogForTest().NewResolver()

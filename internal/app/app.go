@@ -189,7 +189,12 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	// 价格快照在启动时一次性加载到不可变 catalog，供 quota/usage/pricing 共享同一份计价口径。
 	pricingSnapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
 	if err != nil {
-		return nil, fmt.Errorf("load pricing snapshot: %w", err)
+		// 对齐上游:走 failInitialization 终止错误标记(已记录)并释放缓存/连接/日志资源。
+		if recentUsageCache != nil {
+			recentUsageCache.Close()
+		}
+		_ = closeGormDB(db)
+		return nil, failInitialization(logCloser, fmt.Errorf("load pricing snapshot: %w", err))
 	}
 	pricingCatalog := pricing.NewCatalog(pricingSnapshot)
 	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{

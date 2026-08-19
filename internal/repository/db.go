@@ -159,18 +159,23 @@ func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
 	usageEventsArchive, err := ArchiveExpiredUsageEvents(databaseContext(db), db, now)
-	if err != nil {
-		return dto.StorageCleanupResult{
-			RedisInbox:               redisResult,
-			UsageEventsArchived:      usageEventsArchive.Archived,
-			UsageEventsArchiveStatus: usageEventsArchive.Status,
-		}, err
-	}
-	return dto.StorageCleanupResult{
+	result := dto.StorageCleanupResult{
 		RedisInbox:               redisResult,
 		UsageEventsArchived:      usageEventsArchive.Archived,
 		UsageEventsArchiveStatus: usageEventsArchive.Status,
-	}, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	// Activity 的 short/medium/long 分别按自身 retention 清理，daily 永久保留。
+	if err := CleanupUsageActivityStats(db, now); err != nil {
+		return result, err
+	}
+	// Latency 小时保留 3 天、自然日保留 365 天(fork 无 VACUUM,PG 由 autovacuum 处理)。
+	if err := CleanupUsageLatencyStats(db, now); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 const usageEventsRetentionDays = 90

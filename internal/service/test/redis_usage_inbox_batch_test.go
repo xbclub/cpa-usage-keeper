@@ -107,10 +107,20 @@ func TestProcessRedisUsageInboxRollsBackAllChunksWhenLaterProcessedMarkFails(t *
 	if err != nil {
 		t.Fatalf("seed redis usage inbox rows: %v", err)
 	}
+	// PG plpgsql 版(SQLite WHEN 条件转函数内 IF;字符串双单引号)。
 	if err := db.Exec(fmt.Sprintf(
-		`CREATE TRIGGER fail_later_processed_mark BEFORE UPDATE OF status ON redis_usage_inboxes WHEN OLD.id = %d AND NEW.status = 'processed' BEGIN SELECT RAISE(ABORT, 'later processed mark failed'); END;`,
+		`CREATE OR REPLACE FUNCTION fail_later_processed_mark() RETURNS TRIGGER AS '
+		BEGIN
+			IF OLD.id = %d AND NEW.status = ''processed'' THEN
+				RAISE EXCEPTION ''later processed mark failed'';
+			END IF;
+			RETURN NEW;
+		END;' LANGUAGE plpgsql`,
 		rows[300].ID,
 	)).Error; err != nil {
+		t.Fatalf("create later-batch failure function: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_later_processed_mark BEFORE UPDATE OF status ON redis_usage_inboxes FOR EACH ROW EXECUTE FUNCTION fail_later_processed_mark()`).Error; err != nil {
 		t.Fatalf("create later-batch failure trigger: %v", err)
 	}
 

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { Modal } from '@/components/ui/Modal'
+import { PortalTooltip, usePortalTooltip } from '@/components/ui/PortalTooltip'
 import { IconChartLine, IconGaugeReset, IconRefreshCw, IconSearch, IconSettings, IconShield, IconTrash2 } from '@/components/ui/icons'
 import quotaCostIcon from '@/assets/icons/quota-cost.svg'
 import quotaTokenIcon from '@/assets/icons/quota-token.svg'
@@ -118,6 +119,22 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
   const [quotaUsageMode, setQuotaUsageMode] = useState<QuotaUsageMode>('current')
   const [displayMode, setDisplayModeState] = useState<AuthFileDisplayMode>(() => readStoredAuthFileDisplayMode())
   const [expiryTooltip, setExpiryTooltip] = useState<CredentialExpiryTooltipState | null>(null)
+  const {
+    tooltip: filenameTooltip,
+    showOnMouseEnter: showFilenameTooltipOnMouseEnter,
+    hideOnMouseLeave: hideFilenameTooltipOnMouseLeave,
+    showOnFocus: showFilenameTooltipOnFocus,
+    hideOnBlur: hideFilenameTooltipOnBlur,
+    dismiss: dismissFilenameTooltip,
+  } = usePortalTooltip()
+  const filenameTooltipRowsVersion = rows
+    .map((row) => `${row.identity.id || row.identity.identity}\u0000${row.identity.file_name?.trim() ?? ''}`)
+    .sort()
+    .join('\u0001')
+  useEffect(() => {
+    // 当前页文件映射变化时清理旧事件快照；统计刷新但映射不变时保留正在查看的 tooltip。
+    dismissFilenameTooltip()
+  }, [dismissFilenameTooltip, filenameTooltipRowsVersion])
   const expiryTooltipHoverTargetRef = useRef<CredentialExpiryTooltipTarget | null>(null)
   const expiryTooltipFocusTargetRef = useRef<CredentialExpiryTooltipTarget | null>(null)
   const showHealthMode = displayMode === 'health'
@@ -256,6 +273,25 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         const rowExpiryTooltipText = row.expiresAtLabel
           ? t('usage_stats.credentials_expiry_tooltip', { value: row.expiresAtLabel })
           : ''
+        const fileName = row.identity.file_name?.trim() ?? ''
+        const filenameTooltipTargetProps = {
+          className: styles.credentialFileNameTooltipTarget,
+          'data-auth-file-name-tooltip-target': true,
+          tabIndex: fileName ? 0 : undefined,
+          'aria-label': fileName ? `${row.displayName}; ${fileName}` : undefined,
+          onMouseEnter: fileName
+            ? (event: React.MouseEvent<HTMLSpanElement>) => showFilenameTooltipOnMouseEnter([fileName], event.currentTarget)
+            : undefined,
+          onMouseLeave: fileName
+            ? (event: React.MouseEvent<HTMLSpanElement>) => hideFilenameTooltipOnMouseLeave(event.currentTarget)
+            : undefined,
+          onFocus: fileName
+            ? (event: React.FocusEvent<HTMLSpanElement>) => showFilenameTooltipOnFocus([fileName], event.currentTarget)
+            : undefined,
+          onBlur: fileName
+            ? (event: React.FocusEvent<HTMLSpanElement>) => hideFilenameTooltipOnBlur(event.currentTarget)
+            : undefined,
+        }
         return (
           <CredentialRowShell
             key={rowKey}
@@ -266,9 +302,10 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
                 alias={row.identity.alias}
                 saving={aliasSavingId === row.identity.id}
                 disabled={isCredentialAliasEditorDisabled(row.identity.id, row.identity.is_deleted, aliasSavingId)}
+                displayNameProps={filenameTooltipTargetProps}
                 onSaveAlias={onSaveAlias}
               />
-            ) : row.displayName}
+            ) : <span {...filenameTooltipTargetProps}>{row.displayName}</span>}
             icon={<ProviderBrandIcon providerType={row.identity.type} size={30} ariaLabel={row.typeLabel} />}
             subtitle={(
               <span className={styles.credentialIdentityBadges}>
@@ -371,6 +408,7 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         onSortChange={(nextSort) => onSortChange(nextSort as UsageIdentityPageSort)}
       />
       </CredentialSectionShell>
+      <PortalTooltip tooltip={filenameTooltip} />
       {expiryTooltip && activeExpiryTooltipText && typeof document !== 'undefined'
         ? createPortal(
             <div

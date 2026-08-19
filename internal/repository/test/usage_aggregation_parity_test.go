@@ -47,7 +47,7 @@ func TestUsageOverviewAggregationPreservesAllExistingHourlyAndDailyFields(t *tes
 	assertUsageOverviewParityFields(t, "daily", daily.RequestCount, daily.SuccessCount, daily.FailureCount, daily.InputTokens, daily.OutputTokens, daily.ReasoningTokens, daily.CachedTokens, daily.CacheReadTokens, daily.CacheCreationTokens, daily.TotalTokens)
 
 	// Overview checkpoint 继续精确推进到最后一条 usage event。
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
+	var checkpoint entities.UsageAggregationCheckpoint
 	if err := db.Where("name = ?", "overview").Take(&checkpoint).Error; err != nil {
 		t.Fatalf("load overview parity checkpoint: %v", err)
 	}
@@ -70,11 +70,11 @@ func TestUsageOverviewAggregationRollsBackWhenDailyInsertAndRetryBothMiss(t *tes
 	if _, _, err := repository.InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("insert daily failure event: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_overview_daily_insert
-		BEFORE INSERT ON usage_overview_daily_stats
-		BEGIN
-			SELECT RAISE(ABORT, 'forced overview daily insert failure');
-		END`).Error; err != nil {
+	// PG plpgsql 版(Step 4.9 #4 范式)。
+	if err := db.Exec(`CREATE OR REPLACE FUNCTION fail_overview_daily_insert() RETURNS TRIGGER AS 'BEGIN RAISE EXCEPTION ''forced overview daily insert failure''; END;' LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatalf("create daily failure function: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_overview_daily_insert BEFORE INSERT ON usage_overview_daily_stats FOR EACH ROW EXECUTE FUNCTION fail_overview_daily_insert()`).Error; err != nil {
 		t.Fatalf("create daily failure trigger: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestUsageOverviewAggregationRollsBackWhenDailyInsertAndRetryBothMiss(t *tes
 		t.Fatalf("count rolled back hourly rows: %v", countErr)
 	}
 	var checkpointCount int64
-	if countErr := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; countErr != nil {
+	if countErr := db.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; countErr != nil {
 		t.Fatalf("count rolled back overview checkpoints: %v", countErr)
 	}
 	if hourlyCount != 0 || checkpointCount != 0 {
