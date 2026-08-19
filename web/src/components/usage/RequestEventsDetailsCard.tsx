@@ -1390,18 +1390,33 @@ export function RequestEventsDetailsCard({
             <div className={styles.requestEventsPaginationFooter}>
               <div className={styles.requestEventsPaginationControls}>
                 <>
-                  <span className={styles.requestEventsPaginationPage} aria-live="polite">
-                    {t('usage_stats.request_events_loaded_count', { loaded: rows.length, total: totalCount })}
+                  <span
+                    className={styles.requestEventsPaginationPage}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    aria-label={t('usage_stats.request_events_loaded_count', { loaded: rows.length, total: totalCount })}
+                  >
+                    <span className={styles.requestEventsPaginationLabel}>
+                      {t('usage_stats.request_events_loaded_label')}
+                    </span>
+                    <strong className={styles.requestEventsPaginationLoaded}>{rows.length}</strong>
+                    <span className={styles.requestEventsPaginationTotal} aria-hidden="true">
+                      / {totalCount}
+                    </span>
                   </span>
                   {hasMore && (
-                    <button
+                    <Button
                       type="button"
-                      className={styles.requestEventsPagerButton}
+                      variant="secondary"
+                      size="sm"
+                      appearance="action"
                       onClick={onLoadMore}
-                      disabled={loading || loadingMore}
+                      loading={loadingMore}
+                      disabled={loading}
                     >
                       {loadingMore ? t('common.loading') : t('usage_stats.request_events_load_more')}
-                    </button>
+                    </Button>
                   )}
                 </>
               </div>

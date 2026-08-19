@@ -1246,6 +1246,24 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?padding:\s*0 22px;/)
   })
 
+  it('styles the Request Event loaded count as an inline summary without a second pill', () => {
+    const progressSummary = styleRuleBlock(usagePageStyles, '.requestEventsPaginationPage')
+    const loadedNumberStart = usagePageStyles.indexOf('.requestEventsPaginationLoaded {')
+    const loadedNumber = usagePageStyles.slice(
+      loadedNumberStart,
+      usagePageStyles.indexOf('.requestEventsPaginationTotal {', loadedNumberStart),
+    )
+
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationLabel')
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationLoaded')
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationTotal')
+    expect(progressSummary).toMatch(/display:\s*inline-flex;/)
+    expect(progressSummary).toMatch(/min-height:\s*32px;/)
+    expect(progressSummary).not.toMatch(/(?:^|\n)\s*(?:padding|border|border-radius|background):/)
+    expect(loadedNumber).toMatch(/color:\s*var\(--text-primary\);/)
+    expect(loadedNumber).not.toMatch(/color:\s*var\(--primary-color\);/)
+  })
+
   it('keeps Request Event Log headers visible while the table scrolls', () => {
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?height:\s*clamp\(520px,\s*68vh,\s*760px\);/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?overflow:\s*auto;/)

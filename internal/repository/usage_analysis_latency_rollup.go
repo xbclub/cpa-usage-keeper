@@ -128,14 +128,3 @@ func alignAnalysisLatencyBucketEnd(value time.Time, bucketType entities.UsageLat
 		return boundary.Add(time.Hour)
 	}
 }
-const analysisLatencyMaxDisplayPoints = 200
-
-// buildAnalysisLatencyDiagnostics 从原始 ttft/latency 值构建延迟诊断记录。
-// TODO: 上游重构为 latency 包后此 wrapper 需对齐新算法。
-func buildAnalysisLatencyDiagnostics(ttftValues, latencyValues []int64, maxTTFTMS, maxLatencyMS int64) dto.AnalysisLatencyDiagnosticsRecord {
-	// 委托给 buildAnalysisLatencyDiagnosticsFromValues（如果存在），否则返回空。
-	return dto.AnalysisLatencyDiagnosticsRecord{
-		TotalPoints: int64(len(ttftValues)),
-		Sampled:     false,
-	}
-}
