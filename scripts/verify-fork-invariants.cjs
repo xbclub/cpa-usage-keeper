@@ -147,6 +147,13 @@ const FORK_SYMBOLS = [
   ['internal/repository/usage_overview_pricing.go', 'applyUsageOverviewModelQueryFilter'],
   ['internal/repository/usage.go', 'applyUsageOverviewModelQueryFilter(query, filter)'],
   ['internal/repository/usage_apikey_summary.go', 'applyUsageOverviewModelQueryFilter'],
+  // v1.14.6-8 合并新增的 fork 接线(Step 4.28):
+  // RecordActiveStatus = fork active-only quota refresh(router 依赖);quota 历史与错误事件路由 = 新特性链路守卫。
+  ['internal/quota/service.go', 'func (s *Service) RecordActiveStatus'],
+  ['internal/api/router.go', 'RecordActiveStatus'],
+  ['internal/api/router.go', 'registerErrorEventRoutes(adminProtected, errorEventProvider)'],
+  ['internal/quota/service.go', 'runCodexQuotaHistoryRunner'],
+  ['internal/app/app.go', 'CPAErrors:        redisErrorIngestRunner'],
 ];
 {
   let clean = true;

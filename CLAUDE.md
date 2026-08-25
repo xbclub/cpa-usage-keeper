@@ -1042,6 +1042,35 @@ Merged upstream v1.14.5 (`d62cad3..498abd1`) — 4 PR, 48 文件,+2090/−299。
 
 
 14. **根包 pre-existing 失败清零专项(2026-08-19):32 个失败全部定性修复,四个包全绿。** repository 根 10 + repository/test 12 + service 根 8 + service/test 5,逐一诊断后分七类,无一"环境"兜底: ①**陈旧测试 vs 现行生产**(identity priority 断言 LOWER(name) 而生产/上游都是 LOWER(file_name)、resolver 传 empty 而上游传 DB catalog ×4 文件、缺 UsageHeaderQuota 注入)→ checkout 上游版+重放 PG 适配或接线; ②**旧 checkpoint 表**(Step 4.23 #8 类 ×6 文件)→ 换统一 UsageAggregationCheckpoint; ③**SQLite 内省**(PRAGMA table_info/index_list/CAST AS TEXT)→ information_schema/pg_index(current_schema 过滤+unnest ORDINALITY,复用 Step 4.23 #4 范式); ④**纳秒精度**(Step 4.13 #10 类)→ 微秒; ⑤**NUL 字节**(heatmap 分隔符)→ \x01; ⑥**旧架构断言**(latency-from-events、header 按 auth_index 合并)→ 删除/留注释,等价覆盖在已同步的新测试; ⑦**远程 PG 时序**(singleflight 20ms 窗口)→ 300ms 保语义。 **一处保留的架构分歧:custom rollup 的"禁查 usage_events"断言按 fork 特性放宽** —— fork 对"结束时间晚于 queryNow"的进行中小时/当天用窄边界投影补偿(Step 4.7 记录的设计),断言改为只禁全量行读、允许边界投影查询;day 测试的 wantHourly=false 改 true(进行中当天走 hourly)。 **教训:此前把 ~30 个失败笼统归"远程 PG 环境问题"(Step 4.23 #13)是误判 —— 逐个诊断后 0 个是纯环境,全是可修的适配/陈旧/精度类。"环境问题"是懒惰分类,下次先诊断再归类。**
+
+### Step 4.28: v1.14.6-v1.14.8 merge notes (2026-08-25) — 22 PR(史上最大:148 文件 +15997/−1727)
+
+Merged upstream `e4549df..5181c7a`(v1.14.6+#434-#441 → v1.14.7+#446-#453 → v1.14.8+#455-#458 → #459)。三大特性:Codex 配额历史/效率(#436+#441+#446+#457,新 `QuotaCycle`/`QuotaPercentSegment` 表)、凭证详情抽屉(#434/#453/#456,`CredentialDetailDrawer` + SkipTotalCount/AuthType 查询链)、CPA 错误事件通道(#435,`ErrorEvent` 表 + 独立 `CPAErrors` 后台 runner)。4 commits(backend/frontend/CI-deploy/invariants)。Lessons:
+
+1. **⚠️ 方言初扫清单漏 `INDEXED BY`** —— `repository/codex_quota_efficiency.go` 的 `FROM usage_events INDEXED BY idx_...` 是 SQLite 强制索引提示,PG 直接 SQLSTATE 42601。既有 grep 清单(strftime/RAISE/PRAGMA/julianday/sqlite.Open/SQLitePath)要**加 `INDEXED BY`**。修法:删提示即可(PG 规划器按索引前缀自然选择)。同文件 `Clauses(dbresolver.Read/Write)` 在 fork 单池是 no-op,**保留**(与上游最小 diff;读副本池是 e4549df 已有的既有分歧,fork 持续不采纳)。
+
+2. **"仅 migration 引用"判断必须 grep 文件定义的全部符号,不只类型名。** `entities/codex_quota_cycle.go` 初判 migration-only SKIP,实际承载生产枚举(`CodexQuotaWindowRole/Kind/ResetAtSource` 常量,被 repository 两文件引用)→ build 错。教训:**跳过任何文件前,提取该文件全部顶层符号(类型+常量+函数)反查非 migration 引用**。最终仍 SKIP 了 `migration/` 整目录(fork 无框架)但 checkout 了这两个 entity 文件(未注册进 `All()`,仅常量被引用,死类型无害)。
+
+3. **quota schema 直跳终态**:上游 #436 的 `codex_quota_*` 中间表 2 天后被 #446 推倒重建为通用 `quota_*`。fork 从未有过中间版 → 只注册终态 entity,AutoMigrate 建表,**零数据迁移零 downtime**。合并跨多个版本时先看最终 tag 的 schema,不逐版本跟。
+
+4. **3way 静默丢失第 5 次,symbol 集合审计再立功**:sync_test 静默丢 3 个测试 + usage_filter_test 的同名测试只剩冲突侧副本,全部被 `diff <(git show upstream:文件|grep '^func')` 抓回。**该审计已成本次 merge 的标准步骤,继续强制。**
+
+5. **⚠️ 名字级审计的新盲区:同名测试不同 body。** `CredentialSections.styles.test.ts` 测试名集合与上游完全一致(diff=0),但 3way 保留了 fork 侧旧断言体(断言已被上游删除的 switcher markup)→ 9 测试失败。名字审计对此天然免疫失败。**对策:测试文件失败时先 diff 测试名集合 —— fork-only 名 = 0 且 body 有分歧 → 直接 checkout 上游版**(fork 分歧若全是被取代的旧断言,checkout 是唯一正解)。scss 同理:类名集合 diff 之后还要跑配套 styles 测试断言规则内容。
+
+6. **i18n 重放的存在性检查必须 namespace 级。** `api_key` 在 `ranking` 命名空间已存在(上游自己的键),locale 块级 `re.search` 误判"已存在"跳过插入 → `forkKeys.test.ts` 守卫(按 `usage_stats.api_key` 限定路径断言)立刻红。**守卫按 namespace 检查是对的;重放脚本的存在性判断同样必须限定在目标 namespace 块内。**
+
+7. **三处 fork 旧接线被上游演进取代,整文件 checkout 零损失**(Step 4.27 #4 溯源法再现):文件名 portal tooltip → `onOpenDetails` 抽屉触发按钮(#456);`ApiKeySettingsTitle` 子组件残留(上游已删);`credentialRefreshSwitcher` 旧 markup → MainActionButton。**合并前对每个 fork-unique 前端特性先在上游 main grep 同名/同功能符号,上游已有新方案就弃 fork 侧。**
+
+8. **上游 v9 列偏好直接重置 legacy 版本**(v1-v8 全 reset)取代 fork 的逐版本迁移梯子 → `UsagePageRequestEventsPreferences.test.ts` 整文件 checkout(fork 10 个旧梯子测试全淘汰,上游 1 个循环测试覆盖)。**功能口径演进时,旧口径测试是债务不是资产(Step 4.27 #5 再证)。**
+
+9. **PG 适配新增 3 类**:(a) `DROP TRIGGER name` 必须带 `ON table`(SQLite 可省);(b) 4 处 `RAISE(ABORT)` 触发器转 plpgsql(2 条件 2 无条件,老惯例);(c) 远程 PG 时序扩窗 3 处(双事务写回 1s→10s、timer boundary 2 处 1s→10s)。纳秒→微秒 1 处(checkout 上游 header_cache_worker_test 重新带回 `-time.Nanosecond`,**每次 checkout 该文件都要重查**)。
+
+10. **上游移除 AI Provider identity 的 API 层脱敏**(`Identity: item.Identity` 直发)—— 详情抽屉按原始 auth-index 查询,`LookupKey` 仍隐藏,上游测试断言翻转。跟随上游(Gate 3)。fork 该文件真分歧(`CachedTokens` 字段重命名)在另一区域共存。
+
+11. **CI 嫁接**:上游 #438 加 `changes` path-filter + `container` + `ci-gate` job;fork backend 保留 PG service container 单 ubuntu 形态(上游 SQLite 3-OS 矩阵 + MSYS2 不适用)。#455 部署文件重命名用 `git mv` + workflows cp 行同步 + .gitignore 删 vestigial 行。
+
+12. **冲突解析用 python 逐 marker 删时,`=======` 分隔行容易漏删**(删了 `<<<<<<<` 和 `>>>>>>>` 但中间分隔行残留)→ lint "Merge conflict marker encountered" 抓。删完必须 grep `^=======$` 复查。
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
