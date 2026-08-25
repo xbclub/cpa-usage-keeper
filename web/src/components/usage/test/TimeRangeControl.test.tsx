@@ -21,6 +21,7 @@ interface TimeRangeControlProps {
   onChange: (value: UsageTimeRange, customRange?: UsageCustomRange) => void;
   ariaLabel: string;
   timeZone?: string;
+  maxCustomDayRangeDays?: number;
 }
 
 const loadTimeRangeControl = async (): Promise<ComponentType<TimeRangeControlProps> | null> => {
@@ -52,12 +53,12 @@ describe('TimeRangeControl', () => {
     vi.restoreAllMocks();
   });
 
-  const renderControl = async (value: UsageTimeRange, onChange = vi.fn(), customRange?: UsageCustomRange, timeZone: string | null = 'Asia/Shanghai') => {
+  const renderControl = async (value: UsageTimeRange, onChange = vi.fn(), customRange?: UsageCustomRange, timeZone: string | null = 'Asia/Shanghai', maxCustomDayRangeDays?: number) => {
     const TimeRangeControl = await loadTimeRangeControl();
     expect(TimeRangeControl).not.toBeNull();
     if (!TimeRangeControl) return { onChange };
     await act(async () => {
-      root.render(<TimeRangeControl value={value} customRange={customRange} onChange={onChange} ariaLabel="Range" timeZone={timeZone ?? undefined} />);
+      root.render(<TimeRangeControl value={value} customRange={customRange} onChange={onChange} ariaLabel="Range" timeZone={timeZone ?? undefined} maxCustomDayRangeDays={maxCustomDayRangeDays} />);
     });
     return { onChange };
   };
@@ -379,6 +380,62 @@ describe('TimeRangeControl', () => {
     expect(document.querySelector('[data-custom-calendar-month]')?.getAttribute('data-custom-calendar-month')).toBe('2026-07');
   });
 
+  it('navigates to historical calendar months beyond the former thirty-day window', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-17T07:36:42.000Z'));
+    await renderControl('custom', vi.fn(), {
+      unit: 'day',
+      start: '2026-06-18',
+      end: '2026-07-17',
+    });
+    const trigger = document.querySelector<HTMLButtonElement>('[data-time-range-trigger="desktop"]');
+    await act(async () => trigger?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-custom-endpoint="start"]')?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="usage_stats.range_custom_previous_month"]')?.click());
+
+    expect(document.querySelector('[data-custom-calendar-month]')?.getAttribute('data-custom-calendar-month')).toBe('2026-05');
+    expect(document.querySelector<HTMLButtonElement>('[data-custom-calendar-cell="2026-05-01"]')?.disabled).toBe(false);
+  });
+
+  it('allows the 365-day boundary and disables earlier calendar dates and navigation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-17T07:36:42.000Z'));
+    await renderControl('custom', vi.fn(), {
+      unit: 'day',
+      start: '2025-07-18',
+      end: '2026-07-17',
+    });
+    const trigger = document.querySelector<HTMLButtonElement>('[data-time-range-trigger="desktop"]');
+    await act(async () => trigger?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-custom-endpoint="start"]')?.click());
+
+    expect(document.querySelector('[data-custom-calendar-month]')?.getAttribute('data-custom-calendar-month')).toBe('2025-07');
+    expect(document.querySelector<HTMLButtonElement>('[data-custom-calendar-cell="2025-07-18"]')?.disabled).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>('[data-custom-calendar-cell="2025-07-17"]')?.disabled).toBe(true);
+    expect(document.querySelector('[data-custom-calendar-cell="2025-07-17"]')?.hasAttribute('data-custom-day')).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="usage_stats.range_custom_previous_month"]')?.disabled).toBe(true);
+  });
+
+  it('uses a configured 90-day boundary for Request Events', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-17T07:36:42.000Z'));
+    await renderControl('custom', vi.fn(), {
+      unit: 'day',
+      start: '2026-04-19',
+      end: '2026-07-17',
+    }, 'Asia/Shanghai', 90);
+    const trigger = document.querySelector<HTMLButtonElement>('[data-time-range-trigger="desktop"]');
+    await act(async () => trigger?.click());
+    expect(document.querySelector('[data-custom-range-limit-hint]')?.textContent)
+      .toBe('usage_stats.range_custom_day_limit_hint:90');
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-custom-endpoint="start"]')?.click());
+
+    expect(document.querySelector('[data-custom-calendar-month]')?.getAttribute('data-custom-calendar-month')).toBe('2026-04');
+    expect(document.querySelector<HTMLButtonElement>('[data-custom-calendar-cell="2026-04-19"]')?.disabled).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>('[data-custom-calendar-cell="2026-04-18"]')?.disabled).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="usage_stats.range_custom_previous_month"]')?.disabled).toBe(true);
+  });
+
   it('keeps crossed-month ranges continuous inside a fixed six-week calendar', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-17T07:36:42.000Z'));
@@ -490,6 +547,16 @@ describe('TimeRangeControl', () => {
     expect(document.querySelector('[data-custom-day-picker]')).not.toBeNull();
     expect(document.querySelectorAll('[data-custom-day]').length).toBeGreaterThan(0);
     expect(document.querySelector('input[type="date"], input[type="time"], input[type="datetime-local"]')).toBeNull();
+  });
+
+  it('shows the one-year limit while drafting a Custom day range', async () => {
+    await renderControl('8h');
+    const trigger = document.querySelector<HTMLButtonElement>('[data-time-range-trigger="desktop"]');
+    await act(async () => trigger?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-time-range-mode="custom"]')?.click());
+
+    expect(document.querySelector('[data-custom-range-limit-hint]')?.textContent)
+      .toBe('usage_stats.range_custom_day_limit_hint:365');
   });
 
   it('uses two custom 24-slot hour lists and disables too-short end choices', async () => {

@@ -15,6 +15,7 @@ import styles from './TimeRangeControl.module.scss';
 
 type CustomPickerView = 'summary' | 'day' | 'hour';
 type CustomEndpoint = 'start' | 'end';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface CustomRangePanelProps {
   value: UsageCustomRange;
@@ -57,6 +58,12 @@ const formatCalendarDay = (value: string, locale?: string): string => new Intl.D
 
 const monthKey = (value: string): string => value.slice(0, 7);
 
+const shiftMonth = (value: string, amount: number): string => {
+  const date = parseDayKey(`${value}-01`);
+  date.setUTCMonth(date.getUTCMonth() + amount);
+  return date.toISOString().slice(0, 7);
+};
+
 interface CalendarCell {
   value: string;
   outsideMonth: boolean;
@@ -82,6 +89,7 @@ function CustomRangeSummary({
   timeZone,
   locale,
   slotCount,
+  maxDayRangeDays,
   onUnitChange,
   onEdit,
   onApply,
@@ -91,6 +99,7 @@ function CustomRangeSummary({
   timeZone: string;
   locale?: string;
   slotCount: number;
+  maxDayRangeDays: number;
   onUnitChange: (unit: UsageCustomRangeUnit) => void;
   onEdit: (endpoint: CustomEndpoint) => void;
   onApply: () => void;
@@ -134,11 +143,16 @@ function CustomRangeSummary({
         <span>{t(value.unit === 'hour' ? 'usage_stats.range_custom_hours_count' : 'usage_stats.range_custom_days_count', { count: slotCount })}</span>
         <strong>{timeZone}</strong>
       </div>
+      {value.unit === 'day' && (
+        <small className={styles.customRangeLimitHint} data-custom-range-limit-hint>
+          {t('usage_stats.range_custom_day_limit_hint', { count: maxDayRangeDays })}
+        </small>
+      )}
       <div className={styles.customSummaryActions}>
-        <Button type="button" variant="secondary" size="sm" className={styles.customRangeAction} data-custom-summary-cancel onClick={onCancel}>
+        <Button type="button" variant="secondary" size="sm" appearance="action" data-custom-summary-cancel onClick={onCancel}>
           {t('common.cancel')}
         </Button>
-        <Button type="button" variant="primary" size="sm" className={styles.customRangeAction} data-custom-summary-apply data-custom-range-apply onClick={onApply}>
+        <Button type="button" variant="primary" size="sm" appearance="action" data-custom-summary-apply data-custom-range-apply onClick={onApply}>
           {t('common.apply')}
         </Button>
       </div>
@@ -150,15 +164,23 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, maxDayRang
   const { t } = useTranslation();
   const [view, setView] = useState<CustomPickerView>('summary');
   const [activeEndpoint, setActiveEndpoint] = useState<CustomEndpoint>('start');
-  const daySlots = useMemo(() => buildCustomDaySlots({ nowMs: anchorMs, timeZone, locale, maxDayRangeDays }), [anchorMs, locale, maxDayRangeDays, timeZone]);
+  const daySlots = useMemo(() => buildCustomDaySlots({
+    nowMs: anchorMs,
+    timeZone,
+    locale,
+    maxDayRangeDays,
+  }), [anchorMs, locale, maxDayRangeDays, timeZone]);
   const hourSlots = useMemo(() => buildCustomHourSlots({ nowMs: anchorMs, timeZone, locale }), [anchorMs, locale, timeZone]);
   const weekdayLabels = useMemo(() => buildCustomWeekdayLabels(locale), [locale]);
-  const slots = value.unit === 'hour' ? hourSlots : daySlots;
-  const startIndex = slots.findIndex((slot) => slot.value === value.start);
-  const endIndex = slots.findIndex((slot) => slot.value === value.end);
-  const slotCount = Math.max(endIndex - startIndex + 1, 0);
-  const allowedMonths = useMemo(() => [...new Set(daySlots.map((slot) => monthKey(slot.value)))], [daySlots]);
+  const startIndex = hourSlots.findIndex((slot) => slot.value === value.start);
+  const endIndex = hourSlots.findIndex((slot) => slot.value === value.end);
+  const slotCount = value.unit === 'hour'
+    ? Math.max(endIndex - startIndex + 1, 0)
+    : Math.max(Math.floor((parseDayKey(value.end).getTime() - parseDayKey(value.start).getTime()) / DAY_MS) + 1, 0);
   const allowedDayValues = useMemo(() => new Set(daySlots.map((slot) => slot.value)), [daySlots]);
+  const firstAllowedMonth = monthKey(daySlots[0].value);
+  const today = daySlots[daySlots.length - 1].value;
+  const currentMonth = monthKey(today);
   const activeDay = value[activeEndpoint].slice(0, 10);
   const [visibleMonth, setVisibleMonth] = useState(monthKey(activeDay));
   const [pickerSnapshot, setPickerSnapshot] = useState<UsageCustomRange | null>(null);
@@ -240,6 +262,7 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, maxDayRang
         timeZone={timeZone}
         locale={locale}
         slotCount={slotCount}
+        maxDayRangeDays={maxDayRangeDays}
         onUnitChange={handleUnitChange}
         onEdit={handleEdit}
         onApply={onApply}
@@ -278,22 +301,27 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, maxDayRang
         </span>
       </div>
       {endpointCards}
+      {value.unit === 'day' && (
+        <small className={styles.customRangeLimitHint} data-custom-range-limit-hint>
+          {t('usage_stats.range_custom_day_limit_hint', { count: maxDayRangeDays })}
+        </small>
+      )}
 
       {view === 'day' ? (
         <div className={styles.customCalendar} data-custom-calendar-month={visibleMonth}>
           <div className={styles.customCalendarHeader}>
             <button
               type="button"
-              disabled={allowedMonths.indexOf(visibleMonth) <= 0}
-              onClick={() => setVisibleMonth(allowedMonths[allowedMonths.indexOf(visibleMonth) - 1])}
+              disabled={visibleMonth <= firstAllowedMonth}
+              onClick={() => setVisibleMonth((month) => shiftMonth(month, -1))}
               aria-label={t('usage_stats.range_custom_previous_month')}
             ><IconChevronLeft size={14} /></button>
             <strong>{new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', timeZone: 'UTC' }).format(parseDayKey(`${visibleMonth}-01`))}</strong>
             <button
               type="button"
-              disabled={allowedMonths.indexOf(visibleMonth) >= allowedMonths.length - 1}
+              disabled={visibleMonth >= currentMonth}
               className={styles.customNextMonthButton}
-              onClick={() => setVisibleMonth(allowedMonths[allowedMonths.indexOf(visibleMonth) + 1])}
+              onClick={() => setVisibleMonth((month) => shiftMonth(month, 1))}
               aria-label={t('usage_stats.range_custom_next_month')}
             ><IconChevronLeft size={14} /></button>
           </div>
@@ -390,10 +418,10 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, maxDayRang
       <div className={styles.customPickerFooter}>
         <span>{formatCustomRangeLabel(value, { locale, timeZone })}</span>
         <div className={styles.customPickerActions}>
-          <Button type="button" variant="secondary" size="sm" className={styles.customRangeAction} data-custom-picker-cancel onClick={handlePickerCancel}>
+          <Button type="button" variant="secondary" size="sm" appearance="action" data-custom-picker-cancel onClick={handlePickerCancel}>
             {t('common.cancel')}
           </Button>
-          <Button type="button" variant="primary" size="sm" className={styles.customRangeAction} data-custom-range-apply onClick={handlePickerApply}>
+          <Button type="button" variant="primary" size="sm" appearance="action" data-custom-range-apply onClick={handlePickerApply}>
             {t('common.apply')}
           </Button>
         </div>

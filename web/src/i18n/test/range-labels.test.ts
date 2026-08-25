@@ -26,6 +26,19 @@ describe('range filter labels', () => {
       expect(i18n.getResource(language, 'translation', 'common.back')).toBeTruthy();
       expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_select_days')).toBeTruthy();
       expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_select_hours')).toBeTruthy();
+      expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_day_limit_hint')).toBeTruthy();
     }
+  });
+
+  it('describes the Request Events 90-day retention window in every supported language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.request_events_subtitle')).toBe(
+      'Filter, inspect, and export request events from the most recent 90 days.',
+    );
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.request_events_subtitle')).toBe(
+      '筛选、查看并导出最近 90 天内的请求事件。',
+    );
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.request_events_subtitle')).toBe(
+      '篩選、查看並匯出最近 90 天內的請求事件。',
+    );
   });
 });
