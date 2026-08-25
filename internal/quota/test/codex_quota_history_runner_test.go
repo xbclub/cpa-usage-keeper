@@ -578,10 +578,15 @@ func TestCodexQuotaHistoryRunnerPrefersTrustedQueueAtTimerBoundary(t *testing.T)
 	})
 
 	writes := make(chan []repositorydto.CodexMainQuotaObservation, 2)
+	var writeErr atomic.Value
 	setCodexQuotaHistoryWriter(service, func(ctx context.Context, writerDB *gorm.DB, observations []repositorydto.CodexMainQuotaObservation) error {
 		copied := append([]repositorydto.CodexMainQuotaObservation(nil), observations...)
 		writes <- copied
-		return repository.WriteCodexMainQuotaObservations(ctx, writerDB, observations)
+		err := repository.WriteCodexMainQuotaObservations(ctx, writerDB, observations)
+		if err != nil {
+			writeErr.Store(err.Error())
+		}
+		return err
 	})
 
 	badHeader := codexHistoryPrimarySnapshot("trusted-boundary-auth", base, 100, resetAt)
@@ -620,8 +625,21 @@ func TestCodexQuotaHistoryRunnerPrefersTrustedQueueAtTimerBoundary(t *testing.T)
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	cycles := loadCodexQuotaCycles(t, db, "trusted-boundary-auth")
+	// PG 适配:writer stub 先投递副本再执行真实落库,远程 PG 上写事务需要多个往返;
+	// 轮询等待周期可见而不是立刻读(Step 4.22 #8 可见性时序类)。
+	var cycles []entities.QuotaCycle
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		cycles = loadCodexQuotaCyclesQuiet(db, "trusted-boundary-auth")
+		if len(cycles) == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if len(cycles) != 1 {
+		if stored := writeErr.Load(); stored != nil {
+			t.Fatalf("expected one trusted cycle at the timer boundary, got write error %v", stored)
+		}
 		t.Fatalf("expected one trusted cycle at the timer boundary, got %+v", cycles)
 	}
 	segments := loadCodexQuotaSegments(t, db, cycles[0].ID)
@@ -1323,6 +1341,12 @@ func codexHistoryUsageWindow(usedPercent float64, windowSeconds int64, resetAt t
 		HasLimitWindowSeconds: true,
 		HasResetAt:            true,
 	}
+}
+
+func loadCodexQuotaCyclesQuiet(db *gorm.DB, authIndex string) []entities.QuotaCycle {
+	var cycles []entities.QuotaCycle
+	_ = db.Where("provider = ? AND auth_index = ?", "codex", authIndex).Order("reset_at ASC, id ASC").Find(&cycles).Error
+	return cycles
 }
 
 func loadCodexQuotaCycles(t *testing.T, db *gorm.DB, authIndex string) []entities.QuotaCycle {
