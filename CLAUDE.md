@@ -1071,6 +1071,10 @@ Merged upstream `e4549df..5181c7a`(v1.14.6+#434-#441 → v1.14.7+#446-#453 → v
 
 12. **冲突解析用 python 逐 marker 删时,`=======` 分隔行容易漏删**(删了 `<<<<<<<` 和 `>>>>>>>` 但中间分隔行残留)→ lint "Merge conflict marker encountered" 抓。删完必须 grep `^=======$` 复查。
 
+13. **⚠️ 全树对照 review(diff-filter=A/D)再抓 2 个漏同步 + 1 个追踪污染 —— 规划分类正确 ≠ 命令清单完整。** `repository/test/codex_quota_efficiency_test.go` 在计划的 CHECKOUT 分类里,但 1a/1b 的 git checkout 命令都没包含它 → 静默漏掉(148 文件的命令清单靠手工转写,是新的丢失面)。**教训:checkout 命令执行后必须反向核对 —— `git diff upstream/main --diff-filter=D --name-only` 列出上游有而 fork 无的文件,逐一确认是 SKIP 决策还是漏checkout;这是继 symbol 审计之后第二道必跑 gate。** 另收编 pre-existing 测试债 `logging/test/error_file_test.go`(e4549df 前,纯日志文件零方言);`.omx/` 运营状态文件曾被误提交(同 Step 4.27 #12 的 .omc/ 教训),git rm --cached + 补 ignore。
+
+14. **PG 无索引提示:SQLite 的 EXPLAIN QUERY PLAN + INDEXED BY 测试转可移植契约。** 上游用 INDEXED BY 钉死单一索引断言;PG 无提示语法(除非 pg_hint_plan),规划器在 auth 索引族(auth 单列/auth+timestamp/auth_type+auth_index+id)按成本自选,空表上选 timestamp 单列索引也合法。**可移植断言 = 非 Seq Scan + 时间范围条件出现在计划中**;不要试图播种数据诱导规划器选特定索引(240 行 Seq Scan、2 万行 bitmap 单列、删索引后又选第三个 —— 三轮都输给规划器)。另:query logger 按 SQL 文本匹配计数的测试,生产查询改形状(如删 INDEXED BY)时 logger 匹配串要同步。
+
 13. **review 抓到既有跨层断链:identity 响应 `cached_tokens` 半拉子改名。** fork 曾把 identity 响应字段改名为 `cached_tokens` 并映射 entity 上**无 gorm tag 的遗留字段**(`CachedTokens`,而真实列是 `CacheReadTokens`),但前端 types.ts/viewModels 一直是上游口径 `cache_read_tokens` → 凭证页 Cache 指标长期 undefined。修复 = 三处回归上游(api 响应 + 测试断言含负向守卫 + AiProvider fixture),与上游 0 diff。**教训:(a) "fork 分歧"不等于"fork 特性" —— 不服务任何 fork 功能的半拉子改名是债务,review 时对每个 fork-unique diff 追问"它服务什么";(b) 跨层字段契约要三层对齐查:后端 json tag ↔ types.ts 接口 ↔ 组件读取,typecheck 对"类型声明与运行时 JSON 不符"是盲区(TS 类型在撒谎);(c) 上游同文件常带负向守卫(`did not expect legacy cached_tokens`),fork 侧丢了守卫就丢了报警器。**
 
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
