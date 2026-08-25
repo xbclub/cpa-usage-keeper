@@ -50,3 +50,6 @@ lerna-debug.log*
 *.sln
 *.sw?
 .omc/
+
+# operational state (OMX tool)
+.omx/
