@@ -1071,6 +1071,8 @@ Merged upstream `e4549df..5181c7a`(v1.14.6+#434-#441 → v1.14.7+#446-#453 → v
 
 12. **冲突解析用 python 逐 marker 删时,`=======` 分隔行容易漏删**(删了 `<<<<<<<` 和 `>>>>>>>` 但中间分隔行残留)→ lint "Merge conflict marker encountered" 抓。删完必须 grep `^=======$` 复查。
 
+13. **review 抓到既有跨层断链:identity 响应 `cached_tokens` 半拉子改名。** fork 曾把 identity 响应字段改名为 `cached_tokens` 并映射 entity 上**无 gorm tag 的遗留字段**(`CachedTokens`,而真实列是 `CacheReadTokens`),但前端 types.ts/viewModels 一直是上游口径 `cache_read_tokens` → 凭证页 Cache 指标长期 undefined。修复 = 三处回归上游(api 响应 + 测试断言含负向守卫 + AiProvider fixture),与上游 0 diff。**教训:(a) "fork 分歧"不等于"fork 特性" —— 不服务任何 fork 功能的半拉子改名是债务,review 时对每个 fork-unique diff 追问"它服务什么";(b) 跨层字段契约要三层对齐查:后端 json tag ↔ types.ts 接口 ↔ 组件读取,typecheck 对"类型声明与运行时 JSON 不符"是盲区(TS 类型在撒谎);(c) 上游同文件常带负向守卫(`did not expect legacy cached_tokens`),fork 侧丢了守卫就丢了报警器。**
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
