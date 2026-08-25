@@ -300,6 +300,25 @@ func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
 	}
 }
 
+func TestListUsageEventsWithFilterAppliesAuthTypeWithSharedAuthIndex(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	events := []entities.UsageEvent{
+		{EventKey: "oauth-shared", AuthType: "oauth", AuthIndex: "shared-auth", Model: "codex", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC)},
+		{EventKey: "apikey-shared", AuthType: "apikey", AuthIndex: "shared-auth", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)},
+	}
+	if _, _, err := InsertUsageEvents(db, events); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthIndex: "shared-auth", AuthType: "oauth", Page: 1, PageSize: 20}, emptyPricingResolverForTest())
+	if err != nil {
+		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
+	}
+	if page.TotalCount != 1 || len(page.Events) != 1 || page.Events[0].AuthType != "oauth" {
+		t.Fatalf("expected only the auth-file event, got %+v", page)
+	}
+}
+
 func TestListUsageEventFilterOptionsWithFilterReturnsStableModels(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
 	events := []entities.UsageEvent{

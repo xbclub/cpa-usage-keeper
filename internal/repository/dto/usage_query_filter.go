@@ -20,10 +20,12 @@ type UsageQueryFilter struct {
 	CursorMode      bool
 	CursorTimestamp *time.Time
 	CursorID        int64
+	SkipTotalCount  bool
 	Model           string
 	// Models 是 fork-unique 的多模型筛选（上游只支持单 Model）。仓储层用 model IN ? 过滤。
 	Models          []string
 	AuthIndex       string
+	AuthType        string
 	APIGroupKey     string
 	Result          string
 }

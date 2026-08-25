@@ -30,15 +30,16 @@ type recordingRecentUsageAppender struct {
 }
 
 type recordingUsageHeaderQuotaAppender struct {
-	calls     int
-	snapshots []quota.UsageHeaderSnapshot
-	allowed   bool
+	eventCalls int
+	calls      int
+	snapshots  []*quota.UsageHeaderSnapshot
+	allowed    bool
 }
 
 type aggregationAwareUsageHeaderQuotaAppender struct {
 	db                  *gorm.DB
 	calls               int
-	snapshots           []quota.UsageHeaderSnapshot
+	snapshots           []*quota.UsageHeaderSnapshot
 	hourlyStatsAtAppend int64
 	countErr            error
 }
@@ -49,13 +50,24 @@ func (r *recordingRecentUsageAppender) TryAppend(events []entities.UsageEvent) b
 	return r.allowed
 }
 
-func (r *recordingUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+func (r *recordingUsageHeaderQuotaAppender) NotifyUsageEventsCommitted(_ []entities.UsageEvent) {
+	r.eventCalls++
+}
+
+func (r *recordingUsageHeaderQuotaAppender) NotifyUsageIdentitiesChanged() {}
+
+func (r *recordingUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []*quota.UsageHeaderSnapshot) bool {
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
 	return r.allowed
 }
 
-func (r *aggregationAwareUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+func (r *aggregationAwareUsageHeaderQuotaAppender) NotifyUsageEventsCommitted(_ []entities.UsageEvent) {
+}
+
+func (r *aggregationAwareUsageHeaderQuotaAppender) NotifyUsageIdentitiesChanged() {}
+
+func (r *aggregationAwareUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []*quota.UsageHeaderSnapshot) bool {
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
 	r.countErr = r.db.Model(&entities.UsageOverviewHourlyStat{}).Where("auth_index = ?", "codex-auth").Count(&r.hourlyStatsAtAppend).Error
@@ -239,8 +251,8 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterTransactionCommit(t 
 	if snapshot.AuthType != "oauth" || snapshot.AuthIndex != "codex-auth" || snapshot.Provider != "codex" {
 		t.Fatalf("unexpected snapshot identity: %+v", snapshot)
 	}
-	if snapshot.Headers.Get("X-Codex-Plan-Type") != "pro" {
-		t.Fatalf("expected codex header snapshot, got %#v", snapshot.Headers)
+	if codexSnapshotPlan(snapshot) != "pro" {
+		t.Fatalf("expected decoded Codex snapshot, got %#v", snapshot.CacheOutput)
 	}
 }
 
@@ -291,10 +303,242 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterOverviewAggregation(
 	}
 }
 
-// TestProcessRedisUsageInboxCoalescesUsageHeaderQuotaSnapshotsByAuthIndex 已删:fork 旧架构产物(上游无此测试)。现行架构 Header 原样交给
-// quota worker,按 auth_index 合并是消费方职责(sync.go 355 行注释);
-// 等价覆盖在 quota/test 的 header_cache_worker 测试(本专项已同步)。
+func TestProcessRedisUsageInboxForwardsStructuredUsageHeaderSnapshotsToQuotaService(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
+		{
+			Source: redisUsageInboxTestSource,
+			RawMessage: `{
+				"timestamp":"2026-06-22T11:00:00+08:00",
+				"provider":"codex",
+				"auth_type":"oauth",
+				"auth_index":"codex-auth",
+				"model":"gpt-5.5",
+				"request_id":"header-quota-old",
+				"tokens":{"input_tokens":1,"output_tokens":2},
+				"response_headers":{
+					"X-Codex-Primary-Used-Percent":["4"],
+					"X-Codex-Primary-Window-Minutes":["300"],
+					"X-Codex-Primary-Reset-After-Seconds":["60"]
+				}
+			}`,
+			PoppedAt: time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local),
+		},
+		{
+			Source: redisUsageInboxTestSource,
+			RawMessage: `{
+				"timestamp":"2026-06-22T11:02:00+08:00",
+				"provider":"codex",
+				"auth_type":"oauth",
+				"auth_index":"codex-auth",
+				"model":"gpt-5.5",
+				"request_id":"header-quota-new",
+				"tokens":{"input_tokens":1,"output_tokens":2},
+				"response_headers":{
+					"X-Codex-Primary-Used-Percent":["8"],
+					"X-Codex-Primary-Window-Minutes":["300"],
+					"X-Codex-Primary-Reset-After-Seconds":["60"]
+				}
+			}`,
+			PoppedAt: time.Date(2026, 6, 22, 11, 2, 0, 0, time.Local),
+		},
+		{
+			Source: redisUsageInboxTestSource,
+			RawMessage: `{
+				"timestamp":"2026-06-22T11:01:00+08:00",
+				"provider":"codex",
+				"auth_type":"oauth",
+				"auth_index":"other-codex-auth",
+				"model":"gpt-5.5",
+				"request_id":"header-quota-other",
+				"tokens":{"input_tokens":1,"output_tokens":2},
+				"response_headers":{
+					"X-Codex-Primary-Used-Percent":["20"],
+					"X-Codex-Primary-Window-Minutes":["300"],
+					"X-Codex-Primary-Reset-After-Seconds":["60"]
+				}
+			}`,
+			PoppedAt: time.Date(2026, 6, 22, 11, 1, 0, 0, time.Local),
+		},
+	}); err != nil {
+		t.Fatalf("seed inbox rows: %v", err)
+	}
+	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
+		UsageHeaderQuota:         appender,
+	})
 
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 3 {
+		t.Fatalf("unexpected process result: %+v", result)
+	}
+	if appender.calls != 1 || len(appender.snapshots) != 3 {
+		t.Fatalf("expected three structured snapshots for quota-side fan-out, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
+	}
+	firstUsed, firstOK := codexSnapshotPrimaryUsedPercent(appender.snapshots[0])
+	if appender.snapshots[0].AuthIndex != "codex-auth" || !firstOK || firstUsed != 4 {
+		t.Fatalf("expected first duplicate identity snapshot to remain structured, got %+v", appender.snapshots[0])
+	}
+	secondUsed, secondOK := codexSnapshotPrimaryUsedPercent(appender.snapshots[1])
+	if appender.snapshots[1].AuthIndex != "codex-auth" || !secondOK || secondUsed != 8 {
+		t.Fatalf("expected newer duplicate identity snapshot to remain structured, got %+v", appender.snapshots[1])
+	}
+	thirdUsed, thirdOK := codexSnapshotPrimaryUsedPercent(appender.snapshots[2])
+	if appender.snapshots[2].AuthIndex != "other-codex-auth" || !thirdOK || thirdUsed != 20 {
+		t.Fatalf("expected other identity snapshot to preserve order, got %+v", appender.snapshots[2])
+	}
+}
+
+func TestProcessRedisUsageInboxNotifiesAggregationRunnerBeforeOverviewAggregation(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		Source: redisUsageInboxTestSource,
+		RawMessage: `{
+			"timestamp":"2026-06-22T11:10:43+08:00",
+			"provider":"codex",
+			"auth_type":"oauth",
+			"auth_index":"codex-auth",
+			"model":"gpt-5.5",
+			"request_id":"header-quota-after-aggregation",
+			"tokens":{"input_tokens":10,"output_tokens":20,"total_tokens":30},
+			"response_headers":{
+				"X-Codex-Primary-Used-Percent":["4"],
+				"X-Codex-Primary-Window-Minutes":["300"],
+				"X-Codex-Primary-Reset-After-Seconds":["60"]
+			}
+		}`,
+		PoppedAt: time.Date(2026, 6, 22, 11, 10, 43, 0, time.Local),
+	}}); err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	appender := &aggregationAwareUsageHeaderQuotaAppender{db: db}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
+		UsageHeaderQuota:         appender,
+		Now:                      func() time.Time { return time.Date(2026, 6, 22, 11, 15, 0, 0, time.Local) },
+	})
+
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 1 {
+		t.Fatalf("unexpected process result: %+v", result)
+	}
+	if appender.calls != 1 || len(appender.snapshots) != 1 {
+		t.Fatalf("expected one usage header quota notification, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
+	}
+	if appender.countErr != nil {
+		t.Fatalf("count hourly stats during header notification: %v", appender.countErr)
+	}
+	if appender.hourlyStatsAtAppend != 0 {
+		t.Fatalf("expected notifier before background overview aggregation, got %d hourly rows", appender.hourlyStatsAtAppend)
+	}
+}
+
+func TestProcessRedisUsageInboxNotifiesAggregationRunnerWithoutWaiting(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		Source: redisUsageInboxTestSource,
+		RawMessage: `{
+			"timestamp":"2026-06-22T11:10:43+08:00",
+			"provider":"codex",
+			"auth_type":"oauth",
+			"auth_index":"codex-auth",
+			"model":"gpt-5.5",
+			"request_id":"header-quota-overflow",
+			"tokens":{"input_tokens":1,"output_tokens":2},
+			"response_headers":{
+				"X-Codex-Primary-Used-Percent":["4"],
+				"X-Codex-Primary-Window-Minutes":["300"],
+				"X-Codex-Primary-Reset-After-Seconds":["60"]
+			}
+		}`,
+		PoppedAt: time.Date(2026, 6, 22, 11, 10, 43, 0, time.Local),
+	}}); err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	appender := &recordingUsageHeaderQuotaAppender{allowed: false}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
+		UsageHeaderQuota:         appender,
+	})
+
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox should return after notifier call, got %v", err)
+	}
+	if result == nil || result.Status != "completed" || result.InsertedEvents != 1 {
+		t.Fatalf("unexpected process result: %+v", result)
+	}
+	if appender.eventCalls != 1 || appender.calls != 1 {
+		t.Fatalf("expected one aggregation notification and one rejected header append, got events=%d headers=%d", appender.eventCalls, appender.calls)
+	}
+}
+
+func TestProcessRedisUsageInboxNotifiesEventsWithoutUsageHeaderQuotaSnapshot(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		Source:     redisUsageInboxTestSource,
+		RawMessage: `{"timestamp":"2026-06-22T11:10:43+08:00","provider":"codex","auth_type":"oauth","auth_index":"codex-auth","model":"gpt-5.5","request_id":"header-quota-missing","tokens":{"input_tokens":1,"output_tokens":2}}`,
+		PoppedAt:   time.Date(2026, 6, 22, 11, 10, 43, 0, time.Local),
+	}}); err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
+		UsageHeaderQuota:         appender,
+	})
+
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 1 {
+		t.Fatalf("unexpected process result: %+v", result)
+	}
+	if appender.eventCalls != 1 || appender.calls != 0 || len(appender.snapshots) != 0 {
+		t.Fatalf("expected event wake without quota append, got events=%d calls=%d snapshots=%+v", appender.eventCalls, appender.calls, appender.snapshots)
+	}
+}
+
+func TestProcessRedisUsageInboxLeavesOverviewCatchUpToRunnerWhenInboxIsEmpty(t *testing.T) {
+	// 准备：插入尚未聚合的 raw event，并显式注入生产 aggregation notifier。
+	db := openSyncTestDatabase(t)
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
+		EventKey: "stale-event", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC), TotalTokens: 10,
+	}}); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+	notifier := &recordingUsageHeaderQuotaAppender{allowed: true}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com", UsageAggregationNotifier: notifier})
+
+	// 执行：空 inbox 不替后台 Runner 追平启动前已存在的 event。
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || !result.Empty || result.Status != "empty" {
+		t.Fatalf("unexpected empty process result: %+v", result)
+	}
+	// 断言：生产 notifier 路径保持 Overview checkpoint 不变，等待 Runner startup wake。
+	var checkpointCount int64
+	if err := db.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", entities.UsageAggregationCheckpointOverview).Count(&checkpointCount).Error; err != nil {
+		t.Fatalf("count overview aggregation checkpoints: %v", err)
+	}
+	if checkpointCount != 0 {
+		t.Fatalf("expected empty process to leave catch-up to runner, got %d checkpoints", checkpointCount)
+	}
+}
 
 func TestProcessRedisUsageInboxIgnoresIncompleteUsageHeaderQuotaSnapshotDuringCoalesce(t *testing.T) {
 	db := openSyncTestDatabase(t)
@@ -353,7 +597,7 @@ func TestProcessRedisUsageInboxIgnoresIncompleteUsageHeaderQuotaSnapshotDuringCo
 	if appender.calls != 1 || len(appender.snapshots) != 1 {
 		t.Fatalf("expected only one complete usage header snapshot, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
 	}
-	if appender.snapshots[0].Headers.Get("X-Codex-Primary-Used-Percent") != "4" {
+	if used, ok := codexSnapshotPrimaryUsedPercent(appender.snapshots[0]); !ok || used != 4 {
 		t.Fatalf("expected incomplete later header to be filtered before coalesce, got %+v", appender.snapshots[0])
 	}
 }

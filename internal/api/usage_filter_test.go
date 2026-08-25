@@ -294,6 +294,29 @@ func TestParseUsageFilterQueryRejectsMissingRange(t *testing.T) {
 	}
 }
 
+func TestParseUsageFilterQueryAcceptsLatestIdentityCursorWithoutRange(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?cursor_mode=true&page_size=50&source=shared-auth&auth_type=1", nil)
+
+	filter, err := parseUsageFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
+	}
+	if !filter.CursorMode || filter.PageSize != 50 || filter.Source != "shared-auth" || filter.AuthType != "oauth" {
+		t.Fatalf("expected latest auth-file cursor filter, got %+v", filter)
+	}
+	if filter.StartTime != nil || filter.EndTime != nil || filter.Range != "" {
+		t.Fatalf("expected latest cursor query without fixed time range, got %+v", filter)
+	}
+}
+
+func TestParseUsageFilterQueryRejectsInvalidIdentityAuthType(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?cursor_mode=true&source=shared-auth&auth_type=3", nil)
+
+	if _, err := parseUsageFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)); err == nil {
+		t.Fatal("expected invalid auth_type error")
+	}
+}
+
 func TestParseUsageFilterQueryDefaultsEventsPagination(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=24h", nil)
 
@@ -328,26 +351,6 @@ func TestParseUsageFilterQueryRejectsInvalidEventsCursor(t *testing.T) {
 	}
 }
 
-
-func TestParseUsageTimeFilterQueryIgnoresEventOnlyParameters(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=2d&page=0&page_size=25&model=x&source=y&auth_index=z&result=bogus&api_key_id=42", nil)
-	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-
-	filter, err := parseUsageTimeFilterQuery(req, anchor)
-	if err != nil {
-		t.Fatalf("time-only parser should ignore Events parameters: %v", err)
-	}
-	if filter.Range != "2d" || filter.RangeUnit != "day" || filter.RangeCount != 2 {
-		t.Fatalf("unexpected normalized time identity: %+v", filter)
-	}
-	if filter.APIKeyID != "42" {
-		t.Fatalf("expected Admin API key scope to remain available: %+v", filter)
-	}
-	if filter.Page != 0 || filter.PageSize != 0 || filter.Model != "" || filter.Source != "" || filter.AuthIndex != "" || filter.Result != "" {
-		t.Fatalf("time-only parser leaked Events fields: %+v", filter)
-	}
-}
-
 func TestParseUsageFilterQueryAcceptsAPIKeyID(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=24h&api_key_id=%201234567890123456789%20", nil)
 	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
@@ -366,6 +369,25 @@ func TestParseUsageFilterQueryAcceptsAPIKeyID(t *testing.T) {
 	}
 	if timeFilter.APIKeyID != "1234567890123456789" {
 		t.Fatalf("expected time filter to preserve api key id, got %+v", timeFilter)
+	}
+}
+
+func TestParseUsageTimeFilterQueryIgnoresEventOnlyParameters(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=2d&page=0&page_size=25&model=x&source=y&auth_index=z&result=bogus&api_key_id=42", nil)
+	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+
+	filter, err := parseUsageTimeFilterQuery(req, anchor)
+	if err != nil {
+		t.Fatalf("time-only parser should ignore Events parameters: %v", err)
+	}
+	if filter.Range != "2d" || filter.RangeUnit != "day" || filter.RangeCount != 2 {
+		t.Fatalf("unexpected normalized time identity: %+v", filter)
+	}
+	if filter.APIKeyID != "42" {
+		t.Fatalf("expected Admin API key scope to remain available: %+v", filter)
+	}
+	if filter.Page != 0 || filter.PageSize != 0 || filter.Model != "" || filter.Source != "" || filter.AuthIndex != "" || filter.Result != "" {
+		t.Fatalf("time-only parser leaked Events fields: %+v", filter)
 	}
 }
 
