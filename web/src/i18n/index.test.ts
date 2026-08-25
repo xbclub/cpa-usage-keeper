@@ -18,6 +18,41 @@ describe('i18n resources', () => {
     }
   });
 
+  it('keeps the compact Request Events column labels aligned in Chinese and English', () => {
+    const keys = [
+      'request_events_timestamp',
+      'api_key_filter',
+      'request_events_source',
+      'model_name',
+      'reasoning_effort',
+      'speed_mode',
+      'request_events_result',
+      'request_events_request',
+      'request_events_latency',
+      'speed',
+      'request_events_tokens',
+      'request_events_cache',
+      'request_events_cost',
+      'credentials_detail_executor',
+      'client_ip',
+      'x_forwarded_for',
+      'user_agent',
+    ];
+    const labels = (language: string) => keys.map((key) => (
+      i18n.getResource(language, 'translation', `usage_stats.${key}`)
+    ));
+
+    expect(labels('en')).toEqual([
+      'Timestamp', 'API Key', 'Source', 'Model', 'Effort', 'Speed Mode', 'Result', 'Request',
+      'Latency', 'Speed', 'Tokens', 'Cache', 'Cost', 'Executor', 'Client IP', 'X-Forwarded-For',
+      'User Agent',
+    ]);
+    expect(labels('zh')).toEqual([
+      '时间', 'API Key', '来源', '模型', '推理强度', '速度模式', '结果', '请求', '延时', '生成速度',
+      'Tokens', '缓存', '成本', '执行器', '客户端 IP', 'X-Forwarded-For', '用户代理',
+    ]);
+  });
+
   it('localizes Token Activity and density labels in every supported language', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.token_activity_title')).toBe('Token Activity');
     expect(i18n.getResource('en', 'translation', 'usage_stats.token_activity_less')).toBe('Less');

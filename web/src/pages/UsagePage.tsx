@@ -24,6 +24,7 @@ import {
   PriceSettingsCard,
   AuthFileCredentialsSection,
   AiProviderCredentialsSection,
+  CredentialDetailDrawer,
   CredentialProviderFilterBar,
   TimeRangeControl,
   useUsageData,
@@ -32,12 +33,14 @@ import {
   useOverviewRealtimeData,
   usePricingData,
   useSparklines,
-  useCredentialsTabData
+  useCredentialsTabData,
+  type CredentialDetailSelection,
 } from '@/components/usage';
 import {
   RequestEventsDetailsCard,
   REQUEST_EVENT_COLUMN_IDS,
   normalizeRequestEventColumnOrder,
+  normalizeRequestEventVisibleColumnIds,
   type RequestEventColumnId,
 } from '@/components/usage/RequestEventsDetailsCard';
 import { clampCustomRangeToCurrentBounds, clampStoredUsageRangeStateToCurrentBounds, parseLegacyCustomRange, parseStoredUsageRangeState, resolveUsageRangeRecoveryTimeZone, serializeUsageRangeState, type StoredUsageRangeState } from '@/utils/usage/customRange';
@@ -84,6 +87,14 @@ const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 50;
 const REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS = 90;
+// v9 将强关联字段折叠为组合列，并加入 Executor；旧版本直接重置列设置以避免错误折叠。
+const REQUEST_EVENTS_PREFERENCES_VERSION = 9;
+const ALL_REQUEST_EVENTS_FILTER = '__all__';
+const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
+const CPA_MANAGEMENT_PAGE = 'management.html';
+const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//i;
+const EXPLICIT_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:/i;
+const BARE_HOST_WITH_PORT_PATTERN = /^[a-z0-9.-]+:\d+(?:[/?#]|$)/i;
 export const getUsageCustomRangeForTab = (
   tab: UsageTab,
   customRange: UsageCustomRange | undefined,
@@ -97,15 +108,6 @@ export const getUsageCustomRangeForTab = (
     maxDayRangeDays: REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS,
   });
 };
-// v7 是完整列顺序格式；v8 加入客户端请求元数据列，并保留历史自定义顺序。
-const REQUEST_EVENTS_PREFERENCES_VERSION = 8;
-const ALL_REQUEST_EVENTS_FILTER = '__all__';
-const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
-const CPA_MANAGEMENT_PAGE = 'management.html';
-const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//i;
-const EXPLICIT_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:/i;
-const BARE_HOST_WITH_PORT_PATTERN = /^[a-z0-9.-]+:\d+(?:[/?#]|$)/i;
-
 type AnalysisSectionLoadOptions<TCore, TLatency> = {
   loadCore: () => Promise<TCore>;
   loadLatency: () => Promise<TLatency>;
@@ -280,169 +282,6 @@ const buildDefaultRequestEventsPreferences = (): RequestEventsPreferences => ({
   columnOrder: [...REQUEST_EVENT_COLUMN_IDS],
 });
 
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V3 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'model_alias',
-  'reasoning_effort',
-  'service_tier',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cached_tokens',
-  'cache_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V4 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'model_alias',
-  'reasoning_effort',
-  'service_tier',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cache_read_tokens',
-  'cache_creation_tokens',
-  'cache_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V7 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'model_alias',
-  'reasoning_effort',
-  'service_tier',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cache_read_tokens',
-  'cache_creation_tokens',
-  'cache_read_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V5 = LEGACY_REQUEST_EVENT_COLUMN_IDS_V7;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V6 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'model_alias',
-  'reasoning_effort',
-  'service_tier',
-  'response_service_tier',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cache_read_tokens',
-  'cache_creation_tokens',
-  'cache_read_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V2 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'reasoning_effort',
-  'service_tier',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cached_tokens',
-  'cache_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V1 = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'reasoning_effort',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cached_tokens',
-  'cache_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_V1_WITH_MODEL_ALIAS = [
-  'timestamp',
-  'api_key',
-  'source',
-  'model',
-  'model_alias',
-  'reasoning_effort',
-  'result',
-  'request_type',
-  'endpoint',
-  'ttft',
-  'latency',
-  'speed',
-  'input_tokens',
-  'output_tokens',
-  'reasoning_tokens',
-  'cached_tokens',
-  'cache_rate',
-  'total_tokens',
-  'total_cost',
-] as const;
-
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 );
@@ -469,69 +308,32 @@ const normalizeRequestEventPreferenceFilters = (value: unknown): RequestEventFil
   };
 };
 
-const hasSameRequestEventColumnOrder = (
-  left: readonly string[],
-  right: readonly string[]
-): boolean => left.length === right.length && left.every((columnId, index) => columnId === right[index]);
-
-const migrateRequestEventColumnId = (value: unknown): RequestEventColumnId | null => {
-  if (value === 'cached_tokens') return 'cache_read_tokens';
-  if (value === 'cache_rate') return 'cache_read_rate';
-  if (value === 'response_service_tier') return 'service_tier';
-  return isRequestEventColumnId(value) ? value : null;
-};
-
-const normalizeRequestEventPreferenceColumnIds = (value: unknown, version: unknown): RequestEventColumnId[] => {
+const normalizeRequestEventPreferenceColumnIds = (value: unknown): RequestEventColumnId[] => {
   if (!Array.isArray(value)) {
     return [...REQUEST_EVENT_COLUMN_IDS];
   }
-
-  const rawColumnIds = value.filter((columnId): columnId is string => typeof columnId === 'string');
-  const legacyFullSelection = version !== REQUEST_EVENTS_PREFERENCES_VERSION && (
-    (version === 7 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V7)) ||
-    (version === 6 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V6)) ||
-    (version === 5 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V5)) ||
-    (version === 4 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V4)) ||
-    (version === 3 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V3)) ||
-    (version === 2 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V2)) ||
-    (typeof version === 'number' && version < 2 && (
-      hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V1) ||
-      hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V1_WITH_MODEL_ALIAS)
-    ))
-  );
-  if (legacyFullSelection) {
-    return [...REQUEST_EVENT_COLUMN_IDS];
-  }
-
-  const seen = new Set<RequestEventColumnId>();
-  const normalized: RequestEventColumnId[] = [];
-  for (const rawColumnId of rawColumnIds) {
-    const columnId = migrateRequestEventColumnId(rawColumnId);
-    if (columnId === null || seen.has(columnId)) continue;
-    seen.add(columnId);
-    normalized.push(columnId);
-  }
-  return normalized.length > 0 ? normalized : [...REQUEST_EVENT_COLUMN_IDS];
+  return normalizeRequestEventVisibleColumnIds(value.filter(isRequestEventColumnId));
 };
 
-const normalizeRequestEventPreferenceColumnOrder = (value: unknown, version: unknown): RequestEventColumnId[] => {
+const normalizeRequestEventPreferenceColumnOrder = (value: unknown): RequestEventColumnId[] => {
   if (!Array.isArray(value)) {
     return [...REQUEST_EVENT_COLUMN_IDS];
   }
-  const rawColumnIds = value.filter((columnId): columnId is string => typeof columnId === 'string');
-  if (version === 7 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V7)) {
-    return [...REQUEST_EVENT_COLUMN_IDS];
-  }
-  return normalizeRequestEventColumnOrder(rawColumnIds.filter(isRequestEventColumnId));
+  return normalizeRequestEventColumnOrder(value.filter(isRequestEventColumnId));
 };
 
 export const normalizeRequestEventsPreferences = (value: unknown): RequestEventsPreferences => {
   const preferences = isRecord(value) ? value : {};
+  const hasCurrentColumnSettings = preferences.version === REQUEST_EVENTS_PREFERENCES_VERSION;
   return {
     version: REQUEST_EVENTS_PREFERENCES_VERSION,
     filters: normalizeRequestEventPreferenceFilters(preferences.filters),
-    visibleColumnIds: normalizeRequestEventPreferenceColumnIds(preferences.visibleColumnIds, preferences.version),
-    columnOrder: normalizeRequestEventPreferenceColumnOrder(preferences.columnOrder, preferences.version),
+    visibleColumnIds: hasCurrentColumnSettings
+      ? normalizeRequestEventPreferenceColumnIds(preferences.visibleColumnIds)
+      : [...REQUEST_EVENT_COLUMN_IDS],
+    columnOrder: hasCurrentColumnSettings
+      ? normalizeRequestEventPreferenceColumnOrder(preferences.columnOrder)
+      : [...REQUEST_EVENT_COLUMN_IDS],
   };
 };
 
@@ -1046,6 +848,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [eventsColumnOrder, setEventsColumnOrder] = useState<RequestEventColumnId[]>(initialRequestEventsPreferences.columnOrder);
   const [eventsExportingFormat, setEventsExportingFormat] = useState<UsageEventsExportFormat | null>(null);
   const [eventsFilterOptionsLoaded, setEventsFilterOptionsLoaded] = useState(false);
+  const [credentialDetailSelection, setCredentialDetailSelection] = useState<CredentialDetailSelection | null>(null);
+  const [credentialDetailOpen, setCredentialDetailOpen] = useState(false);
   const [requestLogResponse, setRequestLogResponse] = useState<UsageEventRequestLogResponse | null>(null);
   const [requestLogError, setRequestLogError] = useState('');
   const [requestLogLoadingEventId, setRequestLogLoadingEventId] = useState<string | null>(null);
@@ -1742,6 +1546,16 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setRequestLogDownloading(false);
   }, []);
 
+  const handleCredentialDetailClose = useCallback(() => {
+    handleRequestLogClose();
+    setCredentialDetailOpen(false);
+  }, [handleRequestLogClose]);
+
+  const handleCredentialDetailOpen = useCallback((selection: CredentialDetailSelection) => {
+    setCredentialDetailSelection(selection);
+    setCredentialDetailOpen(true);
+  }, []);
+
   const handleRequestLogDownload = useCallback(async (eventId: string) => {
     if (!requestLogAccessEnabled) return;
     requestLogDownloadGenerationRef.current += 1;
@@ -1890,9 +1704,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, []);
 
 	  useEffect(() => {
-	    if (activeTab === 'events') return;
+	    if (activeTab === 'events' || credentialDetailOpen) return;
 	    handleRequestLogClose();
-	  }, [activeTab, handleRequestLogClose]);
+	  }, [activeTab, credentialDetailOpen, handleRequestLogClose]);
 
 	  useEffect(() => {
 	    if (activeTab !== 'events') {
@@ -2419,6 +2233,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       onResetQuotaForAuthIndex={credentialsData.resetQuotaForAuthIndex}
                       aliasSavingId={credentialsData.aliasSavingId}
                       onSaveAlias={credentialsData.saveUsageIdentityAlias}
+                      onOpenDetails={(row) => handleCredentialDetailOpen({ kind: 'auth-file', row })}
                       onRefreshInspectionStatus={credentialsData.refreshQuotaInspectionStatus}
                       onStartInspection={credentialsData.startQuotaInspection}
                       onAfterInvalidAccountAction={credentialsData.refresh}
@@ -2435,6 +2250,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       loading={credentialsData.loading}
                       aliasSavingId={credentialsData.aliasSavingId}
                       onSaveAlias={credentialsData.saveUsageIdentityAlias}
+                      onOpenDetails={(row) => handleCredentialDetailOpen({ kind: 'ai-provider', row })}
                       onPageChange={credentialsData.setAiProviderPage}
                       onPageSizeChange={credentialsData.setAiProviderPageSize}
                       onSortChange={credentialsData.setAiProviderSort}
@@ -2476,6 +2292,20 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
           </div>
         </main>
       </div>
+      <CredentialDetailDrawer
+        open={credentialDetailOpen}
+        selection={credentialDetailSelection}
+        onAuthRequired={onAuthRequired}
+        requestLogAccessEnabled={requestLogAccessEnabled}
+        onRequestLogOpen={handleRequestLogOpen}
+        requestLogLoadingEventId={requestLogLoadingEventId}
+        requestLogResponse={requestLogResponse}
+        requestLogError={requestLogError}
+        onRequestLogClose={handleRequestLogClose}
+        onRequestLogDownload={handleRequestLogDownload}
+        requestLogDownloading={requestLogDownloading}
+        onClose={handleCredentialDetailClose}
+      />
       <Modal
         open={logoutConfirmOpen}
         title={t('usage_stats.logout_confirm_title')}

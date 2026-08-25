@@ -10,6 +10,7 @@ const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
 const keyOverviewPageStyles = readSource(new URL('../KeyOverviewPage.module.scss', import.meta.url))
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
+const requestEventLogSource = readSource(new URL('../../components/usage/RequestEventLogModal.tsx', import.meta.url))
 const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
 const priceSettingsSource = readSource(new URL('../../components/usage/PriceSettingsCard.tsx', import.meta.url))
 const priceRulesSource = readSource(new URL('../../components/usage/pricing/PriceRulesModal.tsx', import.meta.url))
@@ -68,6 +69,20 @@ const styleRuleBlock = (source: string, selector: string) => {
   return source.slice(open + 1, close)
 }
 
+const cssHexVariable = (rule: string, name: string) => {
+  const match = rule.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6});`))
+  if (!match) throw new Error(`Missing CSS variable: ${name}`)
+  return match[1]
+}
+
+const relativeLuminance = (hex: string) => {
+  const channels = hex.slice(1).match(/.{2}/g)?.map((value) => Number.parseInt(value, 16) / 255) ?? []
+  const [red, green, blue] = channels.map((value) => (
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  ))
+  return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+}
+
 describe('UsagePage toolbar styles', () => {
   it('renders every authenticated page header logo at 20px without pill chrome', () => {
     for (const pageStyles of [usagePageStyles, keyOverviewPageStyles]) {
@@ -106,6 +121,14 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/)
   })
 
+  it('uses the stacked primary emphasis for standalone request event values', () => {
+    const primaryValueBlock = styleRuleBlock(usagePageStyles, '.requestEventsStackedPrimary,')
+
+    expect(primaryValueBlock).toContain('color: var(--text-primary);')
+    expect(primaryValueBlock).toContain('font-weight: 700;')
+    expect(usagePageStyles).toContain('.requestEventsPrimaryCell {')
+  })
+
   it('routes Analysis and Activity cards through the global surface and heading contract', () => {
     const analysisChartSurface = styleRuleBlock(analysisPanelStyles, '\n.analysisChartSurface {')
 
@@ -121,7 +144,7 @@ describe('UsagePage toolbar styles', () => {
     expect(tokenActivityCardSource).toContain('keeper-card-title-track')
     expect(statCardsSource).not.toContain('keeper-card-surface')
     expect(dailyAverageCardSource).not.toContain('keeper-card-surface')
-    expect(analysisChartSurface).toContain('border-radius: $radius-lg;')
+    expect(analysisChartSurface).toContain('border-radius: var(--keeper-card-radius);')
   })
 
   it('keeps only the ranking source switch beside Refresh in the shared top toolbar', () => {
@@ -594,6 +617,8 @@ describe('UsagePage toolbar styles', () => {
   it('renders Recent Activity between the stat cards and realtime metrics', () => {
     const realtimeCard = styleRuleBlock(usagePageStyles, '.overviewRealtimeCard')
     const realtimeCompactCard = styleRuleBlock(usagePageStyles, '.overviewRealtimeCardCompact')
+    const lightTokenActivityCard = styleRuleBlock(usagePageStyles, '.tokenActivityCard')
+    const darkTokenActivityCard = styleRuleBlock(usagePageStyles, ":global([data-theme='dark']) .tokenActivityCard")
 
     expect(usagePageSource).toContain('<OverviewRealtimePanel')
     expect(keyOverviewPageSource).toContain('<OverviewRealtimePanel')
@@ -616,7 +641,11 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toContain('--token-activity-level-3: #60a5fa;')
     expect(usagePageStyles).toContain('--token-activity-level-4: #3b82f6;')
     expect(usagePageStyles).toContain('--token-activity-level-5: #1d4ed8;')
-    expect(usagePageStyles).toMatch(/:global\(\[data-theme='dark'\]\) \.tokenActivityCard\s*\{[\s\S]*?--token-activity-level-1:\s*#172554;/)
+    expect(darkTokenActivityCard).not.toContain('--activity-heatmap-idle:')
+    const lightLevelLuminance = [1, 2, 3, 4, 5].map((level) => relativeLuminance(cssHexVariable(lightTokenActivityCard, `--token-activity-level-${level}`)))
+    const darkLevelLuminance = [1, 2, 3, 4, 5].map((level) => relativeLuminance(cssHexVariable(darkTokenActivityCard, `--token-activity-level-${level}`)))
+    lightLevelLuminance.slice(0, -1).forEach((luminance, index) => expect(luminance).toBeGreaterThan(lightLevelLuminance[index + 1]))
+    darkLevelLuminance.slice(0, -1).forEach((luminance, index) => expect(luminance).toBeGreaterThan(darkLevelLuminance[index + 1]))
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeCardFull\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/)
@@ -891,10 +920,37 @@ describe('UsagePage toolbar styles', () => {
     expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeySettingsItem\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/)
     expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeySettingsItem\s*\{[^}]*align-items:\s*stretch;/)
     expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeyAliasField\s*\{[\s\S]*?width:\s*100%;/)
-    expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeyAliasField\s*\{[\s\S]*?:global\(\.form-group\)\s*\{[\s\S]*?width:\s*100%;/)
-    expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeyAliasField\s*\{[\s\S]*?:global\(\.form-group\)\s*\{[\s\S]*?min-width:\s*0;/)
-    expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeyAliasField\s*\{[\s\S]*?:global\(\.form-group\)\s*\{[\s\S]*?margin-bottom:\s*0;/)
     expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeyAliasInput\s*\{[\s\S]*?max-width:\s*100%;/)
+  })
+
+  it('keeps Settings data cards and alias controls on the shared rounded layout', () => {
+    const apiKeySettingsListBlock = styleRuleBlock(usagePageStyles, '.apiKeySettingsList')
+    const apiKeyAliasInputBlock = styleRuleBlock(usagePageStyles, '.apiKeyAliasInput:global(.input)')
+    const apiKeyAliasFieldBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.apiKeyAliasField {'),
+      usagePageStyles.indexOf('.apiKeyFieldLabel,'),
+    )
+    const apiKeyNameRowBlock = styleRuleBlock(usagePageStyles, '.apiKeySettingsNameRow')
+    const apiKeyCopyIconBlock = styleRuleBlock(usagePageStyles, '.apiKeySettingsCopyIconButton')
+    const sessionSettingsItemBlock = styleRuleBlock(usagePageStyles, '.sessionSettingsItem')
+    const tabletBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('@include tablet {\n  .apiKeySettingsList'),
+      usagePageStyles.indexOf('@include mobile {\n  .apiKeySettingsCard:global(.card)'),
+    )
+
+    expect(apiKeySettingsListBlock).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));')
+    expect(apiKeyAliasInputBlock).toContain('height: 32px;')
+    expect(apiKeyAliasInputBlock).toContain('min-height: 32px;')
+    expect(apiKeyAliasInputBlock).toContain('padding: 6px 12px;')
+    expect(apiKeyAliasInputBlock).toContain('line-height: 18px;')
+    expect(apiKeyAliasInputBlock).toContain('border-radius: 999px;')
+    expect(apiKeyAliasInputBlock).not.toContain('height: 40px;')
+    expect(apiKeyAliasFieldBlock).toMatch(/:global\(\.form-group\)\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?margin-bottom:\s*0;/)
+    expect(apiKeyNameRowBlock).toContain('grid-template-columns: minmax(0, 1fr) auto;')
+    expect(apiKeyCopyIconBlock).toContain('width: 28px;')
+    expect(apiKeyCopyIconBlock).toContain('height: 28px;')
+    expect(sessionSettingsItemBlock).toContain('border-radius: 20px;')
+    expect(tabletBlock).toMatch(/\.apiKeySettingsList\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
   })
 
   it('lets Session Management content shrink until it needs to scroll', () => {
@@ -938,6 +994,7 @@ describe('UsagePage toolbar styles', () => {
     expect(clientBlock).toMatch(/white-space:\s*normal;/)
     expect(clientBlock).toMatch(/overflow-wrap:\s*anywhere;/)
     expect(clientBlock).toContain('border: 1px solid var(--border-color);')
+    expect(clientBlock).toContain('border-radius: 16px;')
     expect(clientBlock).toContain('background: var(--bg-tertiary);')
     expect(clientBlock).not.toMatch(/text-overflow:\s*ellipsis;/)
     expect(clientBlock).not.toMatch(/white-space:\s*nowrap;/)
@@ -965,7 +1022,7 @@ describe('UsagePage toolbar styles', () => {
 
   it('keeps Session and API Key Settings row actions compact like Model Pricing actions', () => {
     const apiKeyButtonsBlock = usagePageStyles.slice(
-      usagePageStyles.indexOf('.apiKeySettingsCopyButton,'),
+      usagePageStyles.indexOf('.apiKeySettingsSaveButton {'),
       usagePageStyles.indexOf('.sessionSettingsCard:global(.card)')
     )
     const sessionButtonBlock = usagePageStyles.slice(
@@ -976,18 +1033,19 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).not.toContain('.settingsCompactAction')
     expect(apiKeyButtonsBlock).not.toContain('min-height: 40px;')
     expect(sessionButtonBlock).not.toContain('min-height: 40px;')
-    expect(apiKeySettingsSource.match(/appearance="action"/g)).toHaveLength(2)
+    expect(apiKeySettingsSource.match(/appearance="action"/g)).toHaveLength(1)
+    expect(apiKeySettingsSource).not.toContain('styles.apiKeySettingsCopyButton')
     expect(sessionSettingsSource.match(/appearance="action"/g)).toHaveLength(3)
   })
 
   it('contains wheel scrolling at overflowing card boundaries without trapping short lists', () => {
     expect(requestEventsSource).toContain('useScrollBoundaryContainment(requestEventsTableWrapperRef, rows.length > 0);')
-    expect(requestEventsSource).toContain('useScrollBoundaryContainment(scrollerRef);')
+    expect(requestEventLogSource).toContain('useScrollBoundaryContainment(scrollerRef)')
     expect(apiKeySettingsSource).toContain('useScrollBoundaryContainment(apiKeySettingsBodyRef);')
     expect(sessionSettingsSource).toContain('useScrollBoundaryContainment(sessionSettingsBodyRef);')
     expect(priceSettingsSource).toContain('useScrollBoundaryContainment(pricesGridRef, sortedModelPrices.length > 0);')
     expect(requestEventsSource).toContain('ref={requestEventsTableWrapperRef} className={styles.requestEventsTableWrapper}')
-    expect(requestEventsSource).toContain('className={styles.requestEventsLogSectionPanelInner} ref={scrollerRef}')
+    expect(requestEventLogSource).toContain('className={styles.requestEventsLogSectionPanelInner} ref={scrollerRef}')
     expect(apiKeySettingsSource).toContain('ref={apiKeySettingsBodyRef} className={styles.apiKeySettingsBody}')
     expect(sessionSettingsSource).toContain('ref={sessionSettingsBodyRef} className={styles.sessionSettingsBody}')
     expect(priceSettingsSource).toContain('ref={pricesGridRef} className={styles.pricesGrid}')
@@ -1305,15 +1363,26 @@ describe('UsagePage toolbar styles', () => {
     expect(requestEventsSource).not.toContain('styles.durationCell')
   })
 
-  it('uses the shared adaptive style for the Request Event Log reasoning column', () => {
+  it('folds reasoning tokens into the adaptive Tokens column', () => {
     expect(usagePageStyles).not.toContain('.requestEventsReasoningHeader')
-    expect(requestEventColumnDefinitionBlock('reasoning_tokens')).toContain('styles.requestEventsNoWrapCell')
+    expect(requestEventsSource).not.toContain("id: 'reasoning_tokens',")
+    expect(requestEventColumnDefinitionBlock('total_tokens')).toContain('row.reasoningTokensLabel')
+    expect(requestEventColumnDefinitionBlock('total_tokens')).toContain('styles.requestEventsNoWrapCell')
   })
 
-  it('keeps Request Event Log long text columns controlled', () => {
-    expect(usagePageStyles).toMatch(/\.requestEventsAPIKeyCell\s*\{[\s\S]*?min-width:\s*135px;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsAPIKeyCell\s*\{[\s\S]*?max-width:\s*240px;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsSourceCell\s*\{[\s\S]*?min-width:\s*165px;/)
+  it('caps Request Event Log long text columns without forcing short aliases wide', () => {
+    const apiKeyCellBlock = Array.from(
+      usagePageStyles.matchAll(/\.requestEventsAPIKeyCell\s*\{([^}]*)\}/g),
+      (match) => match[1],
+    ).at(-1) ?? ''
+    const sourceCellBlock = styleRuleBlock(usagePageStyles, '.requestEventsSourceCell {')
+    const deletedTagBlock = styleRuleBlock(usagePageStyles, '.requestEventsDeletedTag')
+
+    expect(apiKeyCellBlock).toMatch(/max-width:\s*240px;/)
+    expect(apiKeyCellBlock).not.toContain('min-width:')
+    expect(sourceCellBlock).toMatch(/max-width:\s*280px;/)
+    expect(sourceCellBlock).not.toContain('min-width:')
+    expect(deletedTagBlock).toContain('white-space: nowrap;')
     expect(usagePageStyles).toMatch(/\.modelCell\s*\{[\s\S]*?min-width:\s*110px;/)
     expect(usagePageStyles).toMatch(/\.modelCell\s*\{[\s\S]*?max-width:\s*240px;/)
     expect(usagePageStyles).not.toContain('.requestEventsAuthIndex')
@@ -1333,17 +1402,10 @@ describe('UsagePage toolbar styles', () => {
       'service_tier',
       'result',
       'request_type',
-      'endpoint',
-      'ttft',
       'latency',
       'speed',
-      'input_tokens',
-      'output_tokens',
-      'reasoning_tokens',
-      'cache_read_tokens',
-      'cache_creation_tokens',
-      'cache_read_rate',
       'total_tokens',
+      'cache_read_rate',
       'total_cost',
     ]
     const noWrapCellBlock = usagePageStyles.slice(
@@ -1360,6 +1422,11 @@ describe('UsagePage toolbar styles', () => {
       expect(block).toMatch(/header:\s*<th[^>]*styles\.requestEventsNoWrapCell/)
       expect(block).toMatch(/renderCell:[\s\S]*<td[^>]*styles\.requestEventsNoWrapCell/)
     })
+
+    const executorBlock = requestEventColumnDefinitionBlock('executor_type')
+    expect(executorBlock).toMatch(/header:\s*<th[^>]*styles\.requestEventsNoWrapCell/)
+    expect(executorBlock).toContain('styles.requestEventsExecutorCell')
+    expect(usagePageStyles).toMatch(/\.requestEventsExecutorCell\s*\{[\s\S]*?white-space:\s*nowrap;/)
 
     const clientMetadataRenderer = requestEventsSource.slice(
       requestEventsSource.indexOf('const renderClientMetadataCell'),
@@ -1475,11 +1542,11 @@ describe('Pricing rules component boundary', () => {
 
   it('matches the compact model-pricing control sizes and aligns each rule row', () => {
     expect(priceRulesSource.match(/className=\{styles\.ruleInput\}/g)).toHaveLength(3)
-    expect(styleRuleBlock(priceRulesStyles, '.ruleInput')).toMatch(/height:\s*40px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.ruleInput')).toMatch(/height:\s*32px;/)
     expect(styleRuleBlock(priceRulesStyles, '.ruleInput')).toMatch(/border-radius:\s*999px;/)
     expect(priceRulesStyles).toMatch(/\.ruleRow\s+:global\(\.form-group > label\)\s*\{[\s\S]*?font-size:\s*10px;/)
     expect(styleRuleBlock(priceRulesStyles, '.removeButton')).not.toMatch(/min-height:/)
-    expect(styleRuleBlock(priceRulesStyles, '.removeButton')).toMatch(/margin-top:\s*20px;/)
+    expect(styleRuleBlock(priceRulesStyles, '.removeButton')).toMatch(/margin-top:\s*16px;/)
     expect(priceRulesStyles).not.toContain('.actionButton')
     expect(priceRulesSource.match(/appearance="action"/g)).toHaveLength(4)
     expect(priceRulesSource).not.toContain('usageStyles')

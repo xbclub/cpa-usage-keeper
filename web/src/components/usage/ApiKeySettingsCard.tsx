@@ -3,19 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { IconEye, IconEyeOff } from '@/components/ui/icons';
+import { IconCheck, IconCopy, IconEye, IconEyeOff } from '@/components/ui/icons';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import type { CpaApiKeySettingsItem } from '@/lib/types';
 import styles from '@/pages/UsagePage.module.scss';
-
-interface ApiKeySettingsTitleProps {
-  title: string;
-  subtitle: string;
-  showFullApiKeys: boolean;
-  onToggleFullApiKeys: () => void;
-  showFullLabel: string;
-  hideFullLabel: string;
-}
 
 type ClipboardWriter = Pick<Clipboard, 'writeText'>;
 type CopyTextArea = {
@@ -92,31 +83,6 @@ export async function copyApiKeyToClipboard(apiKey: string, context: CopyContext
   }
 }
 
-function ApiKeySettingsTitle({ title, subtitle, showFullApiKeys, onToggleFullApiKeys, showFullLabel, hideFullLabel }: ApiKeySettingsTitleProps) {
-  const toggleLabel = showFullApiKeys ? hideFullLabel : showFullLabel;
-
-  return (
-    <div className={styles.sectionTitleBlock}>
-      <div className={styles.apiKeySettingsTitleRow}>
-        <h3 className={styles.sectionTitle}>{title}</h3>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={`${styles.apiKeyVisibilityToggle} ${showFullApiKeys ? styles.apiKeyVisibilityToggleActive : ''}`.trim()}
-          onClick={onToggleFullApiKeys}
-          aria-label={toggleLabel}
-          aria-pressed={showFullApiKeys}
-          title={toggleLabel}
-        >
-          {showFullApiKeys ? <IconEye size={16} /> : <IconEyeOff size={16} />}
-        </Button>
-      </div>
-      <p className={styles.sectionSubtitle}>{subtitle}</p>
-    </div>
-  );
-}
-
 export interface ApiKeySettingsCardProps {
   apiKeys: CpaApiKeySettingsItem[];
   loading?: boolean;
@@ -162,18 +128,27 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
       onNotice?.('error', t('usage_stats.api_key_settings_copy_failed'));
     }
   }, [onNotice, t]);
+  const toggleLabel = showFullApiKeys
+    ? t('usage_stats.api_key_settings_hide_full')
+    : t('usage_stats.api_key_settings_show_full');
 
   return (
     <Card
-      title={
-        <ApiKeySettingsTitle
-          title={t('usage_stats.api_key_settings_title')}
-          subtitle={t('usage_stats.api_key_settings_subtitle')}
-          showFullApiKeys={showFullApiKeys}
-          onToggleFullApiKeys={() => setShowFullApiKeys((current) => !current)}
-          showFullLabel={t('usage_stats.api_key_settings_show_full')}
-          hideFullLabel={t('usage_stats.api_key_settings_hide_full')}
-        />
+      title={t('usage_stats.api_key_settings_title')}
+      subtitle={t('usage_stats.api_key_settings_subtitle')}
+      titleMeta={
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={`${styles.apiKeyVisibilityToggle} ${showFullApiKeys ? styles.apiKeyVisibilityToggleActive : ''}`.trim()}
+          onClick={() => setShowFullApiKeys((current) => !current)}
+          aria-label={toggleLabel}
+          aria-pressed={showFullApiKeys}
+          title={toggleLabel}
+        >
+          {showFullApiKeys ? <IconEye size={16} /> : <IconEyeOff size={16} />}
+        </Button>
       }
       className={`${styles.detailsFixedCard} ${styles.apiKeySettingsCard}`}
     >
@@ -193,7 +168,19 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
                 <div key={item.id} className={styles.apiKeySettingsItem}>
                   <div className={styles.apiKeySettingsSummary}>
                     <span className={styles.apiKeyFieldLabel}>{t('usage_stats.api_key_settings_display_key')}</span>
-                    <span className={styles.apiKeySettingsName} title={apiKey}>{apiKey}</span>
+                    <div className={styles.apiKeySettingsNameRow}>
+                      <span className={styles.apiKeySettingsName} title={apiKey}>{apiKey}</span>
+                      <button
+                        type="button"
+                        className={`${styles.apiKeySettingsCopyIconButton} ${copiedId === item.id ? styles.apiKeySettingsCopyIconButtonCopied : ''}`.trim()}
+                        onClick={() => void handleCopyApiKey(item)}
+                        disabled={!item.apiKey}
+                        aria-label={copyLabel}
+                        title={copyLabel}
+                      >
+                        {copiedId === item.id ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                      </button>
+                    </div>
                   </div>
                   <div className={styles.apiKeySettingsForm}>
                     <label className={styles.apiKeyAliasField}>
@@ -209,18 +196,10 @@ export function ApiKeySettingsCard({ apiKeys, loading = false, savingId = null, 
                     </label>
                     <div className={styles.apiKeySettingsActions}>
                       <Button
-                        variant="secondary"
-                        size="sm"
-                        className={`${styles.usagePillAction} ${styles.settingsCompactAction} ${styles.apiKeySettingsCopyButton}`.trim()}
-                        onClick={() => void handleCopyApiKey(item)}
-                        disabled={!item.apiKey}
-                      >
-                        {copyLabel}
-                      </Button>
-                      <Button
                         variant="primary"
                         size="sm"
-                        className={`${styles.usagePillAction} ${styles.settingsCompactAction} ${styles.apiKeySettingsSaveButton}`.trim()}
+                        appearance="action"
+                        className={styles.apiKeySettingsSaveButton}
                         onClick={() => onSaveAlias(item.id, draftAlias)}
                         disabled={disabled}
                       >

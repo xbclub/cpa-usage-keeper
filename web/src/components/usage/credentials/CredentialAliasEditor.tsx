@@ -1,4 +1,4 @@
-import { useState, type HTMLAttributes } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { IconCheck, IconPencil, IconX } from '@/components/ui/icons'
@@ -10,7 +10,7 @@ interface CredentialAliasEditorProps {
   alias?: string | null
   saving: boolean
   disabled?: boolean
-  displayNameProps?: HTMLAttributes<HTMLSpanElement>
+  onOpenDetails?: () => void
   onSaveAlias: (id: string, alias: string) => Promise<void>
 }
 
@@ -18,7 +18,7 @@ export function isCredentialAliasEditorDisabled(identityId: string, isDeleted?: 
   return Boolean(isDeleted || (aliasSavingId && aliasSavingId !== identityId))
 }
 
-export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, displayNameProps, onSaveAlias }: CredentialAliasEditorProps) {
+export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, onOpenDetails, onSaveAlias }: CredentialAliasEditorProps) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [draftAlias, setDraftAlias] = useState(alias ?? '')
@@ -101,7 +101,19 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
   return (
     <span className={styles.credentialAliasEditor}>
       <span className={styles.credentialAliasDisplayLayout}>
-        <span {...displayNameProps} className={`${styles.credentialAliasNameSlot} ${displayNameProps?.className ?? ''}`.trim()}>{displayName}</span>
+        {onOpenDetails ? (
+          <button
+            type="button"
+            className={`${styles.credentialAliasNameSlot} ${styles.credentialDetailNameButton}`}
+            data-credential-detail-trigger="true"
+            onClick={onOpenDetails}
+          >
+            <span className={styles.credentialDetailNameText}>{displayName}</span>
+            <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
+          </button>
+        ) : (
+          <span className={styles.credentialAliasNameSlot}>{displayName}</span>
+        )}
         <span className={styles.credentialAliasActionSlot}>
           {canEdit && (
             <button

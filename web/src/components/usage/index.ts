@@ -1,12 +1,14 @@
 export { StatCards } from './StatCards';
-export { ApiKeySummaryTable } from './ApiKeySummaryTable';
 export { DailyAverageCard } from './DailyAverageCard';
 export { OverviewRealtimePanel } from './OverviewRealtimePanel';
 export { AnalysisPanel } from './analysis';
 export { ApiKeySettingsCard } from './ApiKeySettingsCard';
 export { SessionSettingsCard } from './SessionSettingsCard';
 export { PriceSettingsCard } from './PriceSettingsCard';
-export { AiProviderCredentialsSection, AuthFileCredentialsSection, CredentialProviderFilterBar, useCredentialsTabData } from './credentials';
+export { AiProviderCredentialsSection, AuthFileCredentialsSection, CredentialDetailDrawer, CredentialProviderFilterBar, useCredentialsTabData } from './credentials';
+// fork-unique:API Key 汇总表组件(上游无此特性)。
+export { ApiKeySummaryTable } from './ApiKeySummaryTable';
+export type { CredentialDetailSelection } from './credentials';
 export { RequestEventsDetailsCard } from './RequestEventsDetailsCard';
 export { ServiceHealthCard } from './ServiceHealthCard';
 export { TokenActivityCard } from './TokenActivityCard';
