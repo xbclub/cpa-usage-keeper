@@ -39,6 +39,8 @@ type tokenProcessorHeaderRecorder struct {
 
 func (r *tokenProcessorHeaderRecorder) NotifyUsageEventsCommitted(_ []entities.UsageEvent) {}
 
+func (r *tokenProcessorHeaderRecorder) NotifyUsageIdentitiesChanged() {}
+
 func (r *tokenProcessorHeaderRecorder) TryAppendUsageHeaderSnapshots(snapshots []*quota.UsageHeaderSnapshot) bool {
 	// 只记录事务提交后真正投递的 snapshot，用于证明 unresolved 行没有提前泄漏。
 	r.calls++
