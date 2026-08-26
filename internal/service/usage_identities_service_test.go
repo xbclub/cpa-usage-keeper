@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
+	"cpa-usage-keeper/internal/testutil"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
-	"cpa-usage-keeper/internal/testutil"
 )
 
 func TestUsageIdentityServiceAddsCredentialHealthToPagedRows(t *testing.T) {
@@ -60,5 +60,39 @@ func TestUsageIdentityServiceAddsCredentialHealthToPagedRows(t *testing.T) {
 	}
 	if health.TotalSuccess != 1 || health.TotalFailure != 1 {
 		t.Fatalf("expected AI provider health to ignore oauth rows with the same auth_index, got %+v", health)
+	}
+}
+
+func TestUsageIdentityServiceRunsDisplayNameChangeCallbackAfterAliasUpdate(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	if err := repository.ReplaceUsageIdentitiesForAuthType(context.Background(), db, []entities.UsageIdentity{{
+		Name:     "Upstream Auth",
+		Identity: "auth-1",
+		Type:     "claude",
+		Provider: "Claude",
+	}}, entities.UsageIdentityAuthTypeAuthFile, now); err != nil {
+		t.Fatalf("seed usage identity: %v", err)
+	}
+	var callbackRows []entities.UsageIdentity
+	provider := NewUsageIdentityServiceWithOptions(db, nil, UsageIdentityServiceOptions{
+		OnDisplayNameChanged: func(identity entities.UsageIdentity) {
+			callbackRows = append(callbackRows, identity)
+		},
+	})
+
+	updated, err := provider.UpdateUsageIdentityAlias(context.Background(), 1, "Friendly Auth")
+	if err != nil {
+		t.Fatalf("UpdateUsageIdentityAlias returned error: %v", err)
+	}
+
+	if updated.Alias == nil || *updated.Alias != "Friendly Auth" {
+		t.Fatalf("expected updated alias in response, got %+v", updated)
+	}
+	if len(callbackRows) != 1 {
+		t.Fatalf("expected one display name callback, got %+v", callbackRows)
+	}
+	if callbackRows[0].Identity != "auth-1" || callbackRows[0].Alias == nil || *callbackRows[0].Alias != "Friendly Auth" {
+		t.Fatalf("expected callback to receive updated identity, got %+v", callbackRows[0])
 	}
 }

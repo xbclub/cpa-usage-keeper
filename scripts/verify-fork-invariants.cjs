@@ -139,7 +139,6 @@ const FORK_SYMBOLS = [
   ['internal/api/usage_overview.go', 'buildUsageOverviewAPIKeySummary'],
   ['internal/api/usage_overview.go', 'api_key_summary'],
   ['internal/repository/usage.go', 'model IN ?'],            // 多选 filter
-  ['internal/api/usage_analysis.go', 'range_outside_recent_30_days'], // latency guard
   // overview model 筛选接线链(Step 4.5 #3/#4;v1.12.0 丢接线 2 个月,v1.14.5 review 修复)——
   // "code exists ≠ wired":4 个符号钉住 service 拆分 + 3 处查询注入,任何一处被 merge 抹掉立刻红。
   ['internal/service/usage.go', 'Models: splitUsageModelsFilter'],

@@ -9,17 +9,6 @@ import (
 	"cpa-usage-keeper/internal/cpa"
 )
 
-var cleanupConfigEnvKeys = []string{
-	"APP_PORT", "APP_BASE_PATH", "CPA_PUBLIC_URL", "WORK_DIR", "CPA_BASE_URL", "CPA_MANAGEMENT_KEY",
-	"REDIS_QUEUE_ADDR", "REDIS_QUEUE_TLS", "REDIS_QUEUE_BATCH_SIZE", "REDIS_QUEUE_IDLE_INTERVAL",
-	"BACKUP_ENABLED", "BACKUP_INTERVAL", "BACKUP_RETENTION_DAYS", "CLEANUP_USAGE_EVENTS_ENABLED",
-	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
-	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TZ", "TLS_ENABLED", "TLS_CERT_FILE", "TLS_KEY_FILE",
-	"TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT",
-}
-
-// isolatedConfigEnvKeys + isolateConfigEnv 对齐上游通用环境隔离 helper(listen_host 等
-// 上游新测试依赖;fork 原本只有 cleanup 域的 isolateCleanupConfigEnv)。
 var isolatedConfigEnvKeys = []string{
 	"APP_HOST", "APP_PORT", "APP_BASE_PATH", "CPA_PUBLIC_URL", "WORK_DIR", "CPA_BASE_URL", "CPA_MANAGEMENT_KEY",
 	"CPA_REQUEST_LOG_ACCESS_ENABLED",
@@ -28,6 +17,37 @@ var isolatedConfigEnvKeys = []string{
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TRUSTED_PROXY_CIDRS", "TZ", "TLS_ENABLED", "TLS_CERT_FILE", "TLS_KEY_FILE",
 	"TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT",
+}
+
+func TestLoadFromEnvDefaultsCPARequestLogAccessDisabled(t *testing.T) {
+	isolateConfigEnv(t)
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+
+	if cfg.CPARequestLogAccessEnabled {
+		t.Fatal("expected CPA request log access to be disabled by default")
+	}
+}
+
+func TestLoadFromEnvReadsCPARequestLogAccessFlag(t *testing.T) {
+	isolateConfigEnv(t)
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("CPA_REQUEST_LOG_ACCESS_ENABLED", "true")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+
+	if !cfg.CPARequestLogAccessEnabled {
+		t.Fatal("expected CPA request log access to be enabled")
+	}
 }
 
 func isolateConfigEnv(t *testing.T) {
@@ -47,66 +67,6 @@ func isolateConfigEnv(t *testing.T) {
 	t.Cleanup(func() {
 		time.Local = previousLocal
 		for _, key := range isolatedConfigEnvKeys {
-			if previousPresent[key] {
-				if err := os.Setenv(key, previousEnv[key]); err != nil {
-					t.Fatalf("restore %s: %v", key, err)
-				}
-				continue
-			}
-			if err := os.Unsetenv(key); err != nil {
-				t.Fatalf("unset %s: %v", key, err)
-			}
-		}
-	})
-}
-
-func TestLoadFromEnvDefaultsUsageEventCleanupDisabled(t *testing.T) {
-	isolateCleanupConfigEnv(t)
-	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
-	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
-	t.Setenv("AUTH_ENABLED", "false")
-
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv returned error: %v", err)
-	}
-
-	if cfg.CleanupUsageEventsEnabled {
-		t.Fatal("expected usage_events cleanup to be disabled by default")
-	}
-}
-
-func TestLoadFromEnvReadsUsageEventCleanupFlag(t *testing.T) {
-	isolateCleanupConfigEnv(t)
-	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
-	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
-	t.Setenv("AUTH_ENABLED", "false")
-	t.Setenv("CLEANUP_USAGE_EVENTS_ENABLED", "true")
-
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv returned error: %v", err)
-	}
-
-	if !cfg.CleanupUsageEventsEnabled {
-		t.Fatal("expected usage_events cleanup to be enabled")
-	}
-}
-
-func isolateCleanupConfigEnv(t *testing.T) {
-	t.Helper()
-	previousLocal := time.Local
-	previousEnv := make(map[string]string, len(cleanupConfigEnvKeys))
-	previousPresent := make(map[string]bool, len(cleanupConfigEnvKeys))
-	for _, key := range cleanupConfigEnvKeys {
-		previousEnv[key], previousPresent[key] = os.LookupEnv(key)
-		if err := os.Unsetenv(key); err != nil {
-			t.Fatalf("unset %s: %v", key, err)
-		}
-	}
-	t.Cleanup(func() {
-		time.Local = previousLocal
-		for _, key := range cleanupConfigEnvKeys {
 			if previousPresent[key] {
 				if err := os.Setenv(key, previousEnv[key]); err != nil {
 					t.Fatalf("restore %s: %v", key, err)

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"cpa-usage-keeper/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 func TestAppCloseClosesDatabase(t *testing.T) {
@@ -662,4 +664,68 @@ func waitForServerUp(t *testing.T, addr string, timeout time.Duration) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("server at %s did not come up within %s", addr, timeout)
+}
+
+func TestNewWithConfigBuildsQuotaAutoRefreshRunner(t *testing.T) {
+	app, err := NewWithConfig(testAppConfig(t))
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	defer app.Close()
+	if app.QuotaAutoRefresh == nil {
+		t.Fatal("expected quota scheduled refresh runner to be initialized")
+	}
+	if app.QuotaService == nil {
+		t.Fatal("expected quota service to remain available for manual refresh")
+	}
+}
+
+func TestNewWithConfigContinuesWhenRecentUsageCacheInitializationFails(t *testing.T) {
+	cacheErr := errors.New("recent cache unavailable")
+	previousNewRecentUsageCache := newUsageRecentEventCache
+	newUsageRecentEventCache = func(*gorm.DB, repository.UsageRecentEventCacheOptions) (*repository.UsageRecentEventCache, error) {
+		return nil, cacheErr
+	}
+	t.Cleanup(func() { newUsageRecentEventCache = previousNewRecentUsageCache })
+
+	logDir := t.TempDir()
+	cfg := testAppConfig(t)
+	cfg.LogFileEnabled = true
+	cfg.LogDir = logDir
+	app, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	defer app.Close()
+
+	if app.RecentUsageCache != nil {
+		t.Fatalf("expected recent usage cache to be nil after initialization failure, got %T", app.RecentUsageCache)
+	}
+	logContent := readAppLogFile(t, logDir)
+	if !strings.Contains(logContent, "| error |") || !strings.Contains(logContent, "recent usage event cache initialization failed") || !strings.Contains(logContent, cacheErr.Error()) {
+		t.Fatalf("expected error log for recent usage cache initialization failure, got %s", logContent)
+	}
+}
+
+func TestRunSetsQuotaServiceContext(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.AppPort = "invalid-port"
+	quotaService := &quotaContextRecorder{contextSet: make(chan context.Context, 1)}
+	app := &App{
+		Config:       &cfg,
+		Router:       gin.New(),
+		QuotaService: quotaService,
+	}
+
+	if err := app.Run(); err == nil {
+		t.Fatal("expected Run to return an error for invalid port")
+	}
+	select {
+	case ctx := <-quotaService.contextSet:
+		if ctx == nil {
+			t.Fatal("expected quota service context to be non-nil")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected quota service context to be set")
+	}
 }
