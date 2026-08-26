@@ -46,12 +46,17 @@ func (s *usageAnalysisStub) GetUsageOverview(context.Context, servicedto.UsageFi
 	return nil, nil
 }
 
+func (s *usageAnalysisStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, nil
+}
+
 func (s *usageAnalysisStub) GetUsageOverviewRealtime(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
 	return nil, nil
 }
 
+// ListOverviewModels 是 fork-unique 的 /usage/models endpoint stub(上游接口没有此方法)。
 func (s *usageAnalysisStub) ListOverviewModels(context.Context, servicedto.UsageFilter) ([]string, error) {
-	return nil, nil
+	return nil, s.err
 }
 
 func (s *usageAnalysisStub) ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
@@ -72,11 +77,7 @@ func (s *usageAnalysisStub) GetAnalysis(_ context.Context, filter servicedto.Usa
 	return s.analysis, s.err
 }
 
-func (s *usageAnalysisStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
-	return nil, s.err
-}
-
-func (s *usageAnalysisStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+func (s *usageAnalysisStub) GetAnalysisLatency(_ context.Context, _ servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
 	return nil, s.err
 }
 
@@ -199,6 +200,9 @@ func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 	}
 	if !contains(body, `"model_efficiency":`) || !contains(body, `"cost_per_request_usd":0.615`) || !contains(body, `"output_tokens_per_request":5.5`) || !contains(body, `"cache_read_rate":0.03333333333333333`) {
 		t.Fatalf("expected model efficiency in response body: %s", body)
+	}
+	if contains(body, `"latency_diagnostics":`) {
+		t.Fatalf("expected latency diagnostics to use the independent endpoint, got %s", body)
 	}
 	if provider.analysisCalls != 1 {
 		t.Fatalf("expected GetAnalysis to be called once, got %d", provider.analysisCalls)

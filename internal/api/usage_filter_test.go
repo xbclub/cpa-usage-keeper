@@ -164,21 +164,23 @@ func TestParseUsageFilterQueryTodayRangeUsesLocalDSTBoundary(t *testing.T) {
 }
 
 func TestParseUsageFilterQueryCustomRange(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-06-16T00:00:00Z&end=2026-06-16T08:00:00Z", nil)
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&unit=hour&start=2026-04-20T00:00:00Z&end=2026-04-20T04:00:00Z", nil)
 
-	filter, err := parseUsageFilterQuery(req, time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC))
+	filter, err := parseUsageFilterQuery(req, time.Date(2026, 4, 20, 4, 30, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
 	}
 	if filter.StartTime == nil || filter.EndTime == nil {
 		t.Fatalf("expected custom range bounds, got %+v", filter)
 	}
-	if !filter.StartTime.Equal(time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)) {
+	if !filter.StartTime.Equal(time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected custom start: %+v", filter)
 	}
-	// hour 单元 custom range 的 EndTime 为 end+1h（半开区间 exclusive）。
-	if !filter.EndTime.Equal(time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)) {
+	if !filter.EndTime.Equal(time.Date(2026, 4, 20, 5, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected custom end: %+v", filter)
+	}
+	if filter.CustomUnit != "hour" || !filter.EndExclusive {
+		t.Fatalf("expected exclusive custom hour range, got %+v", filter)
 	}
 }
 
@@ -193,7 +195,7 @@ func TestParseUsageFilterQueryCustomDateRangeUsesLocalDayBoundary(t *testing.T) 
 
 	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-20&end=2026-04-21", nil)
 
-	filter, err := parseUsageFilterQuery(req, time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC))
+	filter, err := parseUsageFilterQuery(req, time.Date(2026, 4, 21, 12, 0, 0, 0, location))
 	if err != nil {
 		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
 	}
@@ -214,57 +216,20 @@ func TestParseUsageFilterQueryCustomDateRangeUsesLocalDayBoundary(t *testing.T) 
 	if filter.EndTime.Location().String() != location.String() {
 		t.Fatalf("expected custom date end to keep project timezone, got %s", filter.EndTime.Location())
 	}
+	if filter.CustomUnit != "day" || !filter.EndExclusive {
+		t.Fatalf("expected exclusive custom day range, got %+v", filter)
+	}
 }
 
 func TestParseUsageFilterQueryRejectsInvalidCustomRange(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=custom&start=2026-04-21T00:00:00Z&end=2026-04-20T23:59:59Z", nil)
 
-	_, err := parseUsageFilterQuery(req, time.Time{})
+	_, err := parseUsageFilterQuery(req, time.Date(2026, 4, 21, 12, 0, 0, 0, time.UTC))
 	if err == nil {
 		t.Fatal("expected invalid custom range error")
 	}
 }
 
-func TestParseUsageFilterQueryRejectsCustomRangeBeforeRetentionStart(t *testing.T) {
-	previousLocal := time.Local
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
-	t.Cleanup(func() { time.Local = previousLocal })
-	time.Local = location
-	anchor := time.Date(2026, 6, 16, 9, 0, 0, 0, location)
-
-	for _, tc := range []struct {
-		name      string
-		path      string
-		wantError bool
-	}{
-		{name: "before retention", path: "/api/v1/usage/overview?range=custom&start=2025-01-01&end=2025-01-02", wantError: true},
-		{name: "at retention boundary", path: "/api/v1/usage/overview?range=custom&start=2026-06-15&end=2026-06-15"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tc.path, nil)
-			filter, err := parseUsageFilterQuery(req, anchor)
-			if tc.wantError {
-				if err == nil {
-					t.Fatal("expected custom range before retention start to be rejected")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("expected retention boundary custom range to be accepted: %v", err)
-			}
-			expectedStart := time.Date(2026, 6, 15, 0, 0, 0, 0, location)
-			if filter.StartTime == nil || !filter.StartTime.Equal(expectedStart) {
-				t.Fatalf("expected boundary start %s, got %+v", expectedStart, filter)
-			}
-		})
-	}
-}
-
-// TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays 对齐上游 #412/#421：
-// events 路径的 custom day range 上限 90 天（overview 路径仍走 LongCustomDayRangeMaxDays）。
 func TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
@@ -288,7 +253,7 @@ func TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays(t *testing.T
 func TestParseUsageFilterQueryRejectsMissingRange(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events", nil)
 
-	_, err := parseUsageFilterQuery(req, time.Time{})
+	_, err := parseUsageFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC))
 	if err == nil {
 		t.Fatal("expected missing range error")
 	}
@@ -339,7 +304,7 @@ func TestParseUsageFilterQueryAcceptsEventsPaginationAndFilters(t *testing.T) {
 	if filter.Page != 3 || filter.PageSize != 100 || filter.Offset != 200 {
 		t.Fatalf("expected page 3/page size 100 offset 200, got %+v", filter)
 	}
-	if filter.Source != "source-a" || filter.AuthIndex != "2" {
+	if filter.Model != "claude-sonnet" || filter.Source != "source-a" || filter.AuthIndex != "2" {
 		t.Fatalf("expected trimmed server-side filters, got %+v", filter)
 	}
 }
@@ -440,8 +405,46 @@ func TestParseUsageFilterQueryRejectsInvalidEventsPagination(t *testing.T) {
 	}
 	for _, path := range tests {
 		req := httptest.NewRequest("GET", path, nil)
-		if _, err := parseUsageFilterQuery(req, time.Time{}); err == nil {
+		if _, err := parseUsageFilterQuery(req, time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)); err == nil {
 			t.Fatalf("expected pagination error for %s", path)
 		}
+	}
+}
+
+func TestParseUsageFilterQueryRejectsCustomRangeBeforeRetentionStart(t *testing.T) {
+	previousLocal := time.Local
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	t.Cleanup(func() { time.Local = previousLocal })
+	time.Local = location
+	anchor := time.Date(2026, 6, 16, 9, 0, 0, 0, location)
+
+	for _, tc := range []struct {
+		name      string
+		path      string
+		wantError bool
+	}{
+		{name: "before retention", path: "/api/v1/usage/overview?range=custom&start=2025-01-01&end=2025-01-02", wantError: true},
+		{name: "at retention boundary", path: "/api/v1/usage/overview?range=custom&start=2026-06-15&end=2026-06-15"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			filter, err := parseUsageFilterQuery(req, anchor)
+			if tc.wantError {
+				if err == nil {
+					t.Fatal("expected custom range before retention start to be rejected")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected retention boundary custom range to be accepted: %v", err)
+			}
+			expectedStart := time.Date(2026, 6, 15, 0, 0, 0, 0, location)
+			if filter.StartTime == nil || !filter.StartTime.Equal(expectedStart) {
+				t.Fatalf("expected boundary start %s, got %+v", expectedStart, filter)
+			}
+		})
 	}
 }
