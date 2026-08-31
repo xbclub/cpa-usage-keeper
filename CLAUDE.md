@@ -1085,6 +1085,34 @@ Merged upstream `e4549df..5181c7a`(v1.14.6+#434-#441 → v1.14.7+#446-#453 → v
 
 13. **review 抓到既有跨层断链:identity 响应 `cached_tokens` 半拉子改名。** fork 曾把 identity 响应字段改名为 `cached_tokens` 并映射 entity 上**无 gorm tag 的遗留字段**(`CachedTokens`,而真实列是 `CacheReadTokens`),但前端 types.ts/viewModels 一直是上游口径 `cache_read_tokens` → 凭证页 Cache 指标长期 undefined。修复 = 三处回归上游(api 响应 + 测试断言含负向守卫 + AiProvider fixture),与上游 0 diff。**教训:(a) "fork 分歧"不等于"fork 特性" —— 不服务任何 fork 功能的半拉子改名是债务,review 时对每个 fork-unique diff 追问"它服务什么";(b) 跨层字段契约要三层对齐查:后端 json tag ↔ types.ts 接口 ↔ 组件读取,typecheck 对"类型声明与运行时 JSON 不符"是盲区(TS 类型在撒谎);(c) 上游同文件常带负向守卫(`did not expect legacy cached_tokens`),fork 侧丢了守卫就丢了报警器。**
 
+### Step 4.29: v1.15.0 merge notes (2026-08-31) — 18 PR,167 文件,+8548/−1929(史上最大)
+
+Merged upstream `5181c7a..v1.15.0`(v1.14.9+v1.15.0 合并 tag;`upstream/main == v1.15.0`)。特性:#463 tab 页面寻址(usageNavigation + URL 直达)、#464 管理员会话别名(`auth_sessions.alias` + PATCH)、#476 key-viewer 中间件化(删 allowKeyOverviewRequest 查询限流)、#479+#481 key-viewer 分析页/排行只读(`features/key-viewer/` + `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` 配置)、#466+#480 Codex 周期汇总 heartbeat/trusted 队列重构、#483+#486 5h 缓存率、#461/#470/#485 图标与 key-viewer 重组。无新表。Lessons:
+
+1. **上游 migration 的"数据重置"类在 fork 用部署时手工 SQL 等价。** `20260827_reset_quota_history` = DELETE 全表 quota_cycles/quota_percent_segments(历史物化模型变更,旧行不兼容)。fork 无 migration 框架,生产库实测各 1 行 → 部署时手工 `DELETE FROM quota_cycles; DELETE FROM quota_percent_segments;` 等价执行,不为一次清空引框架。**判断依据:先查生产库存量再定方案 —— 空表/不存在则零动作;有存量且模型已换则手工 DELETE。** 纯加列类(`20260824_auth_session_alias`)AutoMigrate 覆盖,零动作。
+
+2. **db.go 上游改动是 migration 前的 SQLite 在线备份钩子(backup.NewWriter + BeforeDestructiveMigration)→ 整文件零适用改动 SKIP。** 本轮 db.go 不在"永不 checkout"名单的冲突点上,上游 diff 里看似有变化,但内容全部绑定 SQLite backup 体系。**定性 SKIP 前先看上游 diff 的实质内容,不是"db.go 一律 skip"。**
+
+3. **quota/service.go 的 gofmt 重对齐区是静默丢失雷区 → checkout+重放优于 3way。** 上游 +46/−36 大半是 struct literal 因新字段加宽的重对齐;fork 该文件 delta 实测仅 1 个方法(`RecordActiveStatus`)。checkout 后重放 3 行,比 3way(ours/theirs 重对齐全撞)干净得多。**同类判断:fork delta 小而上游 diff 大半是格式 → 永远 checkout+重放。**
+
+4. **`DROP TRIGGER` 有多少处就要改多少处 —— CREATE 转换了 DROP 会漏。** runner_test 的 `fail_partial_codex_history` 触发器 CREATE 已转 plpgsql,但同测试尾部的 `DROP TRIGGER name`(无 ON)漏改 → PG 42601 确定性失败。**触发器转换要 grep 全文件 `DROP TRIGGER` 逐处加 `ON <table>`(本轮全仓扫描兜底抓到第 2 处)。**
+
+5. **node 重放脚本里的"预留 no-op 行"会短路清空文件。** `out = out.slice(0, x) && out` 在 x=0 时 slice 返回空串(falsy)→ 整个表达式返回 `''` → writeFileSync 写空文件。i18n 重放脚本因此把 index.ts 写成 0 行,靠 git checkout 恢复。**教训:重放脚本必须先写临时文件/内存验证长度再落盘;任何 `&&` 短路表达式禁止用于赋值链。**
+
+6. **i18n 重放的 locale 块定位要兼容带引号与不带引号的键。** `'(en|zh|zh-TW)'` 匹配漏 en/zh(不带引号)只中 zh-TW。正则应为 `'?(en|zh|zh-TW)'?`。fork 键 9 个(7 个 usage_stats + 2 个 common)按 namespace 锚点(api_key_filter_all/logout)插入,forkKeys 守卫 11/11 验证。
+
+7. **git checkout 会自动 stage —— 提交切分要按路径 add,冲突文件要先 add 标记 resolved。** 3way 后解决了文件内容里的冲突标记,但 index 仍是 unmerged 状态,直接 commit 报"存在未解决的冲突";`git add <file>` 标记 resolved 即可。另:前端 checkout 的文件已进 index,后端 commit 会把它们一并带入 —— 用 `git commit --amend` 调整 message 或按路径精确 add。
+
+8. **上游把 fork 侧"陈旧 styles 测试"再次救活:`KeyOverviewPage.styles.test.ts`/`LoginPage.styles.test.ts` 的 fork delta 是旧 markup 时代断言(logoutSwitcher/无 MainActionButton),checkout 上游版即清债且 4 个失败转绿。** 判断法:fork delta 逐行问"它服务什么 fork 特性" —— 答案是"没有"(旧上游版本的化石)→ 无脑 checkout。上游 v1.15.0 的 KeyOverviewPage.styles.test 又断言回 logoutSwitcher(#485 KeyViewerShell 用它),说明断言随组件实现来回演进,只有最新版有意义。
+
+9. **上游新测试的 SQLite 模式清单再 +2:`closeTestDatabase(t, db)` 紧跟 OpenDatabase 的"注册清理"形态、`gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), ...)))` 直连形态。** 本轮 3 个新测试文件 6 处,全部 perl/Edit 转 `testutil.OpenTestDatabase(t)` + 删 path/filepath/config/sqlite imports。`usage_credential_health_cache_test.go` 走包内既有 `openTestDatabase(t)` helper(注意 repository/test 子包有自己的 helper,不是 testutil 直引)。
+
+10. **UsagePage.tsx 3way 的 2 处冲突全是"fork callback vs 上游新 callback 同一插入点"→ 取并集(两个都保留)。** import 行冲突同样是并集(fork 的 fetchOverviewModels + 上游的 appPath/updateAuthSessionAlias)。fork 4 特性(overviewModelFilter/ApiKeySummaryTable/signOutPill/MultiSelect)与上游新特性(activateUsageTab/handleSaveAuthSessionAlias)共存验证:0 冲突标记 + 8 符号 grep 全活。
+
+11. **Select.tsx 上游 +4/−2 的 prop 增量,手动应用时插入位置对齐上游(className 后)可让 Gate 2 diff 只剩 fork tooltip 一行。** 位置不同虽然功能等价,但 diff 噪音会掩盖真差异 —— "差异只剩 fork-unique"按最小化理解。
+
+12. **本轮零 CI/依赖变更 —— 首次无需碰 .github/go.mod/package.json 的合并。** 文件总账:10 SKIP(migration×6 + README×2 + db.go + xai.svg 删除)+ 129 直接 checkout + 28 处理(13 生产 + 15 测试)。数字对账是规划完成的硬校验。
+
 ### Step 4.25: 合并硬性要求 — 完工 gate ⚠️(从 v1.14.3 返工提炼)
 
 合并上游的唯一目标:**fork-unique 之外,与 upstream 完全一致**。以下 5 项是硬性 gate,合并完必须逐项过 —— 不跳过、不留债务、不"最小接入"。v1.14.3 因违反这些返工了两次(d2e3477、bfcca5f),教训已付费,勿再犯。
