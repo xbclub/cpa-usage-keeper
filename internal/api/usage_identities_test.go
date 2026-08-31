@@ -197,6 +197,7 @@ func TestUsageIdentitiesRouteReturnsPublishedMetadataFields(t *testing.T) {
 	for _, forbidden := range []string{
 		`"base_url"`,
 		`"account_id"`,
+		`"plan_type"`,
 	} {
 		if contains(body, forbidden) {
 			t.Fatalf("expected API response not to include %s, got %s", forbidden, body)

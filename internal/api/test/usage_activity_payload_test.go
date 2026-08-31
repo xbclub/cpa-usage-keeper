@@ -23,7 +23,10 @@ func TestUsageActivityPayloadExposesCanonicalTokenMetricsWithoutCachedTokens(t *
 	sqlDB, _ := db.DB()
 	
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	bucket, _ := repository.UsageActivityBucketForTimestamp(entities.UsageActivityGrainShort, time.Now().Add(-time.Hour))
+	bucket, err := repository.UsageActivityBucketForTimestamp(entities.UsageActivityGrainShort, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("resolve Activity bucket: %v", err)
+	}
 	
 	row := entities.UsageActivityStat{
 		Grain:               entities.UsageActivityGrainShort,
