@@ -105,7 +105,7 @@ describe('RequestEventsDetailsCard compact columns', () => {
     expect(cells[2]).toContain('OpenAI Team')
     expect(cells[2]).toContain('Deleted')
     expect(cells[2]).not.toContain('openai')
-    expect(html).toMatch(/data-provider-brand-icon="openai"[^>]*style="width:14px;height:14px"/)
+    expect(html).toMatch(/data-provider-brand-icon="openai"[^>]*style="width:25px;height:25px"/)
     expect(cells[3]).toBe('gpt-5.6keeper-gpt')
     expect(cells[4]).toBe('high')
     expect(cells[5]).toBe('Fast / Flex')

@@ -283,12 +283,13 @@ func newWithDB(cfg config.Config, db *gorm.DB, logCloser io.Closer) (*App, error
 	requestLogService := service.NewRequestLogService(db, cpaClient)
 	// 复用的 AuthConfig：同时传给 NewAuthHandler 和 NewRouter，避免 handler/router 使用不同配置。
 	authCfg := api.AuthConfig{
-		Enabled:              cfg.AuthEnabled,
-		LoginPassword:        cfg.LoginPassword,
-		SessionTTL:           cfg.AuthSessionTTL,
-		BasePath:             cfg.AppBasePath,
-		FrameAncestorOrigins: frameAncestorOrigins(cfg),
-		TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
+		Enabled:                         cfg.AuthEnabled,
+		LoginPassword:                   cfg.LoginPassword,
+		SessionTTL:                      cfg.AuthSessionTTL,
+		BasePath:                        cfg.AppBasePath,
+		FrameAncestorOrigins:            frameAncestorOrigins(cfg),
+		TrustedProxyCIDRs:               cfg.TrustedProxyCIDRs,
+		APIKeyViewerLocalRankingEnabled: cfg.APIKeyViewerLocalRankingEnabled,
 	}
 	// 启用登录保护时把 session 持久化到 PostgreSQL，重启后已登录浏览器仍保留有效会话。
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)

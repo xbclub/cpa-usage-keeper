@@ -50,6 +50,7 @@ const commonRow = {
   successRate: 100,
   totalTokens: 15,
   cacheReadRate: 0,
+  windowCacheReadRate: null,
 }
 
 const authFileRow = {
@@ -134,11 +135,13 @@ describe('credential detail name triggers', () => {
         page={1}
         totalPages={1}
         pageSize={10}
+        activeOnly={false}
         sort="priority"
         loading={false}
         onOpenDetails={onOpenDetails}
         onPageChange={() => undefined}
         onPageSizeChange={() => undefined}
+        onActiveOnlyChange={() => undefined}
         onSortChange={() => undefined}
       />,
     ))

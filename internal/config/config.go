@@ -57,6 +57,8 @@ type Config struct {
 	CPAPublicURL string
 	// CPARequestLogAccessEnabled 控制是否允许通过 Keeper 访问 CPA request log。
 	CPARequestLogAccessEnabled bool
+	// APIKeyViewerLocalRankingEnabled 控制 API Key Viewer 是否可只读查看本地排行。
+	APIKeyViewerLocalRankingEnabled bool
 	// TrustedProxyCIDRs 是除本机 loopback 外允许提供客户端转发地址的代理网段。
 	TrustedProxyCIDRs []string
 	// TLSEnabled 控制是否以 HTTPS 模式启动 HTTP 服务。
@@ -310,6 +312,10 @@ func Load(options LoadOptions) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	apiKeyViewerLocalRankingEnabled, err := getBool("API_KEY_VIEWER_LOCAL_RANKING_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
 
 	appBasePath, err := normalizeBasePath(strings.TrimSpace(os.Getenv("APP_BASE_PATH")))
 	if err != nil {
@@ -319,44 +325,45 @@ func Load(options LoadOptions) (*Config, error) {
 	workDir := getString("WORK_DIR", DefaultWorkDir)
 
 	cfg := &Config{
-		AppHost:                    strings.TrimSpace(os.Getenv("APP_HOST")),
-		AppPort:                    getString("APP_PORT", "8080"),
-		AppBasePath:                appBasePath,
-		CPAPublicURL:               strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
-		TrustedProxyCIDRs:          trustedProxyCIDRs,
-		CPARequestLogAccessEnabled: cpaRequestLogAccessEnabled,
-		TLSEnabled:                 tlsEnabled,
-		TLSCertFile:                strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
-		TLSKeyFile:                 strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
-		CPABaseURL:                 strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
-		CPAManagementKey:           strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
-		RedisQueueAddr:             strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
-		RedisQueueTLS:              redisQueueTLS,
-		RedisQueueBatchSize:        redisQueueBatchSize,
-		RedisQueueIdleInterval:     redisQueueIdleInterval,
-		MetadataSyncInterval:       MetadataSyncIntervalDefault,
-		QuotaAutoRefreshEnabled:    quotaAutoRefreshEnabled,
-		QuotaAutoRefreshInterval:   quotaAutoRefreshInterval,
-		QuotaRefreshWorkerLimit:    quotaRefreshWorkerLimit,
-		CleanupUsageEventsEnabled:  cleanupUsageEventsEnabled,
-		WorkDir:                    workDir,
-		DatabaseURL:                strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		RequestTimeout:             requestTimeout,
-		TLSSkipVerify:              tlsSkipVerify,
-		LogLevel:                   getString("LOG_LEVEL", "info"),
-		LogFileEnabled:             logFileEnabled,
-		LogDir:                     filepath.Join(workDir, workDirLogsName),
-		LogRetentionDays:           logRetentionDays,
-		AuthEnabled:                authEnabled,
-		LoginPassword:              strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
-		AuthSessionTTL:             authSessionTTL,
-		HTTPReadHeaderTimeout:      httpReadHeaderTimeout,
-		HTTPIdleTimeout:            httpIdleTimeout,
-		ShutdownTimeout:            shutdownTimeout,
-		DBMaxOpenConns:             dbMaxOpenConns,
-		DBMaxIdleConns:             dbMaxIdleConns,
-		DBConnMaxLifetime:          dbConnMaxLifetime,
-		DBConnMaxIdleTime:          dbConnMaxIdleTime,
+		AppHost:                         strings.TrimSpace(os.Getenv("APP_HOST")),
+		AppPort:                         getString("APP_PORT", "8080"),
+		AppBasePath:                     appBasePath,
+		CPAPublicURL:                    strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		TrustedProxyCIDRs:               trustedProxyCIDRs,
+		CPARequestLogAccessEnabled:      cpaRequestLogAccessEnabled,
+		APIKeyViewerLocalRankingEnabled: apiKeyViewerLocalRankingEnabled,
+		TLSEnabled:                      tlsEnabled,
+		TLSCertFile:                     strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
+		TLSKeyFile:                      strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
+		CPABaseURL:                      strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
+		CPAManagementKey:                strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
+		RedisQueueAddr:                  strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueTLS:                   redisQueueTLS,
+		RedisQueueBatchSize:             redisQueueBatchSize,
+		RedisQueueIdleInterval:          redisQueueIdleInterval,
+		MetadataSyncInterval:            MetadataSyncIntervalDefault,
+		QuotaAutoRefreshEnabled:         quotaAutoRefreshEnabled,
+		QuotaAutoRefreshInterval:        quotaAutoRefreshInterval,
+		QuotaRefreshWorkerLimit:         quotaRefreshWorkerLimit,
+		CleanupUsageEventsEnabled:       cleanupUsageEventsEnabled,
+		WorkDir:                         workDir,
+		DatabaseURL:                     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		RequestTimeout:                  requestTimeout,
+		TLSSkipVerify:                   tlsSkipVerify,
+		LogLevel:                        getString("LOG_LEVEL", "info"),
+		LogFileEnabled:                  logFileEnabled,
+		LogDir:                          filepath.Join(workDir, workDirLogsName),
+		LogRetentionDays:                logRetentionDays,
+		AuthEnabled:                     authEnabled,
+		LoginPassword:                   strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
+		AuthSessionTTL:                  authSessionTTL,
+		HTTPReadHeaderTimeout:           httpReadHeaderTimeout,
+		HTTPIdleTimeout:                 httpIdleTimeout,
+		ShutdownTimeout:                 shutdownTimeout,
+		DBMaxOpenConns:                  dbMaxOpenConns,
+		DBMaxIdleConns:                  dbMaxIdleConns,
+		DBConnMaxLifetime:               dbConnMaxLifetime,
+		DBConnMaxIdleTime:               dbConnMaxIdleTime,
 	}
 	if appHost := strings.TrimSpace(options.AppHost); appHost != "" {
 		cfg.AppHost = appHost

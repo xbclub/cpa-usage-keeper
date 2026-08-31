@@ -19,10 +19,12 @@ describe('AiProviderCredentialsSection', () => {
         page={1}
         totalPages={1}
         pageSize={10}
+        activeOnly={false}
         sort="priority"
         loading={false}
         onPageChange={() => undefined}
         onPageSizeChange={() => undefined}
+        onActiveOnlyChange={() => undefined}
         onSortChange={() => undefined}
       />,
     )
@@ -66,6 +68,7 @@ describe('AiProviderCredentialsSection', () => {
       successRate: null,
       totalTokens: 0,
       cacheReadRate: null,
+      windowCacheReadRate: 61.75,
       lastUsedText: '2026-05-10T10:00:00Z',
       statsUpdatedText: '2026-05-10T10:02:00Z',
       remainingDaysLabel: '25d',
@@ -80,10 +83,12 @@ describe('AiProviderCredentialsSection', () => {
         page={1}
         totalPages={1}
         pageSize={10}
+        activeOnly={false}
         sort="priority"
         loading={false}
         onPageChange={() => undefined}
         onPageSizeChange={() => undefined}
+        onActiveOnlyChange={() => undefined}
         onSortChange={() => undefined}
       />,
     )
@@ -95,6 +100,9 @@ describe('AiProviderCredentialsSection', () => {
     expect(html).toContain('usage_stats.credentials_column_name')
     expect(html).toContain('usage_stats.credentials_column_health')
     expect(html).toContain('usage_stats.credentials_health_last_5h')
+    // 5h 缓存率只是健康面板 meta 区的一行文字，不再额外画一条柱状图。
+    expect(html).toContain('usage_stats.credentials_health_cache_rate_5h')
+    expect(html).toContain('61.75%')
     expect(html).toContain('usage_stats.credentials_last_used')
     expect(html).toContain('usage_stats.credentials_stats_updated')
     expect(html).toContain('data-provider-brand-icon="claude"')
@@ -104,7 +112,9 @@ describe('AiProviderCredentialsSection', () => {
     expect(html).not.toContain('>claude</span>')
     expect(html).toContain('P5')
     expect(html).toContain('usage_stats.credentials_sort_priority')
+    expect(html).toContain('aria-label="usage_stats.credentials_sort_label: usage_stats.credentials_sort_priority"')
     expect(html).toContain('usage_stats.credentials_sort_last_used')
+    expect(html).toContain('data-credential-pagination-sort-sizer="true"')
     expect(html).not.toContain('Team')
     expect(html).not.toContain('25d')
     expect(html).not.toContain('Weekly')

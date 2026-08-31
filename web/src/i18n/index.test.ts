@@ -91,6 +91,11 @@ describe('i18n resources', () => {
         session_settings_empty: '暂无有效会话。',
         session_settings_admin_label: '管理员会话',
         session_settings_type_admin: '管理员',
+        session_settings_alias_edit: '编辑会话别名',
+        session_settings_alias_placeholder: '会话别名',
+        session_settings_alias_save_success: '会话别名已保存。',
+        session_settings_alias_save_failed: '无法保存会话别名。',
+        session_settings_current: '正在使用',
         session_settings_logout_one: '退出此会话',
         session_settings_admin_logout_title: '退出管理员会话？',
         session_settings_admin_logout_body: '只会退出此管理员会话，其他管理员会话仍保持有效。',
@@ -106,6 +111,11 @@ describe('i18n resources', () => {
         session_settings_empty: '尚無有效工作階段。',
         session_settings_admin_label: '管理員工作階段',
         session_settings_type_admin: '管理員',
+        session_settings_alias_edit: '編輯工作階段別名',
+        session_settings_alias_placeholder: '工作階段別名',
+        session_settings_alias_save_success: '工作階段別名已儲存。',
+        session_settings_alias_save_failed: '無法儲存工作階段別名。',
+        session_settings_current: '使用中',
         session_settings_logout_one: '登出此工作階段',
         session_settings_admin_logout_title: '登出管理員工作階段？',
         session_settings_admin_logout_body: '僅會登出此管理員工作階段，其他管理員工作階段仍保持有效。',
@@ -185,6 +195,7 @@ describe('i18n resources', () => {
 
   it('keeps credential health chart labels available in every language', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('Last 5h');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_cache_rate_5h')).toBe('Cache rate 5h');
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_ok')).toBe('OK');
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_fail')).toBe('Fail');
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_status_success')).toBe('healthy');
@@ -200,6 +211,7 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_grid_aria')).toBe('{{name}} request health over the last 5 hours');
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_bucket_aria')).toBe('{{timeRange}}: {{status}}, {{successCount}} successful, {{failureCount}} failed, {{rate}}');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('最近 5 小时');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_cache_rate_5h')).toBe('近 5h 缓存率');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_status_warning')).toBe('部分失败');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_summary_healthy')).toBe('健康');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_summary_degraded')).toBe('波动');
@@ -207,6 +219,7 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_no_failures_5h')).toBe('5 小时内无失败');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_bucket_aria')).toBe('{{timeRange}}：{{status}}，成功 {{successCount}}，失败 {{failureCount}}，{{rate}}');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('最近 5 小時');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_cache_rate_5h')).toBe('近 5h 快取率');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_status_empty')).toBe('無資料');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_summary_healthy')).toBe('健康');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_summary_degraded')).toBe('波動');

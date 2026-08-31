@@ -11,6 +11,7 @@ import (
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
 	repositorydto "cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/testutil"
 
 	"gorm.io/gorm"
 )
@@ -164,6 +165,43 @@ func TestWriteCodexMainQuotaObservationsSwitchesWindowBeforeComparingReset(t *te
 	}
 	if !state.Found || state.WindowSeconds != 18_000 || !state.HasTail || state.TailRemainingPercent != 89 {
 		t.Fatalf("expected state recovery to select the latest observed 5h cycle, got %+v", state)
+	}
+}
+
+func TestWriteCodexMainQuotaObservationsReusesMatchingCycleAfterWindowDetour(t *testing.T) {
+	// Weekly 中间出现错误 5h 后再次观察同一 Weekly，必须回到原父行而不是触发唯一键或创建重复周期。
+	db := openCodexQuotaHistoryRepositoryDatabase(t, "reuse-window-cycle.db")
+	base := time.Date(2026, 8, 27, 8, 0, 0, 0, time.UTC)
+	weeklyReset := base.Add(7 * 24 * time.Hour)
+	fiveHourReset := base.Add(5 * time.Hour)
+	weekly := codexQuotaHistoryObservation("codex-auth", "primary", 604_800, weeklyReset, 90, base)
+	fiveHour := codexQuotaHistoryObservation("codex-auth", "primary", 18_000, fiveHourReset, 50, base.Add(time.Minute))
+	restoredWeekly := codexQuotaHistoryObservation("codex-auth", "primary", 604_800, weeklyReset, 89, base.Add(2*time.Minute))
+
+	if err := repository.WriteCodexMainQuotaObservations(context.Background(), db, []repositorydto.CodexMainQuotaObservation{weekly, fiveHour, restoredWeekly}); err != nil {
+		t.Fatalf("write restored Weekly observations: %v", err)
+	}
+
+	var cycles []entities.QuotaCycle
+	if err := db.Where("provider = ? AND auth_index = ? AND quota_key = ?", "codex", "codex-auth", "rate_limit.primary_window").Order("window_seconds desc").Find(&cycles).Error; err != nil {
+		t.Fatalf("load restored Weekly cycles: %v", err)
+	}
+	if len(cycles) != 2 || cycles[0].WindowSeconds != 604_800 || cycles[1].WindowSeconds != 18_000 {
+		t.Fatalf("expected one reused Weekly and one intermediate 5h cycle, got %+v", cycles)
+	}
+	weeklySegments := loadCodexQuotaHistorySegments(t, db, cycles[0].ID)
+	if len(weeklySegments) != 2 || weeklySegments[0].RemainingPercent != 90 || weeklySegments[1].RemainingPercent != 89 {
+		t.Fatalf("expected restored Weekly observation on the original parent, got %+v", weeklySegments)
+	}
+	if !cycles[0].LastObservedAt.Equal(restoredWeekly.LastObservedAt) {
+		t.Fatalf("expected reused Weekly to become latest observed cycle, got %+v", cycles[0])
+	}
+	state, err := repository.LoadLatestCodexQuotaHistoryState(context.Background(), db, "codex-auth", "primary")
+	if err != nil {
+		t.Fatalf("load restored Weekly state: %v", err)
+	}
+	if !state.Found || state.WindowSeconds != 604_800 || !state.HasTail || state.TailRemainingPercent != 89 {
+		t.Fatalf("expected state recovery to select reused Weekly, got %+v", state)
 	}
 }
 
@@ -326,8 +364,9 @@ func TestWriteCodexMainQuotaObservationsKeepsThirtyTwoItemTransactionBoundary(t 
 				observations = append(observations, codexQuotaHistoryObservation(authIndex, "primary", 18_000, resetAt, 90, observedAt.Add(time.Duration(index)*time.Second)))
 			}
 			// 受控测试身份不包含外部输入；trigger 只让本批最后一条父行 INSERT 失败。
-			// PG 适配:SQLite 的 WHEN+RAISE(ABORT) 触发器转 plpgsql 函数 + 触发器(Step 4.9 #4 单引号约定)。
 			failingAuthIndex := fmt.Sprintf("codex-auth-%03d", testCase.observationCount-1)
+			// PG 适配:SQLite 的 CREATE TRIGGER ... WHEN + RAISE(ABORT) 改写为 plpgsql
+			// 函数 + 触发器(SQLSTATE 语义等价,条件搬进函数体的 IF)。
 			if err := db.Exec(`CREATE OR REPLACE FUNCTION fail_last_codex_quota_cycle_fn() RETURNS TRIGGER AS 'BEGIN IF NEW.auth_index = ''` + failingAuthIndex + `'' THEN RAISE EXCEPTION ''expected transaction boundary failure''; END IF; RETURN NEW; END;' LANGUAGE plpgsql`).Error; err != nil {
 				t.Fatalf("create transaction boundary trigger function: %v", err)
 			}
@@ -439,7 +478,7 @@ func TestWriteCodexMainQuotaObservationsHonorsCancellationWhileWriterIsOccupied(
 func TestWriteCodexMainQuotaObservationsRollsBackParentWhenChildInsertFails(t *testing.T) {
 	// 父周期先创建、百分比子行后创建；子表失败必须由同一个事务连父行一起回滚。
 	db := openCodexQuotaHistoryRepositoryDatabase(t, "child-rollback.db")
-	// PG 适配:无条件失败的 SQLite 触发器转 plpgsql。
+	// PG 适配:RAISE(ABORT) 触发器转 plpgsql 函数 + 触发器(无条件版本)。
 	if err := db.Exec(`CREATE OR REPLACE FUNCTION fail_codex_quota_segment_fn() RETURNS TRIGGER AS 'BEGIN RAISE EXCEPTION ''expected child insert failure''; END;' LANGUAGE plpgsql`).Error; err != nil {
 		t.Fatalf("create child failure trigger function: %v", err)
 	}
@@ -488,7 +527,7 @@ func codexQuotaHistoryObservation(authIndex string, role string, windowSeconds i
 func openCodexQuotaHistoryRepositoryDatabase(t *testing.T, name string) *gorm.DB {
 	t.Helper()
 	// PG 适配:fork 用 testutil 随机 schema 隔离,name 参数仅为与上游测试签名兼容而保留。
-	return openTestDatabase(t)
+	return testutil.OpenTestDatabase(t)
 }
 
 func loadCodexQuotaHistoryRows(t *testing.T, db *gorm.DB, authIndex string, role string) (entities.QuotaCycle, []entities.QuotaPercentSegment) {

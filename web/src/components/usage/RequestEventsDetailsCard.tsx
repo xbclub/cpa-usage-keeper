@@ -353,8 +353,6 @@ function RequestEventsExportMenu({
   return (
     <div
       className={styles.requestEventsExportMenu}
-      onMouseEnter={() => !disabled && setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
     >
@@ -715,7 +713,7 @@ export function RequestEventsDetailsCard({
           <td className={styles.requestEventsSourceCell} title={row.source}>
             <span className={styles.requestEventsSourceStack}>
               <span className={styles.requestEventsSourceIdentity}>
-                <ProviderBrandIcon providerType={row.sourceType} size={14} />
+                <ProviderBrandIcon providerType={row.sourceType} size={25} />
                 <span className={styles.requestEventsSourceValue}>{row.source}</span>
               </span>
               {row.isDelete ? (

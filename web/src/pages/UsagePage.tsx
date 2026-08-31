@@ -1,7 +1,8 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchOverviewModels, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
 import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
+import { DEFAULT_USAGE_TAB, getUsageTabPath, handleUsageTabKeyActivation, resolveInitialUsageTab, shouldHandleUsageNavigation, USAGE_TAB_OPTIONS, type UsageTab } from '@/lib/usageNavigation';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -48,7 +49,7 @@ import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import { getDailyAverageCardUsage, isDailyAverageRange } from '@/utils/usage/overview';
 import type { Theme } from '@/types';
 import { BrandLink } from '@/components/BrandLink';
-import { isCPAMCEmbed } from '@/embed/cpamcEmbed';
+import { cpamcEmbedSearch, isCPAMCEmbed } from '@/embed/cpamcEmbed';
 import { RankingPage } from '@/features/ranking/RankingPage';
 import { RankingScopeSwitch } from '@/features/ranking/components/RankingScopeSwitch';
 import { useRankingData } from '@/features/ranking/hooks/useRankingData';
@@ -69,10 +70,8 @@ const THEME_OPTIONS: ReadonlyArray<{ value: Theme; labelKey: string }> = [
   { value: 'dark', labelKey: 'usage_stats.theme_dark' },
   { value: 'auto', labelKey: 'usage_stats.theme_auto' }
 ];
-const USAGE_TAB_OPTIONS = ['overview', 'analysis', 'ranking', 'events', 'auth-files', 'ai-provider', 'settings'] as const;
 const RANKING_PREVIEW_API = resolveRankingPreviewAPI(import.meta.env.VITE_RANKING_PREVIEW_MOCK);
 const LOCAL_RANKING_PREVIEW_API = resolveLocalRankingPreviewAPI(import.meta.env.VITE_RANKING_PREVIEW_MOCK);
-type UsageTab = (typeof USAGE_TAB_OPTIONS)[number];
 type Translate = (key: string) => string;
 const USAGE_TAB_LABEL_KEYS: Record<UsageTab, string> = {
   overview: 'usage_stats.tab_overview',
@@ -83,7 +82,6 @@ const USAGE_TAB_LABEL_KEYS: Record<UsageTab, string> = {
   'ai-provider': 'usage_stats.tab_ai_provider',
   settings: 'usage_stats.tab_settings',
 };
-const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 50;
 const REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS = 90;
@@ -611,15 +609,7 @@ const loadTimeRange = (): LoadedUsageRangeState => loadUsageRangeState(
   typeof localStorage === 'undefined' ? undefined : localStorage,
 );
 
-const isUsageTab = (value: unknown): value is UsageTab =>
-  typeof value === 'string' && USAGE_TAB_OPTIONS.includes(value as UsageTab);
-
-export const normalizeUsageTabValue = (value: unknown): UsageTab | null => {
-  if (value === 'credentials') {
-    return 'auth-files';
-  }
-  return isUsageTab(value) ? value : null;
-};
+export { normalizeUsageTabValue } from '@/lib/usageNavigation';
 
 export const getUsageTabOptions = (
   translate: Translate,
@@ -631,15 +621,18 @@ export const getUsageTabOptions = (
   }));
 
 const loadUsageTab = (): UsageTab => {
+  let storedTab: unknown = null;
   try {
-    if (typeof localStorage === 'undefined') {
-      return DEFAULT_USAGE_TAB;
-    }
-    const raw = localStorage.getItem(USAGE_TAB_STORAGE_KEY);
-    return normalizeUsageTabValue(raw) ?? DEFAULT_USAGE_TAB;
+    if (typeof localStorage !== 'undefined') storedTab = localStorage.getItem(USAGE_TAB_STORAGE_KEY);
   } catch {
-    return DEFAULT_USAGE_TAB;
+    // 忽略存储异常；直达路由不依赖 localStorage 仍可工作。
   }
+
+  return resolveInitialUsageTab(
+    typeof window === 'undefined' ? '/' : window.location.pathname,
+    typeof window === 'undefined' ? undefined : window.__APP_BASE_PATH__,
+    storedTab,
+  );
 };
 
 const isOverviewRealtimeWindow = (value: unknown): value is OverviewRealtimeWindow => (
@@ -691,6 +684,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     const loadedTab = loadUsageTab();
     return isEmbeddedInCPAMC && loadedTab === 'ranking' ? DEFAULT_USAGE_TAB : loadedTab;
   });
+  const activateUsageTab = useCallback((tab: UsageTab) => {
+    setActiveTab(tab);
+    window.history.replaceState(null, '', appPath(getUsageTabPath(tab)) + cpamcEmbedSearch());
+  }, []);
+  const handleUsageTabNavigation = useCallback((event: ReactMouseEvent<HTMLAnchorElement>, tab: UsageTab) => {
+    // 普通左键保持现有无刷新切换；组合键和中键交给原生链接打开新页面。
+    if (!shouldHandleUsageNavigation(event.nativeEvent)) return;
+
+    event.preventDefault();
+    activateUsageTab(tab);
+  }, [activateUsageTab]);
   const [rankingScope, setRankingScope] = useState<RankingScope>(loadRankingScope);
   const handleRankingScopeChange = useCallback((scope: RankingScope) => {
     setRankingScope(scope);
@@ -821,6 +825,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [authSessionsLoading, setAuthSessionsLoading] = useState(false);
   const [authSessionsError, setAuthSessionsError] = useState('');
   const [authSessionRevokingId, setAuthSessionRevokingId] = useState<string | null>(null);
+  const [authSessionAliasSavingId, setAuthSessionAliasSavingId] = useState<string | null>(null);
   const authSessionsRequestControllerRef = useRef<AbortController | null>(null);
   const [statusError, setStatusError] = useState('');
   const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
@@ -1109,6 +1114,26 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       // 模型列表加载失败不阻塞主页面
     }
   }, [usageRangeQuery, selectedApiKeyId]);
+
+  const handleSaveAuthSessionAlias = useCallback(async (id: string, alias: string) => {
+    setAuthSessionAliasSavingId(id);
+    setAuthSessionsError('');
+    try {
+      const updated = await updateAuthSessionAlias(id, alias);
+      setAuthSessions((current) => current.map((session) => (session.id === updated.id ? { ...session, ...updated } : session)));
+      showTopNotice('success', t('usage_stats.session_settings_alias_save_success'));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+      } else {
+        setAuthSessionsError(error instanceof Error ? error.message : 'Failed to update auth session alias');
+        showTopNotice('error', t('usage_stats.session_settings_alias_save_failed'));
+      }
+      throw error;
+    } finally {
+      setAuthSessionAliasSavingId((current) => (current === id ? null : current));
+    }
+  }, [onAuthRequired, showTopNotice, t]);
 
   const loadAnalysis = useCallback(async () => {
     if (!usageRangeQuery.valid) return;
@@ -1966,16 +1991,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 lang={i18n.resolvedLanguage || i18n.language}
               >
                 {tabOptions.map((option) => (
-                  <button
+                  <a
                     key={option.value}
-                    type="button"
+                    href={appPath(getUsageTabPath(option.value)) + cpamcEmbedSearch()}
                     role="tab"
                     aria-selected={activeTab === option.value}
                     className={`${styles.tabPill} ${activeTab === option.value ? styles.tabPillActive : ''}`.trim()}
-                    onClick={() => setActiveTab(option.value)}
+                    onClick={(event) => handleUsageTabNavigation(event, option.value)}
+                    onKeyDown={(event) => handleUsageTabKeyActivation(event, option.value, activateUsageTab)}
                   >
                     {option.label}
-                  </button>
+                  </a>
                 ))}
               </div>
 
@@ -2246,6 +2272,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       page={credentialsData.aiProviderPage}
                       totalPages={credentialsData.aiProviderTotalPages}
                       pageSize={credentialsData.aiProviderPageSize}
+                      activeOnly={credentialsData.aiProviderActiveOnly}
                       sort={credentialsData.aiProviderSort}
                       loading={credentialsData.loading}
                       aliasSavingId={credentialsData.aliasSavingId}
@@ -2253,6 +2280,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       onOpenDetails={(row) => handleCredentialDetailOpen({ kind: 'ai-provider', row })}
                       onPageChange={credentialsData.setAiProviderPage}
                       onPageSizeChange={credentialsData.setAiProviderPageSize}
+                      onActiveOnlyChange={credentialsData.setAiProviderActiveOnly}
                       onSortChange={credentialsData.setAiProviderSort}
                     />
                   )}
@@ -2266,7 +2294,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   sessions={authSessions}
                   loading={authSessionsLoading}
                   revokingId={authSessionRevokingId}
+                  aliasSavingId={authSessionAliasSavingId}
                   onLogout={handleRevokeAuthSession}
+                  onSaveAlias={handleSaveAuthSessionAlias}
                 />
                 <ApiKeySettingsCard
                   apiKeys={apiKeySettings}

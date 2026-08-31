@@ -7,8 +7,10 @@ const globalStyles = readSource(new URL('../../styles/global.scss', import.meta.
 const componentsStyles = readSource(new URL('../../styles/components.scss', import.meta.url))
 const usagePageStyles = readSource(new URL('../UsagePage.module.scss', import.meta.url))
 const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
-const keyOverviewPageStyles = readSource(new URL('../KeyOverviewPage.module.scss', import.meta.url))
+const keyOverviewPageStyles = readSource(new URL('../../features/key-viewer/KeyViewerShell.module.scss', import.meta.url))
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
+const keyAnalysisPageSource = readSource(new URL('../KeyAnalysisPage.tsx', import.meta.url))
+const keyViewerShellSource = readSource(new URL('../../features/key-viewer/KeyViewerShell.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
 const requestEventLogSource = readSource(new URL('../../components/usage/RequestEventLogModal.tsx', import.meta.url))
 const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
@@ -16,10 +18,13 @@ const priceSettingsSource = readSource(new URL('../../components/usage/PriceSett
 const priceRulesSource = readSource(new URL('../../components/usage/pricing/PriceRulesModal.tsx', import.meta.url))
 const priceRulesHelpSource = readSource(new URL('../../components/usage/pricing/PriceRulesHelp.tsx', import.meta.url))
 const priceRulesStyles = readSource(new URL('../../components/usage/pricing/PriceRulesModal.module.scss', import.meta.url))
+const questionMarkHelpSource = readSource(new URL('../../components/ui/QuestionMarkHelp.tsx', import.meta.url))
 const credentialStyles = readSource(new URL('../../components/usage/credentials/CredentialSections.module.scss', import.meta.url))
+const quotaHistoryStyles = readSource(new URL('../../components/usage/credentials/CodexQuotaHistoryPanel.module.scss', import.meta.url))
 const selectSource = readSource(new URL('../../components/ui/Select.tsx', import.meta.url))
 const apiIndexSource = readSource(new URL('../../components/usage/index.ts', import.meta.url))
 const apiClientSource = readSource(new URL('../../lib/api.ts', import.meta.url))
+const usageNavigationSource = readSource(new URL('../../lib/usageNavigation.ts', import.meta.url))
 const i18nSource = readSource(new URL('../../i18n/index.ts', import.meta.url))
 const typesSource = readSource(new URL('../../lib/types.ts', import.meta.url))
 const pricingDataSource = readSource(new URL('../../components/usage/hooks/usePricingData.ts', import.meta.url))
@@ -250,7 +255,8 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).not.toContain('TimeRangeControlPrototype')
     expect(keyOverviewPageSource).not.toContain('TimeRangeControlPrototype')
     expect(usagePageSource).toContain('parseStoredUsageRangeState')
-    expect(keyOverviewPageSource).toContain('parseStoredUsageRangeState')
+    expect(keyOverviewPageSource).toContain('loadKeyViewerTimeRange')
+    expect(keyAnalysisPageSource).toContain('loadKeyViewerTimeRange')
     expect(timeRangeControlSource).toContain('data-time-range-trigger="desktop"')
     expect(timeRangeControlSource).toContain('data-time-range-trigger="mobile"')
   })
@@ -272,6 +278,13 @@ describe('UsagePage toolbar styles', () => {
     expect(keyOverviewPageSource).toContain('customRange={customRange}')
     expect(keyOverviewPageSource).toContain('onChange={handleTimeRangeChange}')
     expect(keyOverviewPageSource).toContain('fetchKeyOverview(usageRangeQuery, controller.signal)')
+  })
+
+  it('persists one time range across API Key viewer pages', () => {
+    expect(keyOverviewPageSource).toContain('persistKeyViewerTimeRange(timeRangeState)')
+    expect(keyAnalysisPageSource).toContain('persistKeyViewerTimeRange(timeRangeState)')
+    expect(keyOverviewPageSource).not.toContain('cli-proxy-key-overview-range-v1')
+    expect(keyAnalysisPageSource).not.toContain('cli-proxy-key-analysis-range-v1')
   })
 
   it('shows a dedicated notice when Usage Events export capacity is full', () => {
@@ -826,7 +839,7 @@ describe('UsagePage toolbar styles', () => {
     expect(i18nSource).not.toContain("tab_analysis: 'API & Models'")
     expect(i18nSource).not.toContain("tab_analysis: 'API 与模型'")
     expect(i18nSource).not.toContain("tab_analysis: 'API 與模型'")
-    expect(usagePageSource).toContain("const USAGE_TAB_OPTIONS = ['overview', 'analysis', 'ranking', 'events', 'auth-files', 'ai-provider', 'settings'] as const")
+    expect(usageNavigationSource).toMatch(/USAGE_TAB_OPTIONS = \[\s*'overview',\s*'analysis',\s*'ranking',\s*'events',\s*'auth-files',\s*'ai-provider',\s*'settings',\s*\] as const/)
   })
 
   it('keeps Sign out as the rightmost shared main action after Check Updates', () => {
@@ -834,9 +847,10 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('fetchUpdateCheck')
     expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))
     expect(usagePageSource.match(/<MainActionButton/g)).toHaveLength(2)
-    expect(keyOverviewPageSource.match(/<MainActionButton/g)).toHaveLength(2)
+    expect(keyOverviewPageSource.match(/<MainActionButton/g)).toHaveLength(1)
+    expect(keyViewerShellSource.match(/<MainActionButton/g)).toHaveLength(1)
     expect(usagePageSource).toContain("aria-label={t('common.logout')}")
-    expect(keyOverviewPageSource).toContain("aria-label={t('common.logout')}")
+    expect(keyViewerShellSource).toContain("aria-label={t('common.logout')}")
     expect(usagePageSource).not.toContain('styles.signOutPill')
     expect(keyOverviewPageSource).not.toContain('styles.logoutPill')
     expect(usagePageStyles).not.toContain('.signOutPill')
@@ -865,6 +879,7 @@ describe('UsagePage toolbar styles', () => {
 
   it('removes per-tab frames while keeping connected tab labels stable at every width', () => {
     const connectedTabPill = styleRuleBlock(usagePageStyles, '.tabBarConnected .tabPill')
+    const tabPill = styleRuleBlock(usagePageStyles, '.tabPill')
 
     expect(connectedTabPill).toContain('min-height: 32px;')
     expect(connectedTabPill).toContain('padding: 7px 12px;')
@@ -875,6 +890,25 @@ describe('UsagePage toolbar styles', () => {
     expect(connectedTabPill).toContain('font-weight: 700;')
     expect(connectedTabPill).toContain('white-space: nowrap;')
     expect(connectedTabPill).not.toContain('transform:')
+    expect(tabPill).toContain('text-decoration: none;')
+  })
+
+  it('renders primary navigation as direct links without replacing activeTab rendering', () => {
+    const navigationStart = usagePageSource.indexOf('{tabOptions.map((option) => (')
+    const navigationEnd = usagePageSource.indexOf('))}', navigationStart)
+    const navigationBlock = usagePageSource.slice(navigationStart, navigationEnd)
+
+    expect(navigationStart).toBeGreaterThanOrEqual(0)
+    expect(navigationEnd).toBeGreaterThan(navigationStart)
+    expect(navigationBlock).toContain('<a')
+    expect(navigationBlock).toContain('href={appPath(getUsageTabPath(option.value)) + cpamcEmbedSearch()}')
+    expect(navigationBlock).toContain('onClick={(event) => handleUsageTabNavigation(event, option.value)}')
+    expect(navigationBlock).toContain('onKeyDown={(event) => handleUsageTabKeyActivation(event, option.value, activateUsageTab)}')
+    expect(navigationBlock).toContain('aria-selected={activeTab === option.value}')
+    expect(navigationBlock).not.toContain('<button')
+    expect(usagePageSource).toContain('const activateUsageTab = useCallback((tab: UsageTab) => {')
+    expect(usagePageSource).toContain('setActiveTab(tab);')
+    expect(usagePageSource).toContain("window.history.replaceState(null, '', appPath(getUsageTabPath(tab)) + cpamcEmbedSearch());")
   })
 
   it('widens simplified and traditional Chinese tabs without separating the connected segments', () => {
@@ -896,10 +930,11 @@ describe('UsagePage toolbar styles', () => {
     expect(connectedActiveTab).not.toContain('border-color:')
   })
 
-  it('keeps the connected shell out of CPAMC embed and Key Overview', () => {
+  it('keeps the connected shell out of CPAMC embed while sharing it with Key Overview', () => {
     expect(usagePageSource).toContain("${!isEmbeddedInCPAMC ? styles.tabBarConnected : ''}")
-    expect(keyOverviewPageSource).not.toContain('tabBarConnected')
-    expect(keyOverviewPageStyles).not.toContain('.tabBarConnected')
+    expect(keyViewerShellSource).toContain('styles.tabBarConnected')
+    expect(keyOverviewPageSource).toContain('KeyViewerShell')
+    expect(keyOverviewPageStyles).toContain('.tabBarConnected')
   })
 
   it('lets API Key Settings content scroll inside the card instead of being clipped', () => {
@@ -951,6 +986,66 @@ describe('UsagePage toolbar styles', () => {
     expect(apiKeyCopyIconBlock).toContain('height: 28px;')
     expect(sessionSettingsItemBlock).toContain('border-radius: 20px;')
     expect(tabletBlock).toMatch(/\.apiKeySettingsList\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
+  })
+
+  it('uses compact session alias controls and quota-history badge colors', () => {
+    const aliasButton = styleRuleBlock(usagePageStyles, '.sessionSettingsAliasEditButton,')
+    const aliasEditorEditing = styleRuleBlock(usagePageStyles, '.sessionSettingsAliasEditorEditing')
+    const sourceBadge = styleRuleBlock(usagePageStyles, '.sessionSettingsSource')
+    const standardSource = styleRuleBlock(usagePageStyles, '.sessionSettingsSourceStandard')
+    const embedSource = styleRuleBlock(usagePageStyles, '.sessionSettingsSourceEmbed')
+    const quotaBadge = styleRuleBlock(quotaHistoryStyles, '.directBadge,')
+    const directBadge = styleRuleBlock(quotaHistoryStyles, '.directBadge {')
+    const crossBadge = styleRuleBlock(
+      quotaHistoryStyles.slice(quotaHistoryStyles.indexOf('.directBadge {')),
+      '.crossBadge'
+    )
+
+    expect(credentialStyles).toContain('$credential-name-content-width: 236px;')
+    expect(aliasEditorEditing).toContain('width: min(236px, 100%);')
+    expect(aliasButton).toContain('width: 24px;')
+    expect(aliasButton).toContain('height: 24px;')
+    expect(aliasButton).toContain('border-radius: 8px;')
+    expect(sourceBadge).toContain('display: inline-flex;')
+    expect(sourceBadge).toContain('align-items: center;')
+    expect(quotaBadge).toContain('padding: 2px 6px;')
+    expect(quotaBadge).toContain('font-size: 9px;')
+    expect(quotaBadge).toContain('font-weight: 800;')
+    expect(sourceBadge).toContain('padding: 2px 6px;')
+    expect(sourceBadge).toContain('font-size: 9px;')
+    expect(sourceBadge).toContain('font-weight: 800;')
+    expect(directBadge).toContain('background: color-mix(in srgb, #3b82f6 12%, var(--bg-primary));')
+    expect(directBadge).toContain('color: #3b82f6;')
+    expect(standardSource).toContain('background: color-mix(in srgb, #3b82f6 12%, var(--bg-primary));')
+    expect(standardSource).toContain('color: #3b82f6;')
+    expect(crossBadge).toContain('background: color-mix(in srgb, #f59e0b 13%, var(--bg-primary));')
+    expect(crossBadge).toContain('color: #d97706;')
+    expect(embedSource).toContain('background: color-mix(in srgb, #f59e0b 13%, var(--bg-primary));')
+    expect(embedSource).toContain('color: #d97706;')
+    expect(embedSource).toContain('padding-inline: 4px;')
+    expect(standardSource).not.toBe(embedSource)
+    expect(usagePageStyles).toMatch(/\.sessionSettingsAliasEditButton[\s\S]*?&:focus-visible\s*\{[\s\S]*?outline:\s*2px solid var\(--primary-color\);/)
+  })
+
+  it('marks the current session with a green update-style breathing dot', () => {
+    const updateDot = styleRuleBlock(usagePageStyles, '.updateCheckDot')
+    const currentIndicator = styleRuleBlock(usagePageStyles, '.sessionSettingsCurrent')
+    const currentDot = styleRuleBlock(usagePageStyles, '.sessionSettingsCurrentDot')
+
+    expect(currentIndicator).toContain('display: inline-flex;')
+    expect(currentIndicator).toContain('align-items: center;')
+    expect(currentIndicator).toContain('gap: 7px;')
+    expect(currentIndicator).not.toContain('border:')
+    expect(currentIndicator).not.toContain('background:')
+    for (const declaration of ['width: 8px;', 'height: 8px;', 'border-radius: 50%;']) {
+      expect(updateDot).toContain(declaration)
+      expect(currentDot).toContain(declaration)
+    }
+    expect(currentDot).toContain('background: var(--success-color);')
+    expect(currentDot).toContain('box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-color) 18%, transparent);')
+    expect(currentDot).toContain('animation: sessionSettingsCurrentPulse 1.6s ease-in-out infinite;')
+    expect(usagePageStyles).toContain('@keyframes sessionSettingsCurrentPulse')
+    expect(usagePageStyles).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.sessionSettingsCurrentDot\s*\{[\s\S]*?animation:\s*none;/)
   })
 
   it('lets Session Management content shrink until it needs to scroll', () => {
@@ -1460,7 +1555,7 @@ describe('UsagePage toolbar styles', () => {
     expect(priceSettingsSource).not.toContain('styles.usagePillAction')
   })
 
-  it('keeps the Request Event export menu styled and hoverable like the credential inspection control', () => {
+  it('keeps the Request Event export menu aligned with the credential inspection control', () => {
     const exportMenuBlock = styleRuleBlock(usagePageStyles, '.requestEventsExportMenu')
     const exportDropdownBlock = usagePageStyles.slice(
       usagePageStyles.indexOf('.requestEventsExportDropdown {'),
@@ -1529,13 +1624,14 @@ describe('Pricing rules component boundary', () => {
     expect(priceRulesSource).toContain('className={styles.modal}')
     expect(priceRulesStyles).toMatch(/\.ruleRow\s*\{[\s\S]*?grid-template-columns:/)
     expect(priceRulesStyles).toMatch(/\.modal\s+:global\(\.modal-header\)\s*\{[\s\S]*?padding-right:/)
-	expect(priceRulesHelpSource).toContain('createPortal')
+	expect(priceRulesHelpSource).toContain('<QuestionMarkHelp')
+	expect(questionMarkHelpSource).toContain('createPortal')
 	expect(styleRuleBlock(priceRulesStyles, '.help')).toMatch(/display:\s*inline-flex;/)
 	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/box-sizing:\s*border-box;/)
 	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/position:\s*fixed;/)
 	expect(styleRuleBlock(priceRulesStyles, '.helpTooltip')).toMatch(/overflow-y:\s*auto;/)
-	expect(priceRulesHelpSource).toContain('maxHeight')
-	expect(priceRulesHelpSource).toContain("placement === 'above'")
+	expect(questionMarkHelpSource).toContain('maxHeight')
+	expect(questionMarkHelpSource).toContain("placement === 'above'")
     expect(priceRulesStyles).toMatch(/@media \(max-width:/)
     expect(usagePageStyles).not.toMatch(/\.pricingRules/)
   })

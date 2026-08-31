@@ -3,6 +3,7 @@ export type AuthRole = 'admin' | 'api_key_viewer'
 export interface AuthSessionAPIKeySummary {
   display_key: string
   alias?: string
+  local_ranking_enabled?: boolean
 }
 
 export interface AuthSessionResponse {
@@ -19,6 +20,7 @@ export interface AuthManagedSessionItem {
   kind: AuthManagedSessionKind
   role: AuthRole
   source?: AuthManagedSessionSource
+  alias?: string
   current?: boolean
   loginAt?: string
   lastSeenAt?: string
@@ -379,6 +381,10 @@ export interface UsageCredentialHealth {
   total_success: number
   total_failure: number
   success_rate: number
+  /** 窗口内 canonical input_tokens 合计，缓存率的分母。 */
+  input_tokens: number
+  /** 窗口内 canonical cache_read_tokens 合计，缓存率的分子。 */
+  cache_read_tokens: number
   buckets: UsageCredentialHealthBucket[]
 }
 
