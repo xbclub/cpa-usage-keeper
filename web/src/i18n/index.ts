@@ -2,7 +2,7 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
 const LANGUAGE_STORAGE_KEY = 'cpa-usage-keeper-language';
-const DEFAULT_LANGUAGE = 'en';
+const DEFAULT_LANGUAGE = 'zh';
 export const SUPPORTED_LANGUAGES = ['en', 'zh', 'zh-TW'] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -30,6 +30,8 @@ const resources = {
         delete: 'Delete',
         close: 'Close',
         logout: 'Sign out',
+        clear_cache: 'Reset',
+        clear_cache_confirm: 'Clear all preferences and reload?',
         retry: 'Retry'
       },
       notification: {
@@ -111,6 +113,13 @@ const resources = {
         range_filter: 'Range',
         api_key_filter: 'API Key',
         api_key_filter_all: 'All',
+        model_filter: 'Model',
+        all_models: 'All Models',
+        api_key_summary_title: 'API Key Summary',
+        api_key: 'API Key',
+        model_filter_selected_one: '{{count}} model selected',
+        model_filter_selected_other: '{{count}} models selected',
+        credentials_refresh_single: 'Refresh {{name}} quota',
         range_today: 'Today',
         range_yesterday: 'Yesterday',
         range_custom: 'Custom',
@@ -875,6 +884,8 @@ const resources = {
         delete: '删除',
         close: '关闭',
         logout: '退出登录',
+        clear_cache: '重置',
+        clear_cache_confirm: '清空所有偏好并刷新？',
         retry: '重试'
       },
       notification: {
@@ -956,6 +967,13 @@ const resources = {
         range_filter: '范围',
         api_key_filter: 'API Key',
         api_key_filter_all: '全部',
+        model_filter: '模型筛选',
+        all_models: '全部模型',
+        api_key_summary_title: 'API Key 汇总',
+        api_key: 'API Key',
+        model_filter_selected_one: '已选 {{count}} 个模型',
+        model_filter_selected_other: '已选 {{count}} 个模型',
+        credentials_refresh_single: '刷新 {{name}} 限额',
         range_today: '今天',
         range_yesterday: '昨天',
         range_custom: '自定义',
@@ -1720,6 +1738,8 @@ const resources = {
         delete: '刪除',
         close: '關閉',
         logout: '登出',
+        clear_cache: '重置',
+        clear_cache_confirm: '清空所有偏好並重新整理？',
         retry: '重試'
       },
       notification: {
@@ -1801,6 +1821,13 @@ const resources = {
         range_filter: '範圍',
         api_key_filter: 'API Key',
         api_key_filter_all: '全部',
+        model_filter: '模型篩選',
+        all_models: '全部模型',
+        api_key_summary_title: 'API Key 匯總',
+        api_key: 'API Key',
+        model_filter_selected_one: '已選 {{count}} 個模型',
+        model_filter_selected_other: '已選 {{count}} 個模型',
+        credentials_refresh_single: '重新整理 {{name}} 限額',
         range_today: '今天',
         range_yesterday: '昨天',
         range_custom: '自訂',
